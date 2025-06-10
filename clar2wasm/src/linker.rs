@@ -15,6 +15,7 @@ use stacks_common::util::hash::{Keccak256Hash, Sha512Sum, Sha512Trunc256Sum};
 use stacks_common::util::secp256k1::{secp256k1_recover, secp256k1_verify, Secp256k1PublicKey};
 use wasmtime::{Caller, Engine, Instance, Linker, Memory, Module, Store};
 
+use crate::cost::CostLinker;
 use crate::initialize::ClarityWasmContext;
 use crate::wasm_utils::*;
 
@@ -5907,7 +5908,10 @@ pub fn load_stdlib() -> Result<(Instance, Store<()>), wasmtime::Error> {
     let standard_lib = include_str!("standard/standard.wat");
     let engine = Engine::default();
     let mut store = Store::new(&engine, ());
-    let linker = dummy_linker(&engine)?;
+
+    let mut linker = dummy_linker(&engine)?;
+    linker.define_cost_globals(&mut store)?;
+
     let module = Module::new(&engine, standard_lib)?;
     let instance = linker.instantiate(&mut store, &module)?;
     Ok((instance, store))

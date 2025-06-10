@@ -23,7 +23,10 @@ wat = "1.0.74"
 [features]
 flamegraph = []
 pb = []
+
 # Test-specific features
+
+# Clarity version to test - default v2
 test-clarity-v1 = []
 test-clarity-v2 = []
 test-clarity-v3 = []

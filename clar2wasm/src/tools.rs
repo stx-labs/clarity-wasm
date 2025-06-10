@@ -6,13 +6,14 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
+use clarity::boot_util::boot_code_id;
 use clarity::consts::{CHAIN_ID_MAINNET, CHAIN_ID_TESTNET};
 use clarity::types::StacksEpochId;
 use clarity::vm::analysis::run_analysis;
 use clarity::vm::ast::build_ast;
 use clarity::vm::contexts::{EventBatch, GlobalContext};
 use clarity::vm::contracts::Contract;
-use clarity::vm::costs::LimitedCostTracker;
+use clarity::vm::costs::{CostTracker, ExecutionCost, LimitedCostTracker};
 use clarity::vm::database::ClarityDatabase;
 use clarity::vm::errors::{CheckErrors, Error, WasmError};
 use clarity::vm::events::{SmartContractEventData, StacksTransactionEvent};
@@ -21,8 +22,11 @@ use clarity::vm::{eval_all, ClarityVersion, ContractContext, ContractName, Value
 use regex::Regex;
 
 use crate::compile;
+use crate::cost::CostMeter;
 use crate::datastore::{BurnDatastore, Datastore, StacksConstants};
 use crate::initialize::initialize_contract;
+
+const DEFAULT_ENV_AMOUNT: u128 = 1_000_000_000;
 
 #[derive(Clone)]
 pub struct TestEnvironment {
@@ -31,23 +35,47 @@ pub struct TestEnvironment {
     pub version: ClarityVersion,
     datastore: Datastore,
     burn_datastore: BurnDatastore,
-    cost_tracker: LimitedCostTracker,
     events: Vec<EventBatch>,
-    network: Network,
+    is_mainnet: bool,
+    chain_id: u32,
+    emit_cost_code: bool,
+    pub cost_tracker: LimitedCostTracker,
 }
 
 impl TestEnvironment {
-    pub fn new_with_amount(amount: u128, epoch: StacksEpochId, version: ClarityVersion) -> Self {
+    fn new_full(
+        amount: u128,
+        epoch: StacksEpochId,
+        version: ClarityVersion,
+        network: Network,
+        emit_cost_code: bool,
+    ) -> Self {
+        let (epoch, version) = if !Self::epoch_and_clarity_match(epoch, version) {
+            let valid_version = ClarityVersion::default_for_epoch(epoch);
+            println!(
+                "[WARN] Provided epoch ({epoch}) and Clarity version ({version}) do not match. \
+                 Defaulting to epoch ({epoch}) and Clarity version ({valid_version})."
+            );
+            (epoch, valid_version)
+        } else {
+            (epoch, version)
+        };
+
         let constants = StacksConstants::default();
         let burn_datastore = BurnDatastore::new(constants.clone());
         let mut datastore = Datastore::new();
-        let cost_tracker = LimitedCostTracker::new_free();
 
-        let mut db = ClarityDatabase::new(&mut datastore, &burn_datastore, &burn_datastore);
-        db.begin();
-        db.set_clarity_epoch_version(epoch)
+        let (is_mainnet, chain_id) = match network {
+            Network::Mainnet => (true, CHAIN_ID_MAINNET),
+            Network::Testnet => (false, CHAIN_ID_TESTNET),
+        };
+
+        let mut conn = ClarityDatabase::new(&mut datastore, &burn_datastore, &burn_datastore);
+
+        conn.begin();
+        conn.set_clarity_epoch_version(epoch)
             .expect("Failed to set epoch version.");
-        db.commit().expect("Failed to commit.");
+        conn.commit().expect("Failed to commit.");
 
         // Give one account a starting balance, to be used for testing.
         let recipient = PrincipalData::Standard(StandardPrincipalData::transient());
@@ -60,16 +88,49 @@ impl TestEnvironment {
         })
         .expect("Failed to increment liquid supply.");
 
-        Self {
+        let mut env = Self {
             contract_contexts: HashMap::new(),
             epoch,
             version,
             datastore,
             burn_datastore,
-            cost_tracker,
             events: vec![],
-            network: Network::Testnet,
+            is_mainnet,
+            chain_id,
+            emit_cost_code,
+            cost_tracker: LimitedCostTracker::new_free(),
+        };
+
+        if env.emit_cost_code {
+            // we only load boot contracts if we need to track cost
+            for contract in BOOT_CONTRACTS {
+                let _ = env
+                    .inner_init_contract_with_snippet(
+                        contract.name,
+                        true,
+                        contract.code,
+                        contract.version,
+                        contract.epoch,
+                    )
+                    .unwrap_or_else(|err| {
+                        panic!(
+                            "could not interpret boot contract: {}\nreason: {err}",
+                            contract.name
+                        )
+                    });
+            }
+
+            let limit = ExecutionCost::from(CostMeter::INIT);
+
+            let mut conn =
+                ClarityDatabase::new(&mut env.datastore, &env.burn_datastore, &env.burn_datastore);
+
+            env.cost_tracker =
+                LimitedCostTracker::new(env.is_mainnet, env.chain_id, limit, &mut conn, env.epoch)
+                    .expect("Creating cost tracker should succeed")
         }
+
+        env
     }
 
     /// Creates a new environment instance with the specified epoch and Clarity version.
@@ -92,20 +153,24 @@ impl TestEnvironment {
     /// # Returns
     ///
     /// An instance of the environment configured with the validated epoch and Clarity version.
-    ///
     pub fn new(epoch: StacksEpochId, version: ClarityVersion) -> Self {
-        let (epoch, version) = if !Self::epoch_and_clarity_match(epoch, version) {
-            let valid_version = ClarityVersion::default_for_epoch(epoch);
-            println!(
-                "[WARN] Provided epoch ({epoch}) and Clarity version ({version}) do not match. \
-                 Defaulting to epoch ({epoch}) and Clarity version ({valid_version})."
-            );
-            (epoch, valid_version)
-        } else {
-            (epoch, version)
-        };
+        Self::new_full(DEFAULT_ENV_AMOUNT, epoch, version, Network::Testnet, false)
+    }
 
-        Self::new_with_amount(1_000_000_000, epoch, version)
+    pub fn new_with_amount(amount: u128, epoch: StacksEpochId, version: ClarityVersion) -> Self {
+        Self::new_full(amount, epoch, version, Network::Testnet, false)
+    }
+
+    pub fn new_with_network(
+        epoch: StacksEpochId,
+        version: ClarityVersion,
+        network: Network,
+    ) -> Self {
+        Self::new_full(DEFAULT_ENV_AMOUNT, epoch, version, network, false)
+    }
+
+    pub fn new_with_cost(epoch: StacksEpochId, version: ClarityVersion) -> Self {
+        Self::new_full(DEFAULT_ENV_AMOUNT, epoch, version, Network::Testnet, true)
     }
 
     /// Checks whether the given epoch and Clarity version are compatible.
@@ -143,25 +208,35 @@ impl TestEnvironment {
         }
     }
 
-    pub fn new_with_network(
-        epoch: StacksEpochId,
-        version: ClarityVersion,
-        network: Network,
-    ) -> Self {
-        let mut env = Self::new(epoch, version);
-        env.network = network;
-        env
-    }
-
     pub fn init_contract_with_snippet(
         &mut self,
         contract_name: &str,
         snippet: &str,
     ) -> Result<Option<Value>, Error> {
-        let contract_id = QualifiedContractIdentifier::new(
-            StandardPrincipalData::transient(),
-            (*contract_name).into(),
-        );
+        self.inner_init_contract_with_snippet(
+            contract_name,
+            false,
+            snippet,
+            self.version,
+            self.epoch,
+        )
+    }
+
+    fn inner_init_contract_with_snippet(
+        &mut self,
+        contract_name: &str,
+        is_boot_contract: bool,
+        snippet: &str,
+        version: ClarityVersion,
+        epoch: StacksEpochId,
+    ) -> Result<Option<Value>, Error> {
+        let contract_id = match is_boot_contract {
+            false => QualifiedContractIdentifier::new(
+                StandardPrincipalData::transient(),
+                (*contract_name).into(),
+            ),
+            true => boot_code_id(contract_name, self.is_mainnet),
+        };
 
         let mut compile_result = self
             .datastore
@@ -171,10 +246,10 @@ impl TestEnvironment {
                     snippet,
                     &contract_id,
                     LimitedCostTracker::new_free(),
-                    self.version,
-                    self.epoch,
+                    version,
+                    epoch,
                     analysis_db,
-                    false,
+                    !is_boot_contract && self.emit_cost_code,
                 )
                 .map_err(|e| CheckErrors::Expects(format!("Compilation failure {e:?}")))
             })
@@ -200,13 +275,8 @@ impl TestEnvironment {
             &self.burn_datastore,
         );
 
-        let (is_mainnet, chain_id) = match self.network {
-            Network::Mainnet => (true, CHAIN_ID_MAINNET),
-            Network::Testnet => (false, CHAIN_ID_TESTNET),
-        };
-
         let mut global_context =
-            GlobalContext::new(is_mainnet, chain_id, conn, cost_tracker, self.epoch);
+            GlobalContext::new(self.is_mainnet, self.chain_id, conn, cost_tracker, epoch);
         global_context.begin();
         global_context
             .execute(|g| g.database.insert_contract_hash(&contract_id, snippet))
@@ -235,12 +305,16 @@ impl TestEnvironment {
         if let Some(events) = events {
             self.events.push(events);
         }
-        self.cost_tracker = global_context.cost_track;
 
         self.contract_contexts
-            .insert(contract_name.to_string(), contract_context);
+            .insert(contract_id.name.to_string(), contract_context);
 
-        Ok(return_val)
+        self.cost_tracker = global_context.cost_track;
+        self.cost_tracker
+            .add_cost(ExecutionCost::from(return_val.cost))
+            .expect("Adding cost should succeed");
+
+        Ok(return_val.ret)
     }
 
     pub fn evaluate(&mut self, snippet: &str) -> Result<Option<Value>, Error> {
@@ -270,15 +344,14 @@ impl TestEnvironment {
             (*contract_name).into(),
         );
 
-        let mut cost_tracker = LimitedCostTracker::new_free();
-        std::mem::swap(&mut self.cost_tracker, &mut cost_tracker);
+        let contract_analysis = self.datastore.as_analysis_db().execute(|analysis_db| {
+            let mut cost_tracker = LimitedCostTracker::new_free();
 
-        let mut contract_analysis = self.datastore.as_analysis_db().execute(|analysis_db| {
             // Parse the contract
             let ast = build_ast(
                 &contract_id,
                 snippet,
-                &mut self.cost_tracker,
+                &mut cost_tracker,
                 self.version,
                 self.epoch,
             )
@@ -311,16 +384,14 @@ impl TestEnvironment {
             &self.burn_datastore,
         );
 
-        let (is_mainnet, chain_id) = match self.network {
-            Network::Mainnet => (true, CHAIN_ID_MAINNET),
-            Network::Testnet => (false, CHAIN_ID_TESTNET),
-        };
+        let mut cost_tracker = LimitedCostTracker::new_free();
+        std::mem::swap(&mut self.cost_tracker, &mut cost_tracker);
 
         let mut global_context = GlobalContext::new(
-            is_mainnet,
-            chain_id,
+            self.is_mainnet,
+            self.chain_id,
             conn,
-            contract_analysis.cost_track.take().unwrap(),
+            cost_tracker,
             self.epoch,
         );
         global_context.begin();
@@ -352,11 +423,11 @@ impl TestEnvironment {
         if let Some(events) = events {
             self.events.push(events);
         }
-        self.cost_tracker = global_context.cost_track;
 
         self.contract_contexts
             .insert(contract_name.to_owned(), contract_context);
 
+        self.cost_tracker = global_context.cost_track;
         Ok(result)
     }
 
@@ -516,6 +587,7 @@ impl CrossEvalResult {
             "Compiled and interpreted results diverge! {snippet}\ncompiled: {:?}\ninterpreted: {:?}",
             self.compiled, self.interpreted
         );
+
         compare_events(
             self.env_interpreted.get_events(),
             self.env_compiled.get_events(),
@@ -858,6 +930,70 @@ pub fn crosscheck_with_network(
     );
 }
 
+// Represents a boot contract on disk
+struct BootContract {
+    // The name of the contract
+    name: &'static str,
+    // The code of the contract
+    code: &'static str,
+    // Clarity version of the contract
+    version: ClarityVersion,
+    // Stacks epoch of deployment of the contract
+    epoch: StacksEpochId,
+}
+
+macro_rules! boot_contract_code {
+    ($name:literal) => {
+        include_str!(concat!(
+            "../tests/contracts/boot-contracts/",
+            $name,
+            ".clar"
+        ))
+    };
+}
+
+macro_rules! boot_contract {
+    ($name:literal, $version:expr, $epoch:expr) => {
+        BootContract {
+            name: $name,
+            code: boot_contract_code!($name),
+            version: $version,
+            epoch: $epoch,
+        }
+    };
+    ($base:literal, $name:literal, $version:literal, $epoch:literal) => {
+        BootContract {
+            name: $name,
+            code: concat!(boot_contract_code!($base), "\n", boot_contract_code!($name)),
+            version: $version,
+            epoch: $epoch,
+        }
+    };
+}
+
+const BOOT_CONTRACTS: &[BootContract] =
+    &[COSTS_V1, COSTS_V2, COSTS_V2_TESTNET, COST_VOTING, COSTS_V3];
+
+const COSTS_V1: BootContract =
+    boot_contract!("costs", ClarityVersion::Clarity1, StacksEpochId::Epoch20);
+const COSTS_V2: BootContract = boot_contract!(
+    "costs-2",
+    ClarityVersion::Clarity2,
+    StacksEpochId::Epoch2_05
+);
+const COSTS_V2_TESTNET: BootContract = boot_contract!(
+    "costs-2-testnet",
+    ClarityVersion::Clarity2,
+    StacksEpochId::Epoch2_05
+);
+const COST_VOTING: BootContract = boot_contract!(
+    "cost-voting",
+    ClarityVersion::Clarity2,
+    StacksEpochId::Epoch2_05
+);
+const COSTS_V3: BootContract =
+    boot_contract!("costs-3", ClarityVersion::Clarity2, StacksEpochId::Epoch21);
+
 #[cfg(test)]
 mod tests {
 
@@ -993,6 +1129,14 @@ mod tests {
         "#;
             let res = interpret(snippet_different_err).expect_err("Should detect a syntax error");
             assert!(!KnownBug::has_list_of_qualified_principal_issue(&res));
+        }
+    }
+
+    #[test]
+    fn find_boot_contracts() {
+        for boot_contract in std::fs::read_dir("tests/contracts/boot-contracts").unwrap() {
+            let b = boot_contract.unwrap();
+            eprintln!("{:#?}", b.file_name());
         }
     }
 }

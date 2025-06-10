@@ -39,6 +39,7 @@ fn traverse_bitwise(
     builder: &mut InstrSeqBuilder,
     arg_types: &[TypeSignature],
 ) -> Result<(), GeneratorError> {
+    println!("arg_types.len: {}", arg_types.len());
     word.charge(generator, builder, arg_types.len() as u32)?;
 
     let name = word.name();

@@ -416,6 +416,16 @@ lazy_static! {
             },
         );
         map.insert(
+            Construct.name(),
+            WordCost {
+                runtime: Constant(398),
+                read_count: None,
+                read_length: None,
+                write_count: None,
+                write_length: None,
+            },
+        );
+        map.insert(
             Destruct.name(),
             WordCost {
                 runtime: Constant(314),
@@ -439,11 +449,11 @@ lazy_static! {
         map.insert(
             StxBurn.name(),
             WordCost {
-                runtime: None,
-                read_count: None,
-                read_length: None,
-                write_count: None,
-                write_length: None,
+                runtime: Constant(549),
+                read_count: Constant(2),
+                read_length: Constant(1),
+                write_count: Constant(2),
+                write_length: Constant(1),
             },
         );
         map.insert(
@@ -827,16 +837,6 @@ lazy_static! {
             IsSome.name(),
             WordCost {
                 runtime: Constant(195),
-                read_count: None,
-                read_length: None,
-                write_count: None,
-                write_length: None,
-            },
-        );
-        map.insert(
-            Construct.name(),
-            WordCost {
-                runtime: Constant(398),
                 read_count: None,
                 read_length: None,
                 write_count: None,

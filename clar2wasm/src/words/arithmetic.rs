@@ -24,6 +24,8 @@ fn simple_typed_one_call(
         }
     };
 
+    word.charge(generator, builder, 0)?;
+
     let name = word.name();
 
     let func = generator.func_by_name(&format!("stdlib.{name}-{type_suffix}"));
@@ -272,7 +274,6 @@ impl SimpleWord for Sqrti {
         arg_types: &[TypeSignature],
         return_type: &TypeSignature,
     ) -> Result<(), GeneratorError> {
-        self.charge(generator, builder, 0)?;
         simple_typed_one_call(self, generator, builder, arg_types, return_type)
     }
 }

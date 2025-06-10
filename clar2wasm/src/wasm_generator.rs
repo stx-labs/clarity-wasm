@@ -349,15 +349,29 @@ impl WasmGenerator {
 
     pub fn with_cost_code(contract_analysis: ContractAnalysis) -> Result<Self, GeneratorError> {
         let mut generator = Self::new(contract_analysis)?;
+
+        let module = &mut generator.module;
+
+        // NOTE: these are added here, and not in standard.wat, to more easily
+        //       allow for cost tracking to be turned off without modifying
+        //       downstream. See standard.wat for more details
+
+        let (r, _) = module.add_import_global("clarity", "cost-runtime", ValType::I64, true);
+        let (rc, _) = module.add_import_global("clarity", "cost-read-count", ValType::I64, true);
+        let (rl, _) = module.add_import_global("clarity", "cost-read-length", ValType::I64, true);
+        let (wc, _) = module.add_import_global("clarity", "cost-write-count", ValType::I64, true);
+        let (wl, _) = module.add_import_global("clarity", "cost-write-length", ValType::I64, true);
+
         generator.cost_context = Some(ChargeContext {
-            clarity_version: generator.contract_analysis.clarity_version,
-            runtime: get_global(&generator.module, "cost-runtime")?,
-            read_count: get_global(&generator.module, "cost-read-count")?,
-            read_length: get_global(&generator.module, "cost-read-length")?,
-            write_count: get_global(&generator.module, "cost-write-count")?,
-            write_length: get_global(&generator.module, "cost-write-length")?,
-            runtime_error: get_function(&generator.module, "stdlib.runtime-error")?,
+            epoch: generator.contract_analysis.epoch,
+            runtime: r,
+            read_count: rc,
+            read_length: rl,
+            write_count: wc,
+            write_length: wl,
+            runtime_error: get_function(module, "stdlib.runtime-error")?,
         });
+
         Ok(generator)
     }
 
@@ -381,15 +395,6 @@ impl WasmGenerator {
 
     pub fn generate(mut self) -> Result<Module, GeneratorError> {
         let expressions = std::mem::take(&mut self.contract_analysis.expressions);
-
-        if self.cost_context.is_some() {
-            let module = &mut self.module;
-            module.add_import_global("clarity", "cost-runtime", ValType::I64, true);
-            module.add_import_global("clarity", "cost-read-count", ValType::I64, true);
-            module.add_import_global("clarity", "cost-read-length", ValType::I64, true);
-            module.add_import_global("clarity", "cost-write-count", ValType::I64, true);
-            module.add_import_global("clarity", "cost-write-length", ValType::I64, true);
-        }
 
         // Get the type of the last top-level expression with a return value
         // or default to `None`.

@@ -219,6 +219,8 @@ fn from_runtime_error_code(
 ) -> Error {
     let runtime_error_code = get_global_i32(&instance, &mut store, "runtime-error-code");
 
+    println!("error code: {runtime_error_code}");
+
     match ErrorMap::from(runtime_error_code) {
         ErrorMap::NotClarityError => Error::Wasm(WasmError::Runtime(e)),
         ErrorMap::ArithmeticOverflow => {
