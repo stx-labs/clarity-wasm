@@ -9,7 +9,7 @@ use crate::words::bindings::Let;
 use crate::words::blockinfo::{AtBlock, GetBlockInfo, GetStacksBlockInfo, GetTenureInfo};
 use crate::words::comparison::{CmpGeq, CmpGreater, CmpLeq, CmpLess};
 use crate::words::conditionals::{And, Asserts, Filter, If, Match, Or, Try, Unwrap, UnwrapErr};
-use crate::words::contract::{AsContract, ContractCall};
+use crate::words::contract::ContractCall;
 use crate::words::control_flow::{Begin, UnwrapErrPanic, UnwrapPanic};
 use crate::words::data_vars::{GetDataVar, SetDataVar};
 use crate::words::default_to::DefaultTo;
@@ -228,7 +228,7 @@ lazy_static! {
         map.insert(
             Keccak256.name(),
             WordCost {
-                runtime: Linear { a: 1, b: 127 },
+                runtime: Linear { a: 1000, b: 1000 },
                 read_count: None,
                 read_length: None,
                 write_count: None,
@@ -265,15 +265,14 @@ lazy_static! {
                 write_length: None,
             },
         );
-        // TODO: check if this indeed costs nothing (SUSPICIOUS)
         map.insert(
             StxBurn.name(),
             WordCost {
-                runtime: None,
-                read_count: None,
-                read_length: None,
-                write_count: None,
-                write_length: None,
+                runtime: Constant(1000),
+                read_count: Constant(2),
+                read_length: Constant(1),
+                write_count: Constant(2),
+                write_length: Constant(1),
             },
         );
         map.insert(
@@ -425,16 +424,6 @@ lazy_static! {
             UnwrapPanic.name(),
             WordCost {
                 runtime: Constant(1000),
-                read_count: None,
-                read_length: None,
-                write_count: None,
-                write_length: None,
-            },
-        );
-        map.insert(
-            AsContract.name(),
-            WordCost {
-                runtime: Constant(138),
                 read_count: None,
                 read_length: None,
                 write_count: None,
@@ -896,7 +885,7 @@ lazy_static! {
         map.insert(
             TupleMerge.name(),
             WordCost {
-                runtime: Linear { a: 1000, b: 408 },
+                runtime: Linear { a: 1000, b: 1000 },
                 read_count: None,
                 read_length: None,
                 write_count: None,
