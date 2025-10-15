@@ -638,40 +638,22 @@ impl ComplexWord for Map {
 
         let fname = args.get_name(0)?;
 
-        let seq_ty = generator
-            .get_expr_type(args.get_expr(1)?)
-            .ok_or_else(|| GeneratorError::TypeError("list expression must be typed".to_owned()))?
-            .clone();
-
-        // WORKAROUND: Get the type of the function being called, and set the
-        // type of the sequence value to match the functions parameter type.
-        // This is a workaround for the typechecker not being able to infer
-        // the complete type of initial value.
-        if let TypeSignature::SequenceType(SequenceSubtype::ListType(lt)) = &seq_ty {
-            let size = get_type_size(lt.get_list_item_type()) as u32;
-
-            if let Some(FunctionType::Fixed(fixed)) = generator.get_function_type(fname) {
-                let function_ty = fixed
-                    .args
-                    .first()
-                    .ok_or_else(|| {
-                        GeneratorError::TypeError("expected function with 2 arguments".into())
+        if let Some(FunctionType::Fixed(fixed)) = generator.get_function_type(fname) {
+            for (function_arg, arg) in fixed.args.clone().into_iter().zip(&args[1..]) {
+                if let TypeSignature::SequenceType(SequenceSubtype::ListType(ltd)) =
+                    generator.get_expr_type(arg).cloned().ok_or_else(|| {
+                        GeneratorError::TypeError("map argument should be typed".to_owned())
                     })?
-                    .signature
-                    .clone();
-
-                match ListTypeData::new_list(function_ty, size) {
-                    Ok(list_type_data) => {
-                        generator.set_expr_type(
-                            args.get_expr(1)?,
-                            TypeSignature::SequenceType(SequenceSubtype::ListType(list_type_data)),
+                {
+                    let workaround_ty =
+                        TypeSignature::list_of(function_arg.signature, ltd.get_max_len()).map_err(
+                            |e| {
+                                GeneratorError::TypeError(format!(
+                                    "could not create a list type for an argument in map: {e}"
+                                ))
+                            },
                         )?;
-                    }
-                    Err(_) => {
-                        return Err(GeneratorError::TypeError(
-                            "Failed to workaround and create a list type".into(),
-                        ));
-                    }
+                    generator.set_expr_type(arg, workaround_ty)?;
                 }
             }
         }
@@ -2502,6 +2484,22 @@ mod tests {
                 Value::cons_list_unsanitized(vec![Value::okay(Value::Int(1)).unwrap()]).unwrap(),
             )),
         );
+    }
+
+    #[test]
+    fn map_multiple_argument_needs_workaround() {
+        let snippet = "
+            (define-private (foo (a int) (b (response int int)))
+                (+ a (unwrap-panic b))
+            )
+
+            (map foo (list 1 2 3) (list (ok 1) (ok 2) (ok 3)))
+        ";
+
+        let expected =
+            Value::cons_list_unsanitized([2, 4, 6].into_iter().map(Value::Int).collect()).unwrap();
+
+        crosscheck(snippet, Ok(Some(expected)));
     }
 
     #[test]
