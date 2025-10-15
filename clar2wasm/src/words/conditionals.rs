@@ -599,6 +599,7 @@ impl ComplexWord for Filter {
     }
 }
 
+/// Default implementation for `and` that handles the evaluation of its arguments.
 #[derive(Debug)]
 pub struct And;
 
@@ -647,6 +648,11 @@ impl ComplexWord for And {
     }
 }
 
+/// Implementation of `and` that doesn't evaluate its arguments.
+/// This version of `and` is a variadic word.
+///
+/// An example of usage would be in `(map and (list true) (list false))`.
+/// Since both lists are already evaluated, the `and` cannot re-evaluate its arguments.
 #[derive(Debug)]
 pub struct SimpleAnd;
 
@@ -670,6 +676,7 @@ impl SimpleWord for SimpleAnd {
     }
 }
 
+/// Default implementation for `or` that handles the evaluation of its arguments.
 #[derive(Debug)]
 pub struct Or;
 
@@ -718,6 +725,11 @@ impl ComplexWord for Or {
     }
 }
 
+/// Implementation of `or` that doesn't evaluate its arguments.
+/// This version of `or` is a variadic word.
+///
+/// An example of usage would be in `(map or (list true) (list false))`.
+/// Since both lists are already evaluated, the `or` cannot re-evaluate its arguments.
 #[derive(Debug)]
 pub struct SimpleOr;
 
