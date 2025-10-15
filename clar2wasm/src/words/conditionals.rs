@@ -691,18 +691,12 @@ impl Word for SimpleAnd {
 impl SimpleWord for SimpleAnd {
     fn visit(
         &self,
-        generator: &mut WasmGenerator,
+        _generator: &mut WasmGenerator,
         builder: &mut walrus::InstrSeqBuilder,
-        arg_types: &[TypeSignature],
+        _arg_types: &[TypeSignature],
         _return_type: &TypeSignature,
     ) -> Result<(), GeneratorError> {
-        let args_len = arg_types.len();
-
-        self.charge(generator, builder, args_len as u32)?;
-
-        for _ in 0..args_len.saturating_sub(1) {
-            builder.binop(ir::BinaryOp::I32And);
-        }
+        builder.binop(ir::BinaryOp::I32And);
 
         Ok(())
     }
@@ -747,18 +741,12 @@ impl Word for SimpleOr {
 impl SimpleWord for SimpleOr {
     fn visit(
         &self,
-        generator: &mut WasmGenerator,
+        _generator: &mut WasmGenerator,
         builder: &mut walrus::InstrSeqBuilder,
-        arg_types: &[TypeSignature],
+        _arg_types: &[TypeSignature],
         _return_type: &TypeSignature,
     ) -> Result<(), GeneratorError> {
-        let args_len = arg_types.len();
-
-        self.charge(generator, builder, args_len as u32)?;
-
-        for _ in 0..args_len.saturating_sub(1) {
-            builder.binop(ir::BinaryOp::I32Or);
-        }
+        builder.binop(ir::BinaryOp::I32Or);
 
         Ok(())
     }
