@@ -1,6 +1,6 @@
 use clarity::vm::types::{FixedFunction, FunctionType, TypeSignature};
 use clarity::vm::{ClarityName, SymbolicExpression};
-use walrus::ir::{self, Block, IfElse, InstrSeqType, Loop, UnaryOp};
+use walrus::ir::{self, Block, IfElse, Loop, UnaryOp};
 use walrus::{InstrSeqBuilder, LocalId, ValType};
 
 use super::{ComplexWord, SimpleWord, Word};
