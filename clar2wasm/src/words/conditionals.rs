@@ -667,10 +667,12 @@ impl SimpleWord for SimpleAnd {
         &self,
         _generator: &mut WasmGenerator,
         builder: &mut walrus::InstrSeqBuilder,
-        _arg_types: &[TypeSignature],
+        arg_types: &[TypeSignature],
         _return_type: &TypeSignature,
     ) -> Result<(), GeneratorError> {
-        builder.binop(ir::BinaryOp::I32And);
+        if arg_types.len() > 1 {
+            builder.binop(ir::BinaryOp::I32And);
+        }
 
         Ok(())
     }
@@ -744,10 +746,12 @@ impl SimpleWord for SimpleOr {
         &self,
         _generator: &mut WasmGenerator,
         builder: &mut walrus::InstrSeqBuilder,
-        _arg_types: &[TypeSignature],
+        arg_types: &[TypeSignature],
         _return_type: &TypeSignature,
     ) -> Result<(), GeneratorError> {
-        builder.binop(ir::BinaryOp::I32Or);
+        if arg_types.len() > 1 {
+            builder.binop(ir::BinaryOp::I32Or);
+        }
 
         Ok(())
     }
