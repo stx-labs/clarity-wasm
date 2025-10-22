@@ -19,7 +19,9 @@ pub mod wasm_generator;
 pub mod wasm_utils;
 mod words;
 
+#[cfg(feature = "developer-mode")]
 pub mod datastore;
+#[cfg(feature = "developer-mode")]
 pub mod tools;
 
 mod debug_msg;
