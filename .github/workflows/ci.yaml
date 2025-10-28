@@ -52,9 +52,8 @@ jobs:
     strategy:
       matrix:
         clarity_version: [1, 2, 3]
-        cost_tracking: [false, true]
 
-    name: Clarity::V${{ matrix.clarity_version }} Artifacts${{ matrix.cost_tracking && ' (cost-tracking)' || ''}}
+    name: Clarity::V${{ matrix.clarity_version }} Artifacts
     steps:
       - name: Checkout PR
         uses: actions/checkout@v4
@@ -71,21 +70,21 @@ jobs:
       - name: Create archive of test binaries
         run: |
           cargo llvm-cov nextest-archive \
-            --features test-clarity-v${{ matrix.clarity_version }}${{ matrix.cost_tracking && ',test-cost-tracking' || ''}} \
+            --features test-clarity-v${{ matrix.clarity_version }} \
             --workspace \
-            --archive-file nextest-archive-v${{ matrix.clarity_version }}-${{ matrix.cost_tracking }}.tar.zst
+            --archive-file nextest-archive-v${{ matrix.clarity_version }}.tar.zst
 
       - name: Upload test binaries
         uses: actions/upload-artifact@v4
         with:
-          name: nextest-archive-v${{ matrix.clarity_version }}-${{ matrix.cost_tracking }}
-          path: nextest-archive-v${{ matrix.clarity_version }}-${{ matrix.cost_tracking }}.tar.zst
+          name: nextest-archive-v${{ matrix.clarity_version }}
+          path: nextest-archive-v${{ matrix.clarity_version }}.tar.zst
           if-no-files-found: error
 
       - name: Upload standard.wasm file
         uses: actions/upload-artifact@v4
         with:
-          name: standard-v${{ matrix.clarity_version }}-${{ matrix.cost_tracking }}.wasm
+          name: standard-v${{ matrix.clarity_version }}.wasm
           path: ${{github.workspace}}/clar2wasm/src/standard/standard.wasm
           if-no-files-found: error
 
@@ -98,8 +97,7 @@ jobs:
       fail-fast: false
       matrix:
         clarity_version: [1, 2, 3]
-        cost_tracking: [false, true]
-    name: Clarity::V${{ matrix.clarity_version }} Tests${{ matrix.cost_tracking && ' (cost-tracking)' || ''}}
+    name: Clarity::V${{ matrix.clarity_version }} Tests
     steps:
       - name: Checkout PR
         uses: actions/checkout@v4
@@ -116,27 +114,27 @@ jobs:
       - name: Download standard.wasm file
         uses: actions/download-artifact@v4
         with:
-          name: standard-v${{ matrix.clarity_version }}-${{ matrix.cost_tracking }}.wasm
+          name: standard-v${{ matrix.clarity_version }}.wasm
           path: ${{github.workspace}}/clar2wasm/src/standard/
 
       - name: Download archive
         uses: actions/download-artifact@v4
         with:
-          name: nextest-archive-v${{ matrix.clarity_version }}-${{ matrix.cost_tracking }}
+          name: nextest-archive-v${{ matrix.clarity_version }}
 
       - name: Run tests and output coverage
         shell: bash
         run: |
           cargo llvm-cov nextest \
-            --archive-file nextest-archive-v${{ matrix.clarity_version }}-${{ matrix.cost_tracking }}.tar.zst \
+            --archive-file nextest-archive-v${{ matrix.clarity_version }}.tar.zst \
             --codecov \
-            --output-path codecov-v${{ matrix.clarity_version }}-${{ matrix.cost_tracking }}.json
+            --output-path codecov-v${{ matrix.clarity_version }}.json
 
       - name: Upload codecov.json
         uses: actions/upload-artifact@v4
         with:
-          name: code-coverage-v${{ matrix.clarity_version }}-${{ matrix.cost_tracking }}
-          path: codecov-v${{ matrix.clarity_version }}-${{ matrix.cost_tracking }}.json
+          name: code-coverage-v${{ matrix.clarity_version }}
+          path: codecov-v${{ matrix.clarity_version }}.json
           if-no-files-found: error
 
   # Code coverage
