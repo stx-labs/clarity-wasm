@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use clar2wasm::tools::{crosscheck, crosscheck_multi_contract};
+use clar2wasm::tools::{crosscheck, crosscheck_multi_contract, TestEnvironment};
 use clarity::vm::types::{ResponseData, TupleData};
 use clarity::vm::{ClarityName, Value};
 use proptest::prelude::*;
@@ -630,5 +630,38 @@ proptest! {
                 data: Box::new(expected_res.into()),
             }))),
         );
+    }
+
+    #[test]
+    fn contract_call_with_hashing_works_proptest(buffer_size in 1usize..100000usize) {
+        let large_buff = format!("0x{}", "aa".repeat(buffer_size));
+        println!("buffer_size: {}", buffer_size);
+
+        let hasher_contract = format!(
+            r#"
+(define-public (hash-large-buffer (input (buff {})))
+    (ok (sha256 input))
+)
+        "#, large_buff.len());
+
+        // First interpret the contracts to get the expected result
+        let mut env = TestEnvironment::default();
+        env.init_contract_with_snippet("hasher", hasher_contract.as_str())
+            .expect("Failed to init hasher contract");
+        let expected = env
+            .interpret(&format!("(contract-call? .hasher hash-large-buffer {})", large_buff))
+            .expect("Failed to interpret contract call");
+        let caller_contract = format!("(contract-call? .hasher hash-large-buffer {})", large_buff);
+        let contracts = [
+            ("hasher".into(), hasher_contract.as_str()),
+
+            (
+                "caller".into(),
+                caller_contract.as_str()
+            ),
+        ];
+
+        // Compare compiled version with interpreted version
+        crosscheck_multi_contract(&contracts, Ok(expected));
     }
 }

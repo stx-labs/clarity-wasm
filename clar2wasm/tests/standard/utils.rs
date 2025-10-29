@@ -449,6 +449,7 @@ prop_compose! {
         }
 }
 
+#[allow(clippy::too_many_arguments)]
 /// Tests a Wasm hashing function `func_name` and compares its output to the output of `reference_function`.
 /// The buffers tested will be written in memory at offset `data_offset` and can have a length up to `data_max_length`.
 /// The output of the Wasm function will be written in memory on `result_offset` with length `result_length`.
@@ -460,6 +461,7 @@ pub(crate) fn test_on_buffer_hash(
     data_max_length: usize,
     result_offset: i32,
     result_length: i32,
+    workspace_offset: i32,
     reference_function: impl Fn(&[u8]) -> Vec<u8>,
 ) {
     debug_assert!(stack_pointer >= 0);
@@ -492,7 +494,7 @@ pub(crate) fn test_on_buffer_hash(
 
         fun.call(
             store.borrow_mut().deref_mut(),
-            &[offset.into(), len.into(), result_offset.into()],
+            &[offset.into(), len.into(), result_offset.into(), workspace_offset.into()],
             &mut res
         ).unwrap_or_else(|_| panic!("call to {func_name} failed"));
 
@@ -515,6 +517,7 @@ fn test_on_integer_hash(
     stack_pointer: i32,
     result_offset: i32,
     result_length: i32,
+    workspace_offset: i32,
     reference_function: impl Fn(i128) -> Vec<u8>,
 ) {
     debug_assert!(result_offset >= 0);
@@ -545,7 +548,7 @@ fn test_on_integer_hash(
 
             fun.call(
                 store.borrow_mut().deref_mut(),
-                &[n.low().into(), n.high().into(), result_offset.into()],
+                &[n.low().into(), n.high().into(), result_offset.into(), workspace_offset.into()],
                 &mut res
             ).unwrap_or_else(|_| panic!("call to {func_name} failed"));
             assert_eq!(res[0].unwrap_i32(), result_offset);
@@ -567,6 +570,7 @@ pub(crate) fn test_on_int_hash(
     stack_pointer: i32,
     result_offset: i32,
     result_length: i32,
+    workspace_offset: i32,
     reference_function: impl Fn(i128) -> Vec<u8>,
 ) {
     test_on_integer_hash(
@@ -575,6 +579,7 @@ pub(crate) fn test_on_int_hash(
         stack_pointer,
         result_offset,
         result_length,
+        workspace_offset,
         reference_function,
     )
 }
@@ -588,6 +593,7 @@ pub(crate) fn test_on_uint_hash(
     stack_pointer: i32,
     result_offset: i32,
     result_length: i32,
+    workspace_offset: i32,
     reference_function: impl Fn(i128) -> Vec<u8>,
 ) {
     test_on_integer_hash(
@@ -596,6 +602,7 @@ pub(crate) fn test_on_uint_hash(
         stack_pointer,
         result_offset,
         result_length,
+        workspace_offset,
         reference_function,
     )
 }

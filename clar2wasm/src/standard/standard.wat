@@ -1549,17 +1549,17 @@
         )
     )
 
-    (func $stdlib.sha256-buf (param $offset i32) (param $length i32) (param $offset-result i32) (result i32 i32)
+    (func $stdlib.sha256-buf (param $offset i32) (param $length i32) (param $offset-result i32) (param $workspace-offset i32) (result i32 i32)
         (local $i i32)
         ;; see this for an explanation: https://sha256algorithm.com/
 
-        (call $extend-data (local.get $offset) (local.get $length))
+        (call $extend-data (local.get $offset) (local.get $length) (local.get $workspace-offset))
         (local.set $length)
 
         (local.set $i (i32.const 0))
         (loop
-            (call $block64 (local.get $i))
-            (call $working-vars)
+            (call $block64 (local.get $i) (local.get $workspace-offset))
+            (call $working-vars local.get $workspace-offset)
             (br_if 0
                 (i32.lt_u
                     (local.tee $i (i32.add (local.get $i) (i32.const 64)))
@@ -1572,14 +1572,14 @@
         (v128.store
             (local.get $offset-result)
             (i8x16.swizzle
-                (v128.load (global.get $stack-pointer))
+                (v128.load (local.get $workspace-offset))
                 (v128.const i8x16 3 2 1 0 7 6 5 4 11 10 9 8 15 14 13 12)
             )
         )
         (v128.store offset=16
             (local.get $offset-result)
             (i8x16.swizzle
-                (v128.load offset=16 (global.get $stack-pointer))
+                (v128.load offset=16 (local.get $workspace-offset))
                 (v128.const i8x16 3 2 1 0 7 6 5 4 11 10 9 8 15 14 13 12)
             )
         )
@@ -1587,33 +1587,33 @@
         (local.get $offset-result) (i32.const 32)
     )
 
-    (func $stdlib.sha256-int (param $lo i64) (param $hi i64) (param $offset-result i32) (result i32 i32)
+    (func $stdlib.sha256-int (param $lo i64) (param $hi i64) (param $offset-result i32) (param $workspace-offset i32) (result i32 i32)
         ;; Copy data to the working stack, so that it has this relative configuration:
         ;;   0..32 -> Initial hash vals (will be the result hash in the end)
         ;;   32..288 -> Space to store W
         ;;   288..352 -> extended int
-        (memory.copy (global.get $stack-pointer) (i32.const 0) (i32.const 32))
+        (memory.copy (local.get $workspace-offset) (i32.const 0) (i32.const 32))
 
-        (i64.store offset=288 (global.get $stack-pointer) (local.get $lo))
-        (i64.store offset=296 (global.get $stack-pointer) (local.get $hi)) ;; offset = 288 + 8
-        (i32.store offset=304 (global.get $stack-pointer) (i32.const 0x80)) ;; offset = 288+16
-        (memory.fill (i32.add (global.get $stack-pointer) (i32.const 308)) (i32.const 0) (i32.const 46)) ;; offset = 288+20
-        (i32.store8 offset=351 (global.get $stack-pointer) (i32.const 0x80)) ;; offset = 288+63
+        (i64.store offset=288 (local.get $workspace-offset) (local.get $lo))
+        (i64.store offset=296 (local.get $workspace-offset) (local.get $hi)) ;; offset = 288 + 8
+        (i32.store offset=304 (local.get $workspace-offset) (i32.const 0x80)) ;; offset = 288+16
+        (memory.fill (i32.add (local.get $workspace-offset) (i32.const 308)) (i32.const 0) (i32.const 46)) ;; offset = 288+20
+        (i32.store8 offset=351 (local.get $workspace-offset) (i32.const 0x80)) ;; offset = 288+63
 
-        (call $block64 (i32.const 0))
-        (call $working-vars)
+        (call $block64 (i32.const 0) (local.get $workspace-offset))
+        (call $working-vars (local.get $workspace-offset))
 
         (v128.store
             (local.get $offset-result)
             (i8x16.swizzle
-                (v128.load (global.get $stack-pointer))
+                (v128.load (local.get $workspace-offset))
                 (v128.const i8x16 3 2 1 0 7 6 5 4 11 10 9 8 15 14 13 12)
             )
         )
         (v128.store offset=16
             (local.get $offset-result)
             (i8x16.swizzle
-                (v128.load offset=16 (global.get $stack-pointer))
+                (v128.load offset=16 (local.get $workspace-offset))
                 (v128.const i8x16 3 2 1 0 7 6 5 4 11 10 9 8 15 14 13 12)
             )
         )
@@ -1621,15 +1621,15 @@
         (local.get $offset-result) (i32.const 32)
     )
 
-    (func $extend-data (param $offset i32) (param $length i32) (result i32)
+    (func $extend-data (param $offset i32) (param $length i32) (param $workspace-offset i32) (result i32)
         (local $res_len i32) (local $len64 i64)
 
         ;; Move data to the working stack, so that it has this relative configuration:
         ;;   0..32 -> Initial hash vals (will be the result hash in the end)
         ;;   32..288 -> Space to store W (result of $block64)
         ;;   288..$length+288 -> shifted data
-        (memory.copy (global.get $stack-pointer) (i32.const 0) (i32.const 32))
-        (memory.copy (i32.add (global.get $stack-pointer) (i32.const 288)) (local.get $offset) (local.get $length))
+        (memory.copy (local.get $workspace-offset) (i32.const 0) (i32.const 32))
+        (memory.copy (i32.add (local.get $workspace-offset) (i32.const 288)) (local.get $offset) (local.get $length))
 
         (local.set $res_len ;; total size of data with expansion
             (i32.add
@@ -1644,20 +1644,20 @@
 
         ;; Add "1" at the end of the data
         (i32.store offset=288
-            (i32.add (global.get $stack-pointer) (local.get $length))
+            (i32.add (local.get $workspace-offset) (local.get $length))
             (i32.const 0x80)
         )
 
         ;; Fill the remaining part before the size with 0s
         (memory.fill
-            (i32.add (i32.add (global.get $stack-pointer) (local.get $length)) (i32.const 289))
+            (i32.add (i32.add (local.get $workspace-offset) (local.get $length)) (i32.const 289))
             (i32.const 0)
             (i32.sub (i32.sub (local.get $res_len) (local.get $length)) (i32.const 8))
         )
 
         ;; Add the size, as a 64bits big-endian integer
         (local.set $len64 (i64.extend_i32_u (i32.shl (local.get $length) (i32.const 3))))
-        (i32.sub (i32.add (global.get $stack-pointer) (local.get $res_len)) (i32.const 8))
+        (i32.sub (i32.add (local.get $workspace-offset) (local.get $res_len)) (i32.const 8))
         (i64.or
             (i64.or
                 (i64.or
@@ -1685,11 +1685,11 @@
         (local.get $res_len)
     )
 
-    (func $block64 (param $data i32)
+    (func $block64 (param $data i32) (param $workspace-offset i32)
         (local $origin i32)
         (local $i i32) (local $tmp i32)
 
-        (local.set $origin (global.get $stack-pointer))
+        (local.set $origin (local.get $workspace-offset))
         (local.set $data (i32.add (local.get $origin) (local.get $data)))
 
         (local.set $i (i32.const 0))
@@ -1745,13 +1745,13 @@
         )
     )
 
-    (func $working-vars
+    (func $working-vars (param $workspace-offset i32)
         (local $origin i32)
         (local $a i32) (local $b i32) (local $c i32) (local $d i32)
         (local $e i32) (local $f i32) (local $g i32) (local $h i32)
         (local $temp1 i32) (local $temp2 i32) (local $i i32)
 
-        (local.set $origin (global.get $stack-pointer))
+        (local.set $origin (local.get $workspace-offset))
 
         (local.set $a (i32.load offset=0 (local.get $origin)))
         (local.set $b (i32.load offset=4 (local.get $origin)))
@@ -1821,56 +1821,56 @@
         (i32.store offset=28 (local.get $origin) (i32.add (i32.load offset=28 (local.get $origin)) (local.get $h)))
     )
 
-    (func $stdlib.hash160-buf (param $offset i32) (param $length i32) (param $offset-result i32) (result i32 i32)
+    (func $stdlib.hash160-buf (param $offset i32) (param $length i32) (param $offset-result i32) (param $workspace-offset i32) (result i32 i32)
         (local $i i32)
         ;; ripemd-160 article: https://www.esat.kuleuven.be/cosic/publications/article-317.pdf
         ;; Here we implement a ripemd with an easier padding since inputs are results of sha256,
         ;; and thus always have the same length.
 
-        ;; move $stack-pointers: current value will contain sha256 result and moved place is new stack
-        (global.set $stack-pointer (i32.add (local.tee $i (global.get $stack-pointer)) (i32.const 32)))
+        ;; move $worksapce-offset: current value will contain sha256 result and moved place is new stack
+        (local.set $workspace-offset (i32.add (local.tee $i (local.get $workspace-offset)) (i32.const 32)))
         ;; compute sha256
-        (call $stdlib.sha256-buf (local.get $offset) (local.get $length) (local.get $i))
+        (call $stdlib.sha256-buf (local.get $offset) (local.get $length) (local.get $i) (local.get $workspace-offset))
         drop ;; we don't need the length of sha256, it is always 32
-        (global.set $stack-pointer) ;; set $stack-pointer to its original value, aka offset of sha256 result
+        (local.set $workspace-offset) ;; set $workspace-offset to its original value, aka offset of sha256 result
 
-        (call $hash160-pad)
-        (call $hash160-compress (local.get $offset-result))
+        (call $hash160-pad (local.get $workspace-offset))
+        (call $hash160-compress (local.get $offset-result) (local.get $workspace-offset))
 
         (local.get $offset-result) (i32.const 20)
     )
 
-    (func $stdlib.hash160-int (param $lo i64) (param $hi i64) (param $offset-result i32) (result i32 i32)
+    (func $stdlib.hash160-int (param $lo i64) (param $hi i64) (param $offset-result i32) (param $workspace-offset i32) (result i32 i32)
         (local $i i32)
         ;; ripemd-160 article: https://www.esat.kuleuven.be/cosic/publications/article-317.pdf
         ;; Here we implement a ripemd with an easier padding since inputs are results of sha256,
         ;; and thus always have the same length.
 
-        ;; move $stack-pointers: current value will contain sha256 result and moved place is new stack
-        (global.set $stack-pointer (i32.add (local.tee $i (global.get $stack-pointer)) (i32.const 32)))
+        ;; move $workspace-offset: current value will contain sha256 result and moved place is new stack
+        (local.set $workspace-offset (i32.add (local.tee $i (local.get $workspace-offset)) (i32.const 32)))
         ;; compute sha256
-        (call $stdlib.sha256-int (local.get $lo) (local.get $hi) (local.get $i))
+        (call $stdlib.sha256-int (local.get $lo) (local.get $hi) (local.get $i) (local.get $workspace-offset))
         drop ;; we don't need the length of sha256, it is always 32
-        (global.set $stack-pointer) ;; set $stack-pointer to its original value, aka offset of sha256 result
+        (local.set $workspace-offset) ;; set $workspace-offset to its original value, aka offset of sha256 result
 
-        (call $hash160-pad)
-        (call $hash160-compress (local.get $offset-result))
+        (call $hash160-pad (local.get $workspace-offset))
+        (call $hash160-compress (local.get $offset-result) (local.get $workspace-offset))
 
         (local.get $offset-result) (i32.const 20)
     )
 
-    (func $hash160-pad
+    (func $hash160-pad (param $workspace-offset i32)
         ;; MD-padding: (already placed sha256 +) "1" + "00000..." + size as i64 big endian
-        (i64.store offset=32 (global.get $stack-pointer) (i64.const 0x80))
+        (i64.store offset=32 (local.get $workspace-offset) (i64.const 0x80))
         (memory.fill
-            (i32.add (global.get $stack-pointer) (i32.const 40))
+            (i32.add (local.get $workspace-offset) (i32.const 40))
             (i32.const 0)
             (i32.const 16)
         )
-        (i64.store offset=56 (global.get $stack-pointer) (i64.const 256))
+        (i64.store offset=56 (local.get $workspace-offset) (i64.const 256))
     )
 
-    (func $hash160-compress (param $offset-result i32)
+    (func $hash160-compress (param $offset-result i32) (param $workspace-offset i32)
         (local $h0 i32) (local $h1 i32) (local $h2 i32) (local $h3 i32) (local $h4 i32)
         (local $a1 i32) (local $b1 i32) (local $c1 i32) (local $d1 i32) (local $e1 i32)
         (local $a2 i32) (local $b2 i32) (local $c2 i32) (local $d2 i32) (local $e2 i32)
@@ -1898,7 +1898,7 @@
             ;; + word[r[i]]
             (i32.load
                 (i32.add
-                    (global.get $stack-pointer)
+                    (local.get $workspace-offset)
                     (i32.shl (i32.load8_u offset=288 (local.get $i)) (i32.const 2))
                 )
             )
@@ -1931,7 +1931,7 @@
             ;; + word[r'[i]]
             (i32.load
                 (i32.add
-                    (global.get $stack-pointer)
+                    (local.get $workspace-offset)
                     (i32.shl (i32.load8_u offset=368 (local.get $i)) (i32.const 2))
                 )
             )
@@ -2893,7 +2893,7 @@
         (local.get $hi)
     )
 
-    (func $stdlib.sha512-buf (param $offset i32) (param $length i32) (param $offset-result i32)(result i32 i32)
+    (func $stdlib.sha512-buf (param $offset i32) (param $length i32) (param $offset-result i32) (param $workspace-offset i32)(result i32 i32)
 
         ;; For binary representation, you can take a look at https://sha256algorithm.com/
         ;; Keep in mind that SHA-256 handles 4-byte words, but SHA-512 handles 8-byte words
@@ -2907,16 +2907,16 @@
         ;; Index to track all blocks
         (local $index i32)
 
-        (call $pad-sha512-data (local.get $offset) (local.get $length))
+        (call $pad-sha512-data (local.get $offset) (local.get $length) (local.get $workspace-offset))
         (local.set $length_after_padding)
 
         (local.set $index (i32.const 0))
         ;; Iterations on blocks
         (loop
             ;; Process a block
-            (call $process-sha512-block (local.get $index))
+            (call $process-sha512-block (local.get $index) (local.get $workspace-offset))
             ;; Calculate hash using initial values and k-constants (80 rounds total)
-            (call $calculate-sha512)
+            (call $calculate-sha512 (local.get $workspace-offset))
 
             (br_if 0
                 (i32.lt_u
@@ -2927,33 +2927,33 @@
         )
 
         ;; store at result position with correct endianness
-        (call $store-calculated-sha512 (local.get $offset-result))
+        (call $store-calculated-sha512 (local.get $offset-result) (local.get $workspace-offset))
         (local.get $offset-result) (i32.const 64)
     )
 
-    (func $stdlib.sha512-int (param $lo i64) (param $hi i64) (param $offset-result i32) (result i32 i32)
+    (func $stdlib.sha512-int (param $lo i64) (param $hi i64) (param $offset-result i32) (param $workspace-offset i32)(result i32 i32)
 
         ;; Copy data to the working stack, so that it has this relative configuration:
         ;;   0..64 -> Initial hash vals (will be the result hash in the end)
         ;;   64..704 -> Space to store W
         ;;   704..831 -> extended int
-        (memory.copy (global.get $stack-pointer) (i32.const 648) (i32.const 64))
-        (i64.store offset=704 (global.get $stack-pointer) (local.get $lo))
-        (i64.store offset=712 (global.get $stack-pointer) (local.get $hi)) ;; offset = 704 + 8
-        (i32.store offset=720 (global.get $stack-pointer) (i32.const 0x80)) ;; offset = 704 + 16
-        (memory.fill (i32.add (global.get $stack-pointer) (i32.const 724)) (i32.const 0) (i32.const 110)) ;; offset = 704+20
-        (i32.store8 offset=831 (global.get $stack-pointer) (i32.const 0x80)) ;; offset = 704+127
+        (memory.copy (local.get $workspace-offset) (i32.const 648) (i32.const 64))
+        (i64.store offset=704 (local.get $workspace-offset) (local.get $lo))
+        (i64.store offset=712 (local.get $workspace-offset) (local.get $hi)) ;; offset = 704 + 8
+        (i32.store offset=720 (local.get $workspace-offset) (i32.const 0x80)) ;; offset = 704 + 16
+        (memory.fill (i32.add (local.get $workspace-offset) (i32.const 724)) (i32.const 0) (i32.const 110)) ;; offset = 704+20
+        (i32.store8 offset=831 (local.get $workspace-offset) (i32.const 0x80)) ;; offset = 704+127
 
-        (call $process-sha512-block (i32.const 0))
-        (call $calculate-sha512)
+        (call $process-sha512-block (i32.const 0) (local.get $workspace-offset))
+        (call $calculate-sha512 (local.get $workspace-offset))
 
         ;; store at result position with correct endianness
-        (call $store-calculated-sha512 (local.get $offset-result))
+        (call $store-calculated-sha512 (local.get $offset-result) (local.get $workspace-offset))
 
         (local.get $offset-result) (i32.const 64)
     )
 
-    (func $pad-sha512-data (param $offset i32) (param $length i32) (result i32)
+    (func $pad-sha512-data (param $offset i32) (param $length i32) (param $workspace-offset i32) (result i32)
         ;; Length of the data after adding padding and length to it
         (local $length_after_padding i32)
 
@@ -2961,10 +2961,10 @@
         (local $message_length_64 i64)
 
         ;; Copying initial values (64 bytes) for SHA-512 from 648 index
-        (memory.copy (global.get $stack-pointer) (i32.const 648) (i32.const 64))
+        (memory.copy (local.get $workspace-offset) (i32.const 648) (i32.const 64))
 
-        ;; Copying the data from the offset to isolated environment (i.e. target-index = $stack-pointer+(initial-values+(80 rounds * 8)))
-        (memory.copy (i32.add (global.get $stack-pointer) (i32.const 704)) (local.get $offset) (local.get $length))
+        ;; Copying the data from the offset to isolated environment (i.e. target-index = $workspace-offset+(initial-values+(80 rounds * 8)))
+        (memory.copy (i32.add (local.get $workspace-offset) (i32.const 704)) (local.get $offset) (local.get $length))
 
         (local.set $length_after_padding ;; total size of data with expansion divisible by 128
             (i32.add
@@ -2979,13 +2979,13 @@
 
         ;; Add "1" at the end of the data
         (i32.store offset=704
-            (i32.add (global.get $stack-pointer) (local.get $length))
+            (i32.add (local.get $workspace-offset) (local.get $length))
             (i32.const 0x80)
         )
 
         ;; Fill the remaining part before the size with 0s
         (memory.fill
-                (i32.add (i32.add (global.get $stack-pointer) (local.get $length)) (i32.const 705))
+                (i32.add (i32.add (local.get $workspace-offset) (local.get $length)) (i32.const 705))
                 (i32.const 0)
                 ;; Leave the last 8 bytes for the length
                 ;; Not handling 16 bytes length here
@@ -2997,7 +2997,7 @@
 
         ;; Length is being handled as i64 (8 bytes), because we don't need to handle it in 16 bytes, it will be complex
         ;; This is the location where reversed length is going to be stored
-        (i32.sub (i32.add (global.get $stack-pointer) (local.get $length_after_padding)) (i32.const 8))
+        (i32.sub (i32.add (local.get $workspace-offset) (local.get $length_after_padding)) (i32.const 8))
 
         ;; i64.store values in little-endian format, so to convert the length to big-endian, we need to reverse the 8 bits of length
         (i64.or
@@ -3028,8 +3028,8 @@
 
     )
 
-    (func $process-sha512-block (param $current-block-index i32)
-        ;; Basically is the $stack-pointer, but accessing global variables can be slower
+    (func $process-sha512-block (param $current-block-index i32) (param $workspace-offset i32)
+        ;; Basically is the $workspace-offset
         (local $origin i32)
 
         ;; Temporary block data, in an iteration
@@ -3040,7 +3040,7 @@
 
         (local $index i32)
 
-        (local.set $origin (global.get $stack-pointer))
+        (local.set $origin (local.get $workspace-offset))
         (local.set $temp-block-data (i32.add (local.get $origin) (local.get $current-block-index)))
 
         (local.set $index (i32.const 0))
@@ -3094,7 +3094,7 @@
         )
     )
 
-    (func $calculate-sha512
+    (func $calculate-sha512 (param $workspace-offset i32)
 
         (local $origin i32)
         (local $index i32)
@@ -3104,7 +3104,7 @@
         (local $e i64) (local $f i64) (local $g i64) (local $h i64)
         (local $temp1 i64) (local $temp2 i64)
 
-        (local.set $origin (global.get $stack-pointer))
+        (local.set $origin (local.get $workspace-offset))
 
         ;; Calculating variables
         (local.set $a (i64.load offset=0 (local.get $origin)))
@@ -3178,32 +3178,32 @@
         (i64.store offset=56 (local.get $origin) (i64.add (i64.load offset=56 (local.get $origin)) (local.get $h)))
     )
 
-    (func $store-calculated-sha512 (param $offset-result i32)
+    (func $store-calculated-sha512 (param $offset-result i32) (param $workspace-offset i32)
         (v128.store
             (local.get $offset-result)
             (i8x16.swizzle
-                (v128.load (global.get $stack-pointer))
+                (v128.load (local.get $workspace-offset))
                 (v128.const i8x16 7 6 5 4 3 2 1 0 15 14 13 12 11 10 9 8)
             )
         )
         (v128.store offset=16
             (local.get $offset-result)
             (i8x16.swizzle
-                (v128.load offset=16 (global.get $stack-pointer))
+                (v128.load offset=16 (local.get $workspace-offset))
                 (v128.const i8x16 7 6 5 4 3 2 1 0 15 14 13 12 11 10 9 8)
             )
         )
         (v128.store offset=32
             (local.get $offset-result)
             (i8x16.swizzle
-                (v128.load offset=32 (global.get $stack-pointer))
+                (v128.load offset=32 (local.get $workspace-offset))
                 (v128.const i8x16 7 6 5 4 3 2 1 0 15 14 13 12 11 10 9 8)
             )
         )
         (v128.store offset=48
             (local.get $offset-result)
             (i8x16.swizzle
-                (v128.load offset=48 (global.get $stack-pointer))
+                (v128.load offset=48 (local.get $workspace-offset))
                 (v128.const i8x16 7 6 5 4 3 2 1 0 15 14 13 12 11 10 9 8)
             )
         )

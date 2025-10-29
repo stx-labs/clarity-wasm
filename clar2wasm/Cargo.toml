@@ -13,6 +13,7 @@ wasmtime = "15.0.0"
 sha2 = { version = "0.10.7" }
 chrono = { version = "0.4.20" }
 rusqlite = { version = "0.31.0" }
+once_cell = "1.19.0"
 
 clarity = { git="https://github.com/stacks-network/stacks-core", branch="feat/clarity-wasm-develop", features = ["testing"] }
 stacks-common = { git="https://github.com/stacks-network/stacks-core", branch="feat/clarity-wasm-develop" }

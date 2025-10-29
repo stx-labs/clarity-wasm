@@ -2363,6 +2363,7 @@ fn sha256_buf() {
 
     // The offset where the result hash will be written to
     let res_offset = 3000i32;
+    let workspace_offset = 2048i32;
 
     // test with "Hello, World!", which requires only one pass
     let text = b"Hello, World!";
@@ -2377,6 +2378,7 @@ fn sha256_buf() {
                 Val::I32(END_OF_STANDARD_DATA as i32),
                 Val::I32(text.len() as i32),
                 res_offset.into(),
+                workspace_offset.into(),
             ],
             &mut result,
         )
@@ -2405,6 +2407,7 @@ fn sha256_buf() {
                 Val::I32(END_OF_STANDARD_DATA as i32),
                 Val::I32(text.len() as i32),
                 res_offset.into(),
+                workspace_offset.into(),
             ],
             &mut result,
         )
@@ -2433,6 +2436,7 @@ fn sha256_buf() {
                 Val::I32(END_OF_STANDARD_DATA as i32),
                 Val::I32(text.len() as i32),
                 res_offset.into(),
+                workspace_offset.into(),
             ],
             &mut result,
         )
@@ -2467,6 +2471,7 @@ fn sha256_int() {
 
     // The offset where the result hash will be written to
     let res_offset = 3000i32;
+    let workspace_offset = 2048i32;
 
     // Test on 0xfeedc0dedeadbeefcafed00dcafebabe
     sha256
@@ -2476,6 +2481,7 @@ fn sha256_int() {
                 Val::I64(0xcafed00dcafebabe_u64 as i64),
                 Val::I64(0xfeedc0dedeadbeef_u64 as i64),
                 res_offset.into(),
+                workspace_offset.into(),
             ],
             &mut result,
         )
@@ -2601,6 +2607,7 @@ fn hash160_buf() {
 
     // The offset where the result hash will be written to
     let res_offset = 3000i32;
+    let workspace_offset = 2048i32;
 
     // test with "Hello, World!"
     let text = b"Hello, World!";
@@ -2615,6 +2622,7 @@ fn hash160_buf() {
                 Val::I32(END_OF_STANDARD_DATA as i32),
                 Val::I32(text.len() as i32),
                 res_offset.into(),
+                workspace_offset.into(),
             ],
             &mut result,
         )
@@ -2642,6 +2650,7 @@ fn hash160_buf() {
                 Val::I32(END_OF_STANDARD_DATA as i32),
                 Val::I32(text.len() as i32),
                 res_offset.into(),
+                workspace_offset.into(),
             ],
             &mut result,
         )
@@ -2675,6 +2684,7 @@ fn hash160_int() {
 
     // The offset where the result hash will be written to
     let res_offset = 3000i32;
+    let workspace_offset = 2048i32;
 
     // Test on 0xfeedc0dedeadbeefcafed00dcafebabe
     hash160
@@ -2684,6 +2694,7 @@ fn hash160_int() {
                 Val::I64(0xcafed00dcafebabe_u64 as i64),
                 Val::I64(0xfeedc0dedeadbeef_u64 as i64),
                 res_offset.into(),
+                workspace_offset.into(),
             ],
             &mut result,
         )
@@ -3887,6 +3898,7 @@ fn sha512_buf() {
 
     // The offset where the result hash will be written to
     let res_offset = 3000i32;
+    let workspace_offset = 2048i32;
 
     // test with "Hello, World!", which requires only one pass
     let text = b"Hello, World!";
@@ -3901,6 +3913,7 @@ fn sha512_buf() {
                 Val::I32(END_OF_STANDARD_DATA as i32),
                 Val::I32(text.len() as i32),
                 res_offset.into(),
+                workspace_offset.into(),
             ],
             &mut result,
         )
@@ -3929,6 +3942,7 @@ fn sha512_buf() {
                 Val::I32(END_OF_STANDARD_DATA as i32),
                 Val::I32(text.len() as i32),
                 res_offset.into(),
+                workspace_offset.into(),
             ],
             &mut result,
         )
@@ -3958,6 +3972,7 @@ fn sha512_buf() {
                 Val::I32(END_OF_STANDARD_DATA as i32),
                 Val::I32(text.len() as i32),
                 res_offset.into(),
+                workspace_offset.into(),
             ],
             &mut result,
         )
@@ -3992,6 +4007,7 @@ fn sha512_int() {
 
     // The offset where the result hash will be written to
     let res_offset = 3000i32;
+    let workspace_offset = 2048i32;
 
     // Test on 0xfeedc0dedeadbeefcafed00dcafebabe
     sha256
@@ -4001,6 +4017,7 @@ fn sha512_int() {
                 Val::I64(0xcafed00dcafebabe_u64 as i64),
                 Val::I64(0xfeedc0dedeadbeef_u64 as i64),
                 res_offset.into(),
+                workspace_offset.into(),
             ],
             &mut result,
         )

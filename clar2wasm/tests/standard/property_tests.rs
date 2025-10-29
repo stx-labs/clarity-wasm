@@ -524,6 +524,7 @@ fn prop_sha256_buff() {
         300,
         END_OF_STANDARD_DATA as i32,
         32,
+        2048,
         |buf| Sha256Sum::from_data(buf).as_bytes().to_vec(),
     )
 }
@@ -535,6 +536,7 @@ fn prop_sha256_int_on_signed() {
         2048,
         END_OF_STANDARD_DATA as i32,
         32,
+        2048,
         |n| Sha256Sum::from_data(&n.to_le_bytes()).as_bytes().to_vec(),
     )
 }
@@ -546,6 +548,7 @@ fn prop_sha256_int_on_unsigned() {
         2048,
         END_OF_STANDARD_DATA as i32,
         32,
+        2048,
         |n| Sha256Sum::from_data(&n.to_le_bytes()).as_bytes().to_vec(),
     )
 }
@@ -559,6 +562,7 @@ fn prop_hash160_buff() {
         300,
         END_OF_STANDARD_DATA as i32,
         20,
+        2048,
         |buf| Hash160::from_data(buf).as_bytes().to_vec(),
     )
 }
@@ -570,6 +574,7 @@ fn prop_hash160_int_on_signed() {
         2048,
         END_OF_STANDARD_DATA as i32,
         20,
+        2048,
         |n| Hash160::from_data(&n.to_le_bytes()).as_bytes().to_vec(),
     )
 }
@@ -581,6 +586,7 @@ fn prop_hash160_int_on_unsigned() {
         2048,
         END_OF_STANDARD_DATA as i32,
         20,
+        2048,
         |n| Hash160::from_data(&n.to_le_bytes()).as_bytes().to_vec(),
     )
 }
@@ -638,6 +644,7 @@ fn prop_sha512_buff() {
         300,
         END_OF_STANDARD_DATA as i32,
         64,
+        2048,
         |buf| Sha512Sum::from_data(buf).as_bytes().to_vec(),
     )
 }
@@ -649,6 +656,7 @@ fn prop_sha512_int_on_signed() {
         2048,
         END_OF_STANDARD_DATA as i32,
         64,
+        2048,
         |n| Sha512Sum::from_data(&n.to_le_bytes()).as_bytes().to_vec(),
     )
 }
@@ -660,6 +668,7 @@ fn prop_sha512_int_on_unsigned() {
         2048,
         END_OF_STANDARD_DATA as i32,
         64,
+        2048,
         |n| Sha512Sum::from_data(&n.to_le_bytes()).as_bytes().to_vec(),
     )
 }
