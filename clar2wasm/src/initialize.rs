@@ -7,9 +7,10 @@ use clarity::vm::{CallStack, ContractContext, Value};
 use stacks_common::types::chainstate::StacksBlockId;
 use wasmtime::{Linker, Module, Store};
 
+use crate::cost::{CostLinker, CostMeter};
 use crate::linker::link_host_functions;
 use crate::wasm_utils::*;
-use crate::{error_mapping, CostLinker};
+use crate::{error_mapping, AccessCostMeter};
 
 // The context used when making calls into the Wasm module.
 pub struct ClarityWasmContext<'a, 'b> {
@@ -312,6 +313,16 @@ impl<'a, 'b> ClarityWasmContext<'a, 'b> {
     }
 }
 
+/// Successful return of a contract initialization
+///
+/// Contains the result of the execution of the top-level expressions, and the cost of executing
+/// them.
+#[derive(Debug, PartialEq)]
+pub struct ContractInit {
+    pub ret: Option<Value>,
+    pub cost: CostMeter,
+}
+
 /// Initialize a contract, executing all of the top-level expressions and
 /// registering all of the definitions in the context. Returns the value
 /// returned from the last top-level expression.
@@ -320,7 +331,7 @@ pub fn initialize_contract(
     contract_context: &mut ContractContext,
     sponsor: Option<PrincipalData>,
     contract_analysis: &ContractAnalysis,
-) -> Result<Option<Value>, Error> {
+) -> Result<ContractInit, Error> {
     let publisher: PrincipalData = contract_context.contract_identifier.issuer.clone().into();
 
     let mut call_stack = CallStack::new();
@@ -390,13 +401,19 @@ pub fn initialize_contract(
             .and_then(|type_map| type_map.get_type_expected(expr))
     });
 
-    if let Some(return_type) = return_type {
+    let ret = if let Some(return_type) = return_type {
         let memory = instance
             .get_memory(&mut store, "memory")
             .ok_or(Error::Wasm(WasmError::MemoryNotFound))?;
         wasm_to_clarity_value(return_type, 0, &results, memory, &mut &mut store, epoch)
-            .map(|(val, _offset)| val)
+            .map(|(val, _offset)| val)?
     } else {
-        Ok(None)
-    }
+        None
+    };
+
+    let cost = linker
+        .get_used_cost(&mut store)
+        .map_err(|_| Error::Wasm(WasmError::GlobalNotFound("cost-*".to_string())))?;
+
+    Ok(ContractInit { ret, cost })
 }

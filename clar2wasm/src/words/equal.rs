@@ -10,7 +10,7 @@ use crate::cost::WordCharge;
 use crate::wasm_generator::{
     clar2wasm_ty, drop_value, ArgumentsExt, GeneratorError, SequenceElementType, WasmGenerator,
 };
-use crate::wasm_utils::{check_argument_count, ArgumentCountCheck};
+use crate::wasm_utils::{check_argument_count, get_type_size, ArgumentCountCheck};
 
 #[derive(Debug)]
 pub struct IsEq;
@@ -148,9 +148,30 @@ impl ComplexWord for IndexOf {
             .local_set(end_offset);
         // STACK: []
 
+        // compute the cost depending on the number of elements in sequence.
+        // we put seq_size on the stack to retrieve it later,
+        // and again on the stack for the cost computation.
+        builder.local_get(seq_size).local_get(seq_size);
+        match &elem_ty {
+            SequenceElementType::Byte => {
+                // nothing to change here
+            }
+            SequenceElementType::UnicodeScalar => {
+                // number of bytes / 4
+                builder.i32_const(2).binop(BinaryOp::I32ShrU);
+            }
+            SequenceElementType::Other(ty) => {
+                // number of bytes / element size
+                builder
+                    .i32_const(get_type_size(ty))
+                    .binop(BinaryOp::I32DivU);
+            }
+        }
+        builder.local_set(seq_size);
         self.charge(generator, builder, seq_size)?;
 
-        builder.local_get(seq_size).unop(UnaryOp::I32Eqz);
+        // seq_size was on the stack from before the cost computation
+        builder.local_tee(seq_size).unop(UnaryOp::I32Eqz);
         // STACK: [size]
 
         let ty = InstrSeqType::new(

@@ -110,7 +110,8 @@ macro_rules! test_multi_contract_init {
                     None,
                     &compile_result.contract_analysis,
                 )
-                .expect("Failed to initialize contract.");
+                .expect("Failed to initialize contract.")
+                .ret;
 
                 let data_size = contract_context.data_size;
                 global_context
