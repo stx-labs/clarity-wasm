@@ -414,7 +414,11 @@ pub fn evaluate_at_with_amount(
 /// Evaluate a Clarity snippet at the latest epoch and clarity version.
 /// Returns an optional value -- the result of the evaluation.
 pub fn evaluate(snippet: &str) -> Result<Option<Value>, Error> {
-    evaluate_at(snippet, TestConfig::latest_epoch(), TestConfig::clarity_version())
+    evaluate_at(
+        snippet,
+        TestConfig::latest_epoch(),
+        TestConfig::clarity_version(),
+    )
 }
 
 /// Interpret a Clarity snippet at a specific epoch and version.

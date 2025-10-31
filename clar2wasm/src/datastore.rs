@@ -173,13 +173,15 @@ impl Datastore {
         let current_lookup_id = self
             .block_id_lookup
             .get(&self.open_chain_tip)
-            .expect("Open chain tip missing in block id lookup table").clone();
+            .expect("Open chain tip missing in block id lookup table")
+            .clone();
 
         for i in 1..=count {
             let height = cur_height + i;
             let id = height_to_id(height);
 
-            self.block_id_lookup.insert(id.clone(), current_lookup_id.clone());
+            self.block_id_lookup
+                .insert(id.clone(), current_lookup_id.clone());
             self.height_at_chain_tip.insert(id, height);
         }
 
@@ -399,7 +401,8 @@ impl BurnDatastore {
         let current_lookup_id = self
             .block_id_lookup
             .get(&self.open_chain_tip)
-            .expect("Open chain tip missing in block id lookup table").clone();
+            .expect("Open chain tip missing in block id lookup table")
+            .clone();
         let genesis_time = self.genesis_time;
 
         for i in 1..=count {
@@ -408,9 +411,11 @@ impl BurnDatastore {
             let id = StacksBlockId(bytes);
             let sortition_id = SortitionId(bytes);
             let block_info = height_to_block(height, Some(genesis_time));
-            self.block_id_lookup.insert(id.clone(), current_lookup_id.clone());
+            self.block_id_lookup
+                .insert(id.clone(), current_lookup_id.clone());
             self.height_at_chain_tip.insert(id.clone(), height);
-            self.sortition_lookup.insert(sortition_id.clone(), id.clone());
+            self.sortition_lookup
+                .insert(sortition_id.clone(), id.clone());
             self.consensus_hash_lookup
                 .insert(block_info.clone().consensus_hash, sortition_id);
             self.store.insert(id, block_info.clone());
@@ -428,14 +433,18 @@ impl HeadersDB for BurnDatastore {
         id_bhh: &StacksBlockId,
         _epoch_id: &StacksEpochId,
     ) -> Option<BlockHeaderHash> {
-        self.store.get(id_bhh).map(|id| id.block_header_hash.clone())
+        self.store
+            .get(id_bhh)
+            .map(|id| id.block_header_hash.clone())
     }
 
     fn get_burn_header_hash_for_block(
         &self,
         id_bhh: &StacksBlockId,
     ) -> Option<BurnchainHeaderHash> {
-        self.store.get(id_bhh).map(|id| id.burn_block_header_hash.clone())
+        self.store
+            .get(id_bhh)
+            .map(|id| id.burn_block_header_hash.clone())
     }
 
     fn get_consensus_hash_for_block(

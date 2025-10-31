@@ -1657,7 +1657,9 @@ mod tests {
         crosscheck(
             "(try! (if false (some u1) none))",
             Err(Error::ShortReturn(ShortReturnType::ExpectedValue(
-                Box::new(Value::Optional(clarity::vm::types::OptionalData { data: None })),
+                Box::new(Value::Optional(clarity::vm::types::OptionalData {
+                    data: None,
+                })),
             ))),
         )
     }
