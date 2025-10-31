@@ -10,9 +10,9 @@ regex = "1.9.1"
 walrus = "0.20.1"
 lazy_static = "1.4.0"
 wasmtime = "15.0.0"
-sha2 = { version = "0.10.7" }
-chrono = { version = "0.4.20" }
-rusqlite = { version = "0.31.0" }
+sha2 = { version = "0.10.7", optional = true }
+chrono = { version = "0.4.20", optional = true }
+rusqlite = { version = "0.31.0", optional = true }
 
 clarity = { git="https://github.com/stacks-network/stacks-core", branch="feat/clarity-wasm-develop", features = ["testing"] }
 stacks-common = { git="https://github.com/stacks-network/stacks-core", branch="feat/clarity-wasm-develop" }
@@ -28,7 +28,7 @@ pb = []
 test-clarity-v1 = []
 test-clarity-v2 = []
 test-clarity-v3 = []
-developer-mode = []
+developer-mode = ["dep:sha2", "dep:chrono", "dep:rusqlite"]
 
 [dev-dependencies]
 clar2wasm = {path = ".", features = ["developer-mode"]}
