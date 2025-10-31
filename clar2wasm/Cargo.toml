@@ -16,6 +16,7 @@ rusqlite = { version = "0.31.0" }
 
 clarity = { git="https://github.com/stacks-network/stacks-core", branch="feat/clarity-wasm-develop", features = ["testing"] }
 stacks-common = { git="https://github.com/stacks-network/stacks-core", branch="feat/clarity-wasm-develop" }
+clarity-types = { git="https://github.com/stacks-network/stacks-core", branch="feat/clarity-wasm-develop" }
 
 [build-dependencies]
 wat = "1.0.74"

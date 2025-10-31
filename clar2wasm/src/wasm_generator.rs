@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use clarity::vm::analysis::ContractAnalysis;
 use clarity::vm::diagnostic::DiagnosableError;
-use clarity::vm::types::signatures::{CallableSubtype, StringUTF8Length, BUFF_1};
+use clarity::vm::types::signatures::{CallableSubtype, StringUTF8Length};
 use clarity::vm::types::{
     ASCIIData, CharType, FixedFunction, FunctionType, ListTypeData, PrincipalData, SequenceData,
     SequenceSubtype, StringSubtype, TraitIdentifier, TupleTypeSignature, TypeSignature,
@@ -259,7 +259,7 @@ pub(crate) fn drop_value(builder: &mut InstrSeqBuilder, ty: &TypeSignature) {
 pub fn type_from_sequence_element(se: &SequenceElementType) -> TypeSignature {
     match se {
         SequenceElementType::Other(o) => o.clone(),
-        SequenceElementType::Byte => BUFF_1.clone(),
+        SequenceElementType::Byte => TypeSignature::BUFFER_1.clone(),
         SequenceElementType::UnicodeScalar => {
             TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::UTF8(
                 #[allow(clippy::unwrap_used)]
@@ -1504,6 +1504,9 @@ impl WasmGenerator {
                     // Call the host interface function, `chain_id`
                     builder.call(self.func_by_name("stdlib.chain_id"));
                     Ok(true)
+                }
+                NativeVariables::StacksBlockTime | NativeVariables::CurrentContract => {
+                    todo!("Implement NativeVariable")
                 }
             }
         } else {

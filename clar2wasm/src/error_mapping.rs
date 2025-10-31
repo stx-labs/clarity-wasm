@@ -248,7 +248,7 @@ fn from_runtime_error_code(
         }
         ErrorMap::ShortReturnAssertionFailure => {
             let clarity_val = short_return_value(&instance, &mut store, epoch_id, clarity_version);
-            Error::ShortReturn(ShortReturnType::AssertionFailed(clarity_val))
+            Error::ShortReturn(ShortReturnType::AssertionFailed(Box::new(clarity_val)))
         }
         ErrorMap::ArithmeticPowError => Error::Runtime(
             RuntimeErrorType::Arithmetic(POW_ERROR_MESSAGE.into()),
@@ -275,21 +275,21 @@ fn from_runtime_error_code(
         }
         ErrorMap::ShortReturnExpectedValueResponse => {
             let clarity_val = short_return_value(&instance, &mut store, epoch_id, clarity_version);
-            Error::ShortReturn(ShortReturnType::ExpectedValue(Value::Response(
+            Error::ShortReturn(ShortReturnType::ExpectedValue(Box::new(Value::Response(
                 ResponseData {
                     committed: false,
                     data: Box::new(clarity_val),
                 },
-            )))
+            ))))
         }
         ErrorMap::ShortReturnExpectedValueOptional => {
-            Error::ShortReturn(ShortReturnType::ExpectedValue(Value::Optional(
+            Error::ShortReturn(ShortReturnType::ExpectedValue(Box::new(Value::Optional(
                 clarity::vm::types::OptionalData { data: None },
-            )))
+            ))))
         }
         ErrorMap::ShortReturnExpectedValue => {
             let clarity_val = short_return_value(&instance, &mut store, epoch_id, clarity_version);
-            Error::ShortReturn(ShortReturnType::ExpectedValue(clarity_val))
+            Error::ShortReturn(ShortReturnType::ExpectedValue(Box::new(clarity_val)))
         }
         ErrorMap::ArgumentCountMismatch => {
             let (expected, got) = get_runtime_error_arg_lengths(&instance, &mut store);

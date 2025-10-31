@@ -1,4 +1,4 @@
-use clarity::vm::types::TypeSignature;
+use clarity::vm::types::{TypeSignature, TypeSignatureExt};
 use clarity::vm::{ClarityName, SymbolicExpression};
 use walrus::ValType;
 

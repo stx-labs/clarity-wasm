@@ -139,7 +139,13 @@ impl TestEnvironment {
             ) => version <= ClarityVersion::Clarity2,
 
             // For epochs 30, 31 and 32, all clarity versions are supported.
-            (StacksEpochId::Epoch30 | StacksEpochId::Epoch31 | StacksEpochId::Epoch32, _) => true,
+            (
+                StacksEpochId::Epoch30
+                | StacksEpochId::Epoch31
+                | StacksEpochId::Epoch32
+                | StacksEpochId::Epoch33,
+                _,
+            ) => true,
         }
     }
 
@@ -295,7 +301,7 @@ impl TestEnvironment {
                 self.version,
                 true,
             )
-            .map_err(|(e, _)| Error::Wasm(WasmError::WasmGeneratorError(format!("{e:?}"))))
+            .map_err(|boxed| Error::Wasm(WasmError::WasmGeneratorError(format!("{:?}", boxed.0))))
         })?;
 
         self.datastore
