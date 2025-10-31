@@ -1611,10 +1611,10 @@ mod tests {
         crosscheck(
             "(asserts! false (err u1))",
             Err(Error::ShortReturn(ShortReturnType::AssertionFailed(
-                Value::Response(ResponseData {
+                Box::new(Value::Response(ResponseData {
                     committed: false,
                     data: Box::new(Value::UInt(1)),
-                }),
+                })),
             ))),
         )
     }
@@ -1644,10 +1644,10 @@ mod tests {
         crosscheck(
             "(try! (if false (ok u1) (err u42)))",
             Err(Error::ShortReturn(ShortReturnType::ExpectedValue(
-                Value::Response(ResponseData {
+                Box::new(Value::Response(ResponseData {
                     committed: false,
                     data: Box::new(Value::UInt(42)),
-                }),
+                })),
             ))),
         )
     }
@@ -1657,7 +1657,9 @@ mod tests {
         crosscheck(
             "(try! (if false (some u1) none))",
             Err(Error::ShortReturn(ShortReturnType::ExpectedValue(
-                Value::Optional(clarity::vm::types::OptionalData { data: None }),
+                Box::new(Value::Optional(clarity::vm::types::OptionalData {
+                    data: None,
+                })),
             ))),
         )
     }
@@ -1761,9 +1763,9 @@ mod tests {
     #[test]
     fn unwrap_needs_workaround_optional() {
         let snippet = "
-            (define-private (foo) 
+            (define-private (foo)
                 (unwrap! (if true none (some none)) (some (err u1)))
-            ) 
+            )
             (foo)
         ";
 
@@ -1773,9 +1775,9 @@ mod tests {
     #[test]
     fn unwrap_needs_workaround_response() {
         let snippet = "
-            (define-private (foo) 
+            (define-private (foo)
                 (unwrap! (if true (err none) (ok none)) (some (err u1)))
-            ) 
+            )
             (foo)
         ";
 
@@ -1785,9 +1787,9 @@ mod tests {
     #[test]
     fn unwrap_err_needs_workaround() {
         let snippet = "
-            (define-private (foo) 
+            (define-private (foo)
                 (unwrap-err! (if true (ok none) (err none)) (some (err u1)))
-            ) 
+            )
             (foo)
         ";
 

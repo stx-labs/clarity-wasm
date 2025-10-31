@@ -32,6 +32,7 @@ impl ValueEnum for WrappedEpochId {
             WrappedEpochId(StacksEpochId::Epoch30),
             WrappedEpochId(StacksEpochId::Epoch31),
             WrappedEpochId(StacksEpochId::Epoch32),
+            WrappedEpochId(StacksEpochId::Epoch33),
         ]
     }
 
@@ -48,6 +49,7 @@ impl ValueEnum for WrappedEpochId {
             StacksEpochId::Epoch30 => Some(PossibleValue::new("3.0")),
             StacksEpochId::Epoch31 => Some(PossibleValue::new("3.1")),
             StacksEpochId::Epoch32 => Some(PossibleValue::new("3.2")),
+            StacksEpochId::Epoch33 => Some(PossibleValue::new("3.3")),
         }
     }
 }
@@ -73,6 +75,7 @@ impl ValueEnum for WrappedClarityVersion {
             WrappedClarityVersion(ClarityVersion::Clarity1),
             WrappedClarityVersion(ClarityVersion::Clarity2),
             WrappedClarityVersion(ClarityVersion::Clarity3),
+            WrappedClarityVersion(ClarityVersion::Clarity4),
         ]
     }
 
@@ -81,6 +84,7 @@ impl ValueEnum for WrappedClarityVersion {
             ClarityVersion::Clarity1 => Some(PossibleValue::new("1")),
             ClarityVersion::Clarity2 => Some(PossibleValue::new("2")),
             ClarityVersion::Clarity3 => Some(PossibleValue::new("3")),
+            ClarityVersion::Clarity4 => Some(PossibleValue::new("4")),
         }
     }
 }

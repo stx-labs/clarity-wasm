@@ -7,7 +7,7 @@ use clarity::vm::functions::crypto::{pubkey_to_address_v1, pubkey_to_address_v2}
 use clarity::vm::types::{
     AssetIdentifier, BuffData, BufferLength, FunctionType, ListTypeData, PrincipalData,
     SequenceData, SequenceSubtype, StacksAddressExtensions, TraitIdentifier, TupleData,
-    TupleTypeSignature, TypeSignature, BUFF_1, BUFF_32, BUFF_33,
+    TupleTypeSignature, TypeSignature,
 };
 use clarity::vm::{ClarityName, ClarityVersion, Environment, SymbolicExpression, Value};
 use stacks_common::types::chainstate::StacksBlockId;
@@ -2110,9 +2110,11 @@ fn link_nft_get_owner_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
                 // runtime_cost(ClarityCostFunction::NftOwner, env, asset_size)?;
 
                 if !expected_asset_type.admits(&caller.data().global_context.epoch_id, &asset)? {
-                    return Err(
-                        CheckErrors::TypeValueError(expected_asset_type.clone(), asset).into(),
-                    );
+                    return Err(CheckErrors::TypeValueError(
+                        Box::new(expected_asset_type.clone()),
+                        Box::new(asset),
+                    )
+                    .into());
                 }
 
                 match caller.data_mut().global_context.database.get_nft_owner(
@@ -2222,9 +2224,11 @@ fn link_nft_burn_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Error
                 // runtime_cost(ClarityCostFunction::NftBurn, env, asset_size)?;
 
                 if !expected_asset_type.admits(&caller.data().global_context.epoch_id, &asset)? {
-                    return Err(
-                        CheckErrors::TypeValueError(expected_asset_type.clone(), asset).into(),
-                    );
+                    return Err(CheckErrors::TypeValueError(
+                        Box::new(expected_asset_type.clone()),
+                        Box::new(asset),
+                    )
+                    .into());
                 }
 
                 let owner = match caller.data_mut().global_context.database.get_nft_owner(
@@ -2360,9 +2364,11 @@ fn link_nft_mint_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Error
                 // runtime_cost(ClarityCostFunction::NftMint, env, asset_size)?;
 
                 if !expected_asset_type.admits(&caller.data().global_context.epoch_id, &asset)? {
-                    return Err(
-                        CheckErrors::TypeValueError(expected_asset_type.clone(), asset).into(),
-                    );
+                    return Err(CheckErrors::TypeValueError(
+                        Box::new(expected_asset_type.clone()),
+                        Box::new(asset),
+                    )
+                    .into());
                 }
 
                 match caller.data_mut().global_context.database.get_nft_owner(
@@ -2501,9 +2507,11 @@ fn link_nft_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), E
                 // runtime_cost(ClarityCostFunction::NftTransfer, env, asset_size)?;
 
                 if !expected_asset_type.admits(&caller.data().global_context.epoch_id, &asset)? {
-                    return Err(
-                        CheckErrors::TypeValueError(expected_asset_type.clone(), asset).into(),
-                    );
+                    return Err(CheckErrors::TypeValueError(
+                        Box::new(expected_asset_type.clone()),
+                        Box::new(asset),
+                    )
+                    .into());
                 }
 
                 if from_principal == to_principal {
@@ -3611,7 +3619,7 @@ fn link_get_burn_block_info_header_hash_property_fn(
                         }
                         None => Value::none(),
                     },
-                    TypeSignature::OptionalType(Box::new(BUFF_32.clone())),
+                    TypeSignature::OptionalType(Box::new(TypeSignature::BUFFER_32.clone())),
                 );
 
                 write_to_wasm(
@@ -3680,8 +3688,8 @@ fn link_get_burn_block_info_pox_addrs_property_fn(
                     .database
                     .get_pox_payout_addrs_for_burnchain_height(height_value)?;
                 let addr_ty: TypeSignature = TupleTypeSignature::try_from(vec![
-                    ("hashbytes".into(), BUFF_32.clone()),
-                    ("version".into(), BUFF_1.clone()),
+                    ("hashbytes".into(), TypeSignature::BUFFER_32.clone()),
+                    ("version".into(), TypeSignature::BUFFER_1.clone()),
                 ])?
                 .into();
                 let addrs_ty = TypeSignature::list_of(addr_ty.clone(), 2)?;
@@ -4623,7 +4631,7 @@ fn link_enter_at_block_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(),
                 let block_hash = read_from_wasm(
                     memory,
                     &mut caller,
-                    &BUFF_32,
+                    &TypeSignature::BUFFER_32,
                     block_hash_offset,
                     block_hash_length,
                     epoch,
@@ -4636,7 +4644,13 @@ fn link_enter_at_block_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(),
                         }
                         StacksBlockId::from(data.as_slice())
                     }
-                    x => return Err(CheckErrors::TypeValueError(BUFF_32.clone(), x).into()),
+                    x => {
+                        return Err(CheckErrors::TypeValueError(
+                            Box::new(TypeSignature::BUFFER_32.clone()),
+                            Box::new(x),
+                        )
+                        .into())
+                    }
                 };
 
                 caller
@@ -4840,7 +4854,10 @@ fn link_secp256k1_recover_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<
                     .and_then(|export| export.into_memory())
                     .ok_or(Error::Wasm(WasmError::MemoryNotFound))?;
 
-                let ret_ty = TypeSignature::new_response(BUFF_33.clone(), TypeSignature::UIntType)?;
+                let ret_ty = TypeSignature::new_response(
+                    TypeSignature::BUFFER_33.clone(),
+                    TypeSignature::UIntType,
+                )?;
                 let repr_size = get_type_size(&ret_ty);
 
                 // Read the message bytes from the memory
@@ -4849,8 +4866,8 @@ fn link_secp256k1_recover_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<
                 // wrong length, throw a runtime type error.
                 if msg_bytes.len() != 32 {
                     return Err(CheckErrors::TypeValueError(
-                        BUFF_32.clone(),
-                        Value::buff_from(msg_bytes)?,
+                        Box::new(TypeSignature::BUFFER_32.clone()),
+                        Box::new(Value::buff_from(msg_bytes)?),
                     )
                     .into());
                 }
@@ -4929,8 +4946,8 @@ fn link_secp256k1_verify_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(
                 // wrong length, throw a runtime type error.
                 if msg_bytes.len() != 32 {
                     return Err(CheckErrors::TypeValueError(
-                        BUFF_32.clone(),
-                        Value::buff_from(msg_bytes)?,
+                        Box::new(TypeSignature::BUFFER_32.clone()),
+                        Box::new(Value::buff_from(msg_bytes)?),
                     )
                     .into());
                 }
@@ -4952,8 +4969,8 @@ fn link_secp256k1_verify_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(
                 // wrong length, throw a runtime type error.
                 if pk_bytes.len() != 33 {
                     return Err(CheckErrors::TypeValueError(
-                        BUFF_33.clone(),
-                        Value::buff_from(pk_bytes)?,
+                        Box::new(TypeSignature::BUFFER_33.clone()),
+                        Box::new(Value::buff_from(pk_bytes)?),
                     )
                     .into());
                 }
@@ -4995,7 +5012,7 @@ fn link_principal_of_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), E
                 let key_val = read_from_wasm(
                     memory,
                     &mut caller,
-                    &BUFF_33.clone(),
+                    &TypeSignature::BUFFER_33.clone(),
                     key_offset,
                     key_length,
                     epoch,
@@ -5004,13 +5021,21 @@ fn link_principal_of_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), E
                 let pub_key = match key_val {
                     Value::Sequence(SequenceData::Buffer(BuffData { ref data })) => {
                         if data.len() != 33 {
-                            return Err(
-                                CheckErrors::TypeValueError(BUFF_33.clone(), key_val).into()
-                            );
+                            return Err(CheckErrors::TypeValueError(
+                                Box::new(TypeSignature::BUFFER_33.clone()),
+                                Box::new(key_val),
+                            )
+                            .into());
                         }
                         data
                     }
-                    _ => return Err(CheckErrors::TypeValueError(BUFF_33.clone(), key_val).into()),
+                    _ => {
+                        return Err(CheckErrors::TypeValueError(
+                            Box::new(TypeSignature::BUFFER_33.clone()),
+                            Box::new(key_val),
+                        )
+                        .into())
+                    }
                 };
 
                 if let Ok(pub_key) = Secp256k1PublicKey::from_slice(pub_key) {

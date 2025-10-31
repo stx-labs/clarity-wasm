@@ -1,4 +1,4 @@
-use clarity::vm::types::{BufferLength, SequenceSubtype, TypeSignature, BUFF_32};
+use clarity::vm::types::{BufferLength, SequenceSubtype, TypeSignature};
 use clarity::vm::ClarityName;
 use walrus::ValType;
 
@@ -29,7 +29,7 @@ pub fn traverse_hash(
     // Allocate space on the stack for the result
     let (result_local, _) = generator.create_call_stack_local(builder, &return_ty, false, true);
 
-    let hash_type = match arg_types[0] {
+    let hash_type = match &arg_types[0] {
         TypeSignature::IntType | TypeSignature::UIntType => {
             // an integer is 16 bytes
             word.charge(generator, builder, 16)?;
@@ -153,7 +153,7 @@ impl SimpleWord for Keccak256 {
         self.charge(generator, builder, buf_len)?;
 
         // Reserve stack space for the host-function to write the result
-        let ret_ty = BUFF_32.clone();
+        let ret_ty = TypeSignature::BUFFER_32.clone();
         let (result_local, result_size) =
             generator.create_call_stack_local(builder, &ret_ty, false, true);
         builder.local_get(result_local).i32_const(result_size);
@@ -238,7 +238,7 @@ impl SimpleWord for Sha512_256 {
         self.charge(generator, builder, buf_len)?;
 
         // Reserve stack space for the host-function to write the result
-        let ret_ty = BUFF_32.clone();
+        let ret_ty = TypeSignature::BUFFER_32.clone();
         let (result_local, result_size) =
             generator.create_call_stack_local(builder, &ret_ty, false, true);
         builder.local_get(result_local).i32_const(result_size);

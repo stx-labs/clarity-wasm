@@ -1,6 +1,5 @@
 use clarity::vm::clarity_wasm::STANDARD_PRINCIPAL_BYTES;
-use clarity::vm::types::signatures::ASCII_40;
-use clarity::vm::types::{TypeSignature, BUFF_1, BUFF_20};
+use clarity::vm::types::TypeSignature;
 use clarity::vm::{ClarityName, SymbolicExpression};
 use clarity::{
     C32_ADDRESS_VERSION_MAINNET_MULTISIG, C32_ADDRESS_VERSION_MAINNET_SINGLESIG,
@@ -252,12 +251,12 @@ impl SimpleWord for Destruct {
         #[allow(clippy::unwrap_used)]
         let tuple_ty = TypeSignature::TupleType(
             vec![
-                ("hash-bytes".into(), BUFF_20.clone()),
+                ("hash-bytes".into(), TypeSignature::BUFFER_20.clone()),
                 (
                     "name".into(),
-                    TypeSignature::new_option(ASCII_40.clone()).unwrap(),
+                    TypeSignature::new_option(TypeSignature::STRING_ASCII_40.clone()).unwrap(),
                 ),
-                ("version".into(), BUFF_1.clone()),
+                ("version".into(), TypeSignature::BUFFER_1.clone()),
             ]
             .try_into()
             .unwrap(),
@@ -370,12 +369,12 @@ mod tests {
             &format!("(principal-of? 0x{pubkey_32_bytes})"),
             Err(Error::Unchecked(
                 clarity::vm::errors::CheckErrors::TypeValueError(
-                    TypeSignature::SequenceType(SequenceSubtype::BufferType(
+                    Box::new(TypeSignature::SequenceType(SequenceSubtype::BufferType(
                         BufferLength::try_from(33_u32).unwrap(),
-                    )),
-                    Value::Sequence(SequenceData::Buffer(BuffData {
+                    ))),
+                    Box::new(Value::Sequence(SequenceData::Buffer(BuffData {
                         data: hex::decode(pubkey_32_bytes).unwrap(),
-                    })),
+                    }))),
                 ),
             )),
         );

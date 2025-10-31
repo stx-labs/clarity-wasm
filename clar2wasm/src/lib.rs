@@ -94,8 +94,9 @@ pub fn compile(
         true,
     ) {
         Ok(contract_analysis) => contract_analysis,
-        Err((e, cost_track)) => {
-            diagnostics.push(Diagnostic::err(&e.err));
+        Err(boxed) => {
+            let (e, cost_track) = *boxed;
+            diagnostics.push(Diagnostic::err(e.err.as_ref()));
             return Err(CompileError::Generic {
                 ast: Box::new(ast),
                 diagnostics,

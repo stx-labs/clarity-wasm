@@ -139,7 +139,13 @@ impl TestEnvironment {
             ) => version <= ClarityVersion::Clarity2,
 
             // For epochs 30, 31 and 32, all clarity versions are supported.
-            (StacksEpochId::Epoch30 | StacksEpochId::Epoch31 | StacksEpochId::Epoch32, _) => true,
+            (
+                StacksEpochId::Epoch30
+                | StacksEpochId::Epoch31
+                | StacksEpochId::Epoch32
+                | StacksEpochId::Epoch33,
+                _,
+            ) => true,
         }
     }
 
@@ -295,7 +301,7 @@ impl TestEnvironment {
                 self.version,
                 true,
             )
-            .map_err(|(e, _)| Error::Wasm(WasmError::WasmGeneratorError(format!("{e:?}"))))
+            .map_err(|boxed| Error::Wasm(WasmError::WasmGeneratorError(format!("{:?}", boxed.0))))
         })?;
 
         self.datastore
@@ -408,7 +414,10 @@ pub fn evaluate_at_with_amount(
 /// Evaluate a Clarity snippet at the latest epoch and clarity version.
 /// Returns an optional value -- the result of the evaluation.
 pub fn evaluate(snippet: &str) -> Result<Option<Value>, Error> {
-    evaluate_at(snippet, StacksEpochId::latest(), ClarityVersion::latest())
+    // TODO: see issue #731
+    // Revert that when support for Clarity4 is implemented
+    // evaluate_at(snippet, StacksEpochId::latest(), ClarityVersion::latest())
+    evaluate_at(snippet, StacksEpochId::latest(), ClarityVersion::Clarity3)
 }
 
 /// Interpret a Clarity snippet at a specific epoch and version.
@@ -450,13 +459,19 @@ impl TestConfig {
             _ if cfg!(feature = "test-clarity-v1") => ClarityVersion::Clarity1,
             _ if cfg!(feature = "test-clarity-v2") => ClarityVersion::Clarity2,
             _ if cfg!(feature = "test-clarity-v3") => ClarityVersion::Clarity3,
-            _ => ClarityVersion::latest(),
+            // TODO: see issue #731
+            // Revert that when support for Clarity4 is implemented
+            // _ => ClarityVersion::latest(),
+            _ => ClarityVersion::Clarity3,
         }
     }
 
     /// Latest Stacks epoch.
     pub fn latest_epoch() -> StacksEpochId {
-        StacksEpochId::latest()
+        // TODO: see issue #731
+        // Revert that when support for Clarity4 is implemented
+        // StacksEpochId::latest()
+        StacksEpochId::Epoch32
     }
 }
 
