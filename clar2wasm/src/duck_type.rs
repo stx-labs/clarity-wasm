@@ -68,16 +68,18 @@ impl WasmGenerator {
             (TypeSignature::BoolType, TypeSignature::BoolType)
             | (TypeSignature::IntType, TypeSignature::IntType)
             | (TypeSignature::UIntType, TypeSignature::UIntType)
+            | (
+                TypeSignature::SequenceType(SequenceSubtype::BufferType(_)),
+                TypeSignature::SequenceType(SequenceSubtype::BufferType(_)),
+            )
+            | (
+                TypeSignature::SequenceType(SequenceSubtype::StringType(_)),
+                TypeSignature::SequenceType(SequenceSubtype::StringType(_)),
+            )
             | (TypeSignature::PrincipalType, TypeSignature::PrincipalType)
-            | (
-                TypeSignature::SequenceType(SequenceSubtype::BufferType(_)),
-                TypeSignature::SequenceType(SequenceSubtype::BufferType(_)),
-            )
-            | (
-                TypeSignature::SequenceType(SequenceSubtype::StringType(_)),
-                TypeSignature::SequenceType(SequenceSubtype::StringType(_)),
-            )
             | (TypeSignature::CallableType(_), TypeSignature::CallableType(_))
+            | (TypeSignature::PrincipalType, TypeSignature::CallableType(_))
+            | (TypeSignature::CallableType(_), TypeSignature::PrincipalType)
             | (TypeSignature::TraitReferenceType(_), TypeSignature::TraitReferenceType(_)) => {
                 for &l in locals.iter().rev() {
                     builder.local_set(l);
@@ -223,7 +225,7 @@ impl WasmGenerator {
             }
             _ => {
                 return Err(GeneratorError::TypeError(format!(
-                    "Incompatible types for duck typing:\n\t{og_ty}\n\t{target_ty}"
+                    "Incompatible types for duck typing:\n\t{og_ty:?}\n\t{target_ty:?}"
                 )))
             }
         }
