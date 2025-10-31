@@ -414,7 +414,7 @@ pub fn evaluate_at_with_amount(
 /// Evaluate a Clarity snippet at the latest epoch and clarity version.
 /// Returns an optional value -- the result of the evaluation.
 pub fn evaluate(snippet: &str) -> Result<Option<Value>, Error> {
-    evaluate_at(snippet, StacksEpochId::latest(), ClarityVersion::latest())
+    evaluate_at(snippet, TestConfig::latest_epoch(), TestConfig::clarity_version())
 }
 
 /// Interpret a Clarity snippet at a specific epoch and version.
@@ -456,13 +456,19 @@ impl TestConfig {
             _ if cfg!(feature = "test-clarity-v1") => ClarityVersion::Clarity1,
             _ if cfg!(feature = "test-clarity-v2") => ClarityVersion::Clarity2,
             _ if cfg!(feature = "test-clarity-v3") => ClarityVersion::Clarity3,
-            _ => ClarityVersion::latest(),
+            // TODO: see issue #731
+            // Revert that when support for Clarity4 is implemented
+            // _ => ClarityVersion::latest(),
+            _ => ClarityVersion::Clarity3,
         }
     }
 
     /// Latest Stacks epoch.
     pub fn latest_epoch() -> StacksEpochId {
-        StacksEpochId::latest()
+        // TODO: see issue #731
+        // Revert that when support for Clarity4 is implemented
+        // StacksEpochId::latest()
+        StacksEpochId::Epoch32
     }
 }
 

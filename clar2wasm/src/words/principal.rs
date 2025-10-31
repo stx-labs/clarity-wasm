@@ -369,12 +369,12 @@ mod tests {
             &format!("(principal-of? 0x{pubkey_32_bytes})"),
             Err(Error::Unchecked(
                 clarity::vm::errors::CheckErrors::TypeValueError(
-                    TypeSignature::SequenceType(SequenceSubtype::BufferType(
+                    Box::new(TypeSignature::SequenceType(SequenceSubtype::BufferType(
                         BufferLength::try_from(33_u32).unwrap(),
-                    )),
-                    Value::Sequence(SequenceData::Buffer(BuffData {
+                    ))),
+                    Box::new(Value::Sequence(SequenceData::Buffer(BuffData {
                         data: hex::decode(pubkey_32_bytes).unwrap(),
-                    })),
+                    }))),
                 ),
             )),
         );

@@ -100,7 +100,7 @@ proptest! {
 
         crosscheck(
             &snippet,
-            Err(Error::ShortReturn(ShortReturnType::ExpectedValue(Value::from(throw_val))))
+            Err(Error::ShortReturn(ShortReturnType::ExpectedValue(Box::new(Value::from(throw_val)))))
         );
     }
 }
@@ -132,7 +132,7 @@ proptest! {
 
         crosscheck(
             &snippet,
-            Err(Error::ShortReturn(ShortReturnType::ExpectedValue(Value::from(throw_val))))
+            Err(Error::ShortReturn(ShortReturnType::ExpectedValue(Box::new(Value::from(throw_val)))))
         );
     }
 
@@ -214,7 +214,7 @@ proptest! {
 
         crosscheck(
             &snippet,
-            Err(Error::ShortReturn(ShortReturnType::ExpectedValue(Value::from(throw_val))))
+            Err(Error::ShortReturn(ShortReturnType::ExpectedValue(Box::new(Value::from(throw_val)))))
         );
     }
 }
@@ -262,7 +262,7 @@ proptest! {
 
         crosscheck(
             &snippet,
-            Err(Error::ShortReturn(ShortReturnType::ExpectedValue(Value::from(throw_val))))
+            Err(Error::ShortReturn(ShortReturnType::ExpectedValue(Box::new(Value::from(throw_val)))))
         );
     }
 
@@ -329,7 +329,7 @@ proptest! {
 
         crosscheck(
             &snippet,
-            Err(Error::ShortReturn(ShortReturnType::ExpectedValue(Value::from(throw_val))))
+            Err(Error::ShortReturn(ShortReturnType::ExpectedValue(Box::new(Value::from(throw_val)))))
         );
     }
 }
@@ -412,7 +412,7 @@ proptest! {
 
         crosscheck(
             &snippet,
-            Err(Error::ShortReturn(ShortReturnType::ExpectedValue(Value::from(throw_val))))
+            Err(Error::ShortReturn(ShortReturnType::ExpectedValue(Box::new(Value::from(throw_val)))))
         );
     }
 }
@@ -511,7 +511,7 @@ proptest! {
     fn asserts_false(throw_val in PropValue::any()) {
         crosscheck(
             &format!("(asserts! false {throw_val})"),
-            Err(Error::ShortReturn(ShortReturnType::AssertionFailed(Value::from(throw_val)))),
+            Err(Error::ShortReturn(ShortReturnType::AssertionFailed(Box::new(Value::from(throw_val))))),
         );
     }
 }
@@ -552,7 +552,7 @@ proptest! {
 
         crosscheck(
             &snippet,
-            Err(Error::ShortReturn(ShortReturnType::AssertionFailed(Value::from(throw_val)))),
+            Err(Error::ShortReturn(ShortReturnType::AssertionFailed(Box::new(Value::from(throw_val))))),
         );
     }
 }
@@ -616,7 +616,7 @@ proptest! {
     fn try_none(val in PropValue::any()) {
         crosscheck(
             &format!("(try! (if false (some {val}) none))"),
-            Err(Error::ShortReturn(ShortReturnType::ExpectedValue(Value::none())))
+            Err(Error::ShortReturn(ShortReturnType::ExpectedValue(Box::new(Value::none()))))
 
         );
     }
@@ -640,7 +640,7 @@ proptest! {
         crosscheck(
             &format!("(try! (if false (ok {ok_val}) (err {err_val})))"),
             Err(Error::ShortReturn(ShortReturnType::ExpectedValue(
-                Value::error(err_val.into()).unwrap(),
+                Box::new(Value::error(err_val.into()).unwrap()),
             ))),
         );
     }
@@ -683,7 +683,7 @@ proptest! {
 
         crosscheck(
             &snippet,
-            Err(Error::ShortReturn(ShortReturnType::ExpectedValue(Value::none()))),
+            Err(Error::ShortReturn(ShortReturnType::ExpectedValue(Box::new(Value::none())))),
         );
     }
 
@@ -728,7 +728,7 @@ proptest! {
         crosscheck(
             &snippet,
             Err(Error::ShortReturn(ShortReturnType::ExpectedValue(
-                Value::error(err_val.into()).unwrap(),
+                Box::new(Value::error(err_val.into()).unwrap()),
             ))),
         );
     }

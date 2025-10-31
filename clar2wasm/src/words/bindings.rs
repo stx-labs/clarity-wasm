@@ -203,7 +203,7 @@ mod tests {
         crosscheck(
             snippet,
             Err(Error::ShortReturn(ShortReturnType::ExpectedValue(
-                Value::err_uint(42),
+                Box::new(Value::err_uint(42)),
             ))),
         );
     }
