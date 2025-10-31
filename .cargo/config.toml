@@ -3,6 +3,6 @@ clar2wasm-install = "install --path . --locked --force"
 fmt-stacks = "fmt -- --config group_imports=StdExternalCrate,imports_granularity=Module"
 
 # Uncomment the patch below to use a local version of the stacks-core modules
-# [patch.'https://github.com/stacks-network/stacks-core.git']
-# clarity = { path = "../stacks-core/clarity" }
-# stacks-common = { path = "../stacks-core/stacks-common" }
+[patch.'https://github.com/stacks-network/stacks-core.git']
+clarity = { path = "../stacks-core/clarity" }
+stacks-common = { path = "../stacks-core/stacks-common" }

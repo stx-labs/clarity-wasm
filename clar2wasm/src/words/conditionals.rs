@@ -1,6 +1,6 @@
 use clarity::vm::types::{FixedFunction, FunctionType, TypeSignature};
 use clarity::vm::{ClarityName, SymbolicExpression};
-use walrus::ir::{self, IfElse, InstrSeqType, Loop, UnaryOp};
+use walrus::ir::{self, Block, IfElse, Loop, UnaryOp};
 use walrus::{InstrSeqBuilder, LocalId, ValType};
 
 use super::{ComplexWord, SimpleWord, Word};
@@ -599,59 +599,7 @@ impl ComplexWord for Filter {
     }
 }
 
-fn traverse_short_circuiting_list(
-    generator: &mut WasmGenerator,
-    builder: &mut walrus::InstrSeqBuilder,
-    args: &[SymbolicExpression],
-    invert: bool,
-) -> Result<(), GeneratorError> {
-    let n_branches = args.len();
-
-    let mut branches = vec![];
-
-    let noop = builder
-        .dangling_instr_seq(InstrSeqType::new(
-            &mut generator.module.types,
-            &[],
-            &[ValType::I32],
-        ))
-        // for now, the noop branch just adds a false to break out of the next iteration
-        .i32_const(if invert { 1 } else { 0 })
-        .id();
-
-    for i in 0..n_branches {
-        let branch_expr = args.get_expr(i)?;
-
-        let mut branch = builder.dangling_instr_seq(InstrSeqType::new(
-            &mut generator.module.types,
-            &[],
-            &[ValType::I32],
-        ));
-
-        generator.traverse_expr(&mut branch, branch_expr)?;
-
-        branches.push(branch.id());
-    }
-
-    builder.i32_const(if invert { 0 } else { 1 });
-
-    for branch in branches {
-        if invert {
-            builder.instr(ir::IfElse {
-                consequent: noop,
-                alternative: branch,
-            });
-        } else {
-            builder.instr(ir::IfElse {
-                consequent: branch,
-                alternative: noop,
-            });
-        }
-    }
-
-    Ok(())
-}
-
+/// Default implementation for `and` that handles the evaluation of its arguments.
 #[derive(Debug)]
 pub struct And;
 
@@ -675,10 +623,36 @@ impl ComplexWord for And {
 
         self.charge(generator, builder, args_len as u32)?;
 
-        traverse_short_circuiting_list(generator, builder, args, false)
+        let block_id = {
+            let mut block = builder.dangling_instr_seq(ValType::I32);
+            let block_id = block.id();
+
+            // we push a false on the stack for the case where we break early
+            block.i32_const(0);
+
+            for arg in args {
+                generator.traverse_expr(&mut block, arg)?;
+                // if argument is false, we break early
+                block.unop(UnaryOp::I32Eqz).br_if(block_id);
+            }
+
+            // if we reach this point, result is true, so we drop the current false on the stack and push true.
+            block.drop().i32_const(1);
+
+            block_id
+        };
+
+        builder.instr(Block { seq: block_id });
+
+        Ok(())
     }
 }
 
+/// Implementation of `and` that doesn't evaluate its arguments.
+/// This version of `and` is a variadic word.
+///
+/// An example of usage would be in `(map and (list true) (list false))`.
+/// Since both lists are already evaluated, the `and` cannot re-evaluate its arguments.
 #[derive(Debug)]
 pub struct SimpleAnd;
 
@@ -691,16 +665,12 @@ impl Word for SimpleAnd {
 impl SimpleWord for SimpleAnd {
     fn visit(
         &self,
-        generator: &mut WasmGenerator,
+        _generator: &mut WasmGenerator,
         builder: &mut walrus::InstrSeqBuilder,
         arg_types: &[TypeSignature],
         _return_type: &TypeSignature,
     ) -> Result<(), GeneratorError> {
-        let args_len = arg_types.len();
-
-        self.charge(generator, builder, args_len as u32)?;
-
-        for _ in 0..args_len.saturating_sub(1) {
+        if arg_types.len() > 1 {
             builder.binop(ir::BinaryOp::I32And);
         }
 
@@ -708,6 +678,7 @@ impl SimpleWord for SimpleAnd {
     }
 }
 
+/// Default implementation for `or` that handles the evaluation of its arguments.
 #[derive(Debug)]
 pub struct Or;
 
@@ -731,10 +702,36 @@ impl ComplexWord for Or {
 
         self.charge(generator, builder, args_len as u32)?;
 
-        traverse_short_circuiting_list(generator, builder, args, true)
+        let block_id = {
+            let mut block = builder.dangling_instr_seq(ValType::I32);
+            let block_id = block.id();
+
+            // we push a true on the stack for the case where we break early
+            block.i32_const(1);
+
+            for arg in args {
+                generator.traverse_expr(&mut block, arg)?;
+                // if argument is true, we break early
+                block.br_if(block_id);
+            }
+
+            // if we reach this point, result is false, so we drop the current true on the stack and push true.
+            block.drop().i32_const(0);
+
+            block_id
+        };
+
+        builder.instr(Block { seq: block_id });
+
+        Ok(())
     }
 }
 
+/// Implementation of `or` that doesn't evaluate its arguments.
+/// This version of `or` is a variadic word.
+///
+/// An example of usage would be in `(map or (list true) (list false))`.
+/// Since both lists are already evaluated, the `or` cannot re-evaluate its arguments.
 #[derive(Debug)]
 pub struct SimpleOr;
 
@@ -747,16 +744,12 @@ impl Word for SimpleOr {
 impl SimpleWord for SimpleOr {
     fn visit(
         &self,
-        generator: &mut WasmGenerator,
+        _generator: &mut WasmGenerator,
         builder: &mut walrus::InstrSeqBuilder,
         arg_types: &[TypeSignature],
         _return_type: &TypeSignature,
     ) -> Result<(), GeneratorError> {
-        let args_len = arg_types.len();
-
-        self.charge(generator, builder, args_len as u32)?;
-
-        for _ in 0..args_len.saturating_sub(1) {
+        if arg_types.len() > 1 {
             builder.binop(ir::BinaryOp::I32Or);
         }
 

@@ -1,11 +1,12 @@
 use clar2wasm::tools::{crosscheck, crosscheck_compare_only};
 use clarity::vm::types::{
-    ListData, ListTypeData, SequenceData, SequenceSubtype, TypeSignature, MAX_VALUE_SIZE,
+    ListData, ListTypeData, SequenceData, SequenceSubtype, SequencedValue, TypeSignature,
+    MAX_VALUE_SIZE,
 };
 use clarity::vm::Value;
 use proptest::prelude::*;
 
-use crate::{bool, buffer, int, list, prop_signature, PropValue};
+use crate::{bool, buffer, int, list, prop_signature, type_string, PropValue};
 
 proptest! {
     #![proptest_config(super::runtime_config())]
@@ -213,6 +214,73 @@ proptest! {
             &format!(r#"(define-private (fun (a (list 100 int)) (b (list 100 int))) (concat a b)) (try! (element-at (map fun (list {seq_1}) (list {seq_2})) u0))"#),
             Ok(Some(Value::Sequence(expected)))
         )
+    }
+}
+
+proptest! {
+    #![proptest_config(super::runtime_config())]
+
+    #[test]
+    fn crosscheck_map_append(
+        (ty, seq, elem) in prop_signature().prop_flat_map(|ty| {
+            let seq = {
+                let ty = ty.clone();
+                (1..=10u32, 1..=10u32).prop_flat_map(move |(outer_count, inner_count)| {
+                    PropValue::from_type(
+                        TypeSignature::list_of(
+                            TypeSignature::list_of(ty.clone(), inner_count).unwrap(),
+                            outer_count,
+                        )
+                        .unwrap(),
+                    )
+                })
+            };
+            let elem = {
+                let ty = ty.clone();
+                (1..10u32).prop_flat_map(move |count| {
+                    PropValue::from_type(TypeSignature::list_of(ty.clone(), count).unwrap())
+                })
+            };
+
+            (Just(ty).no_shrink(), seq.no_shrink(), elem.no_shrink())
+        })
+    ) {
+        let snippet = format!(
+            r#"
+                (define-private (foo (a (list 100 {t})) (b {t}))
+                    (append a b)
+                ) 
+
+                (map foo {seq} {elem})
+            "#,
+            t = type_string(&ty)
+        );
+
+        let expected = {
+            let SequenceData::List(seq) = extract_sequence(seq) else {
+                unreachable!()
+            };
+            let SequenceData::List(elem) = extract_sequence(elem) else {
+                unreachable!()
+            };
+
+            let mut res = Vec::with_capacity(seq.items().len().min(elem.items().len()));
+            for (s, e) in seq.items().iter().zip(elem.items()) {
+                let Value::Sequence(SequenceData::List(s)) = s else {
+                    unreachable!()
+                };
+
+                let mut item = Vec::with_capacity(s.items().len() + 1);
+                item.extend(s.items().clone());
+                item.push(e.clone());
+
+                res.push(Value::cons_list_unsanitized(item).unwrap());
+            }
+
+            Value::cons_list_unsanitized(res).unwrap()
+        };
+
+        crosscheck(&snippet, Ok(Some(expected)));
     }
 }
 

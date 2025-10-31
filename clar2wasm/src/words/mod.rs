@@ -167,8 +167,6 @@ pub(crate) static SIMPLE_WORDS: &[&'static dyn SimpleWord] = &[
     &comparison::CmpGreater,
     &comparison::CmpLeq,
     &comparison::CmpLess,
-    &conditionals::SimpleOr,
-    &conditionals::SimpleAnd,
     &conversion::IntToAscii,
     &conversion::IntToUtf8,
     &conversion::StringToInt,
@@ -193,6 +191,8 @@ pub(crate) static SIMPLE_VARIADIC_WORDS: &[&'static dyn SimpleWord] = &[
     &arithmetic::Div,
     &arithmetic::Add,
     &arithmetic::Mul,
+    &conditionals::SimpleOr,
+    &conditionals::SimpleAnd,
 ];
 
 lazy_static! {
