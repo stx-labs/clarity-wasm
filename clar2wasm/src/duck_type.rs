@@ -261,6 +261,7 @@ mod tests {
     };
     use clarity::vm::Value;
 
+    use crate::tools::crosscheck_multi_contract;
     use crate::wasm_generator::WasmGenerator;
 
     fn duck_type_test(value: &Value, original_ty: &TypeSignature, target_ty: &TypeSignature) {
@@ -504,5 +505,33 @@ mod tests {
         ));
 
         duck_type_test(&value, &og_ty, &target_ty);
+    }
+
+    #[test]
+    fn duck_typing_principal_and_callable() {
+        let foo = "
+            (define-trait t
+                ((foo () (response bool uint)))
+            )
+
+            (define-public (foo) (ok true))
+        ";
+
+        let bar = r#"
+            (use-trait foo-trait .foo.t)
+
+            (define-constant callee .foo)
+
+            (define-private (call-it (t <foo-trait>))
+                (contract-call? t foo)
+            )
+
+            (call-it callee)
+        "#;
+
+        crosscheck_multi_contract(
+            &[("foo".into(), foo), ("bar".into(), bar)],
+            Ok(Some(Value::okay_true())),
+        );
     }
 }
