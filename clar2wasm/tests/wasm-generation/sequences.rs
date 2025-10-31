@@ -6,7 +6,7 @@ use clarity::vm::types::{
 use clarity::vm::Value;
 use proptest::prelude::*;
 
-use crate::{bool, buffer, int, list, prop_signature, type_string, PropValue};
+use crate::{bool, buffer, int, list, prop_signature, prop_value, type_string, PropValue};
 
 proptest! {
     #![proptest_config(super::runtime_config())]
@@ -223,26 +223,16 @@ proptest! {
     #[test]
     fn crosscheck_map_append(
         (ty, seq, elem) in prop_signature().prop_flat_map(|ty| {
-            let seq = {
-                let ty = ty.clone();
-                (1..=10u32, 1..=10u32).prop_flat_map(move |(outer_count, inner_count)| {
-                    PropValue::from_type(
-                        TypeSignature::list_of(
-                            TypeSignature::list_of(ty.clone(), inner_count).unwrap(),
-                            outer_count,
-                        )
-                        .unwrap(),
-                    )
-                })
-            };
-            let elem = {
-                let ty = ty.clone();
-                (1..10u32).prop_flat_map(move |count| {
-                    PropValue::from_type(TypeSignature::list_of(ty.clone(), count).unwrap())
-                })
-            };
+            let seq = prop::collection::vec(
+                prop::collection::vec(prop_value(ty.clone()), 1..=10).prop_map(|v| Value::cons_list_unsanitized(v).unwrap()),
+                1..=10).prop_map(|v| {
+                Value::cons_list_unsanitized(v).unwrap()
+            }).prop_map_into();
 
-            (Just(ty).no_shrink(), seq.no_shrink(), elem.no_shrink())
+
+            let elem = prop::collection::vec(prop_value(ty.clone()), 1..=10).prop_map(|v| Value::cons_list_unsanitized(v).unwrap()).prop_map_into();
+
+            (Just(ty), seq, elem).no_shrink()
         })
     ) {
         let snippet = format!(

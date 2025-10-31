@@ -248,6 +248,73 @@ pub enum SequenceElementType {
     Other(TypeSignature),
 }
 
+impl SequenceElementType {
+    pub fn type_size(&self) -> i32 {
+        match self {
+            SequenceElementType::Byte => 1,
+            SequenceElementType::UnicodeScalar => 4,
+            SequenceElementType::Other(ty) => get_type_size(ty),
+        }
+    }
+
+    pub fn load(
+        &self,
+        generator: &mut WasmGenerator,
+        builder: &mut InstrSeqBuilder,
+        offset: LocalId,
+    ) -> Result<(), GeneratorError> {
+        match self {
+            SequenceElementType::Byte => {
+                builder.local_get(offset).i32_const(1);
+            }
+            SequenceElementType::UnicodeScalar => {
+                builder.local_get(offset).i32_const(4);
+            }
+            SequenceElementType::Other(type_signature) => {
+                generator.read_from_memory(builder, offset, 0, type_signature)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl TryFrom<&TypeSignature> for SequenceElementType {
+    type Error = GeneratorError;
+
+    fn try_from(ty: &TypeSignature) -> Result<Self, Self::Error> {
+        match ty {
+            TypeSignature::SequenceType(SequenceSubtype::ListType(lt)) => {
+                Ok(SequenceElementType::Other(lt.get_list_item_type().clone()))
+            }
+            TypeSignature::SequenceType(SequenceSubtype::BufferType(_))
+            | TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::ASCII(_))) => {
+                Ok(SequenceElementType::Byte)
+            }
+            TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::UTF8(_))) => {
+                Ok(SequenceElementType::UnicodeScalar)
+            }
+            _ => Err(GeneratorError::TypeError(
+                "expected sequence type".to_string(),
+            )),
+        }
+    }
+}
+
+impl From<&SequenceElementType> for TypeSignature {
+    fn from(se: &SequenceElementType) -> Self {
+        match se {
+            SequenceElementType::Other(o) => o.clone(),
+            SequenceElementType::Byte => TypeSignature::BUFFER_1.clone(),
+            SequenceElementType::UnicodeScalar => {
+                TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::UTF8(
+                    #[allow(clippy::unwrap_used)]
+                    StringUTF8Length::try_from(1u32).unwrap(),
+                )))
+            }
+        }
+    }
+}
+
 /// Drop a value of type `ty` from the data stack.
 pub(crate) fn drop_value(builder: &mut InstrSeqBuilder, ty: &TypeSignature) {
     let wasm_types = clar2wasm_ty(ty);
@@ -256,6 +323,7 @@ pub(crate) fn drop_value(builder: &mut InstrSeqBuilder, ty: &TypeSignature) {
     });
 }
 
+#[deprecated = "use the From implementation"]
 pub fn type_from_sequence_element(se: &SequenceElementType) -> TypeSignature {
     match se {
         SequenceElementType::Other(o) => o.clone(),
