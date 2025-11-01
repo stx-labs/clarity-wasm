@@ -68,16 +68,18 @@ impl WasmGenerator {
             (TypeSignature::BoolType, TypeSignature::BoolType)
             | (TypeSignature::IntType, TypeSignature::IntType)
             | (TypeSignature::UIntType, TypeSignature::UIntType)
+            | (
+                TypeSignature::SequenceType(SequenceSubtype::BufferType(_)),
+                TypeSignature::SequenceType(SequenceSubtype::BufferType(_)),
+            )
+            | (
+                TypeSignature::SequenceType(SequenceSubtype::StringType(_)),
+                TypeSignature::SequenceType(SequenceSubtype::StringType(_)),
+            )
             | (TypeSignature::PrincipalType, TypeSignature::PrincipalType)
-            | (
-                TypeSignature::SequenceType(SequenceSubtype::BufferType(_)),
-                TypeSignature::SequenceType(SequenceSubtype::BufferType(_)),
-            )
-            | (
-                TypeSignature::SequenceType(SequenceSubtype::StringType(_)),
-                TypeSignature::SequenceType(SequenceSubtype::StringType(_)),
-            )
             | (TypeSignature::CallableType(_), TypeSignature::CallableType(_))
+            | (TypeSignature::PrincipalType, TypeSignature::CallableType(_))
+            | (TypeSignature::CallableType(_), TypeSignature::PrincipalType)
             | (TypeSignature::TraitReferenceType(_), TypeSignature::TraitReferenceType(_)) => {
                 for &l in locals.iter().rev() {
                     builder.local_set(l);
@@ -223,7 +225,7 @@ impl WasmGenerator {
             }
             _ => {
                 return Err(GeneratorError::TypeError(format!(
-                    "Incompatible types for duck typing:\n\t{og_ty}\n\t{target_ty}"
+                    "Incompatible types for duck typing:\n\t{og_ty:?}\n\t{target_ty:?}"
                 )))
             }
         }
@@ -261,6 +263,7 @@ mod tests {
     };
     use clarity::vm::Value;
 
+    use crate::tools::crosscheck_multi_contract;
     use crate::wasm_generator::WasmGenerator;
 
     fn duck_type_test(value: &Value, original_ty: &TypeSignature, target_ty: &TypeSignature) {
@@ -504,5 +507,33 @@ mod tests {
         ));
 
         duck_type_test(&value, &og_ty, &target_ty);
+    }
+
+    #[test]
+    fn duck_typing_principal_and_callable() {
+        let foo = "
+            (define-trait t
+                ((foo () (response bool uint)))
+            )
+
+            (define-public (foo) (ok true))
+        ";
+
+        let bar = r#"
+            (use-trait foo-trait .foo.t)
+
+            (define-constant callee .foo)
+
+            (define-private (call-it (t <foo-trait>))
+                (contract-call? t foo)
+            )
+
+            (call-it callee)
+        "#;
+
+        crosscheck_multi_contract(
+            &[("foo".into(), foo), ("bar".into(), bar)],
+            Ok(Some(Value::okay_true())),
+        );
     }
 }

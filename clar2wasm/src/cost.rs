@@ -264,6 +264,7 @@ pub trait ChargeGenerator {
                 ClarityVersion::Clarity1 => clar1::WORD_COSTS.get(&word_name),
                 ClarityVersion::Clarity2 => clar2::WORD_COSTS.get(&word_name),
                 ClarityVersion::Clarity3 => clar3::WORD_COSTS.get(&word_name),
+                ClarityVersion::Clarity4 => todo!("Clarity4 implementation"),
             };
 
             match maybe_word_cost {

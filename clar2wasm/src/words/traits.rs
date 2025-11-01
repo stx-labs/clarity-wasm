@@ -279,12 +279,11 @@ mod tests {
         let contract_context = env.get_contract_context("impl-trait").unwrap();
         assert!(contract_context
             .implemented_traits
-            .get(&TraitIdentifier::new(
+            .contains(&TraitIdentifier::new(
                 StandardPrincipalData::transient(),
                 "my-trait".into(),
                 "my-trait".into(),
-            ))
-            .is_some());
+            )));
     }
 
     #[test]

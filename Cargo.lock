@@ -431,6 +431,7 @@ dependencies = [
  "clap",
  "clar2wasm",
  "clarity",
+ "clarity-types",
  "criterion",
  "hex",
  "lazy_static",
@@ -452,8 +453,9 @@ dependencies = [
 [[package]]
 name = "clarity"
 version = "2.3.0"
-source = "git+https://github.com/stacks-network/stacks-core?branch=feat%2Fclarity-wasm-develop#a62c6f30fcf37067388e9cea51ce704cd2a64802"
+source = "git+https://github.com/stacks-network/stacks-core?branch=feat%2Fclarity-wasm-develop#6e2efe2f7a5af8859bc9b7f447d21c78401ff224"
 dependencies = [
+ "clarity-types",
  "hashbrown 0.15.5",
  "integer-sqrt",
  "lazy_static",
@@ -467,6 +469,22 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "serde_stacker",
+ "slog",
+ "stacks-common",
+ "wasmtime",
+]
+
+[[package]]
+name = "clarity-types"
+version = "0.0.1"
+source = "git+https://github.com/stacks-network/stacks-core?branch=feat%2Fclarity-wasm-develop#6e2efe2f7a5af8859bc9b7f447d21c78401ff224"
+dependencies = [
+ "lazy_static",
+ "regex",
+ "rusqlite",
+ "serde",
+ "serde_derive",
+ "serde_json",
  "slog",
  "stacks-common",
  "wasmtime",
@@ -819,7 +837,6 @@ version = "2.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "115531babc129696a58c64a4fef0a8bf9e9698629fb97e9e40767d235cfbcd53"
 dependencies = [
- "serde",
  "signature",
 ]
 
@@ -831,7 +848,6 @@ checksum = "70e796c081cee67dc755e1a36a0a172b897fab85fc3f6bc48307991f64e4eca9"
 dependencies = [
  "curve25519-dalek",
  "ed25519",
- "serde",
  "sha2 0.10.9",
  "subtle",
 ]
@@ -1477,6 +1493,7 @@ dependencies = [
  "base64 0.22.1",
  "digest 0.9.0",
  "hmac-drbg",
+ "lazy_static",
  "libsecp256k1-core",
  "libsecp256k1-gen-ecmult",
  "libsecp256k1-gen-genmult",
@@ -2384,18 +2401,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8347046d4ebd943127157b94d63abb990fcf729dc4e9978927fdf4ac3c998d06"
 
 [[package]]
-name = "slog-json"
-version = "2.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e1e53f61af1e3c8b852eef0a9dee29008f55d6dd63794f3f12cef786cf0f219"
-dependencies = [
- "serde",
- "serde_json",
- "slog",
- "time",
-]
-
-[[package]]
 name = "slog-term"
 version = "2.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2452,7 +2457,7 @@ dependencies = [
 [[package]]
 name = "stacks-common"
 version = "0.0.2"
-source = "git+https://github.com/stacks-network/stacks-core?branch=feat%2Fclarity-wasm-develop#a62c6f30fcf37067388e9cea51ce704cd2a64802"
+source = "git+https://github.com/stacks-network/stacks-core?branch=feat%2Fclarity-wasm-develop#6e2efe2f7a5af8859bc9b7f447d21c78401ff224"
 dependencies = [
  "chrono",
  "curve25519-dalek",
@@ -2472,7 +2477,6 @@ dependencies = [
  "sha2 0.10.9",
  "sha3",
  "slog",
- "slog-json",
  "slog-term",
  "time",
  "toml",
