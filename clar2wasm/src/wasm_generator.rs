@@ -291,7 +291,7 @@ fn get_function(module: &Module, name: &str) -> Result<FunctionId, GeneratorErro
     })
 }
 
-pub(crate) struct BorrowedLocal {
+pub struct BorrowedLocal {
     id: LocalId,
     ty: ValType,
     pool: Rc<RefCell<HashMap<ValType, Vec<LocalId>>>>,
@@ -1047,7 +1047,7 @@ impl WasmGenerator {
         (offset, size)
     }
 
-    pub(crate) fn borrow_local(&mut self, ty: ValType) -> BorrowedLocal {
+    pub fn borrow_local(&mut self, ty: ValType) -> BorrowedLocal {
         let reuse = (*self.local_pool)
             .borrow_mut()
             .get_mut(&ty)
