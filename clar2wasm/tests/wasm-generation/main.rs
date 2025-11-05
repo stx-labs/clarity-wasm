@@ -31,6 +31,7 @@ pub mod tuple;
 pub mod values;
 
 use std::env;
+use std::ops::Deref;
 
 const DEFAULT_CASES: u32 = 10;
 
@@ -111,6 +112,14 @@ impl From<Value> for PropValue {
 impl From<PropValue> for Value {
     fn from(value: PropValue) -> Self {
         value.0
+    }
+}
+
+impl Deref for PropValue {
+    type Target = Value;
+
+    fn deref(&self) -> &Self::Target {
+        self.inner()
     }
 }
 
