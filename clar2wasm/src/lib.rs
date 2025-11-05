@@ -22,6 +22,7 @@ mod words;
 pub mod datastore;
 pub mod tools;
 
+pub mod copy;
 mod debug_msg;
 pub mod duck_type;
 mod error_mapping;
