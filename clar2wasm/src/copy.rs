@@ -179,4 +179,187 @@ impl WasmGenerator {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use clarity_types::types::{PrincipalData, TupleData, TypeSignature};
+    use clarity_types::Value;
+
+    use crate::wasm_generator::WasmGenerator;
+    use crate::wasm_utils::get_type_in_memory_size;
+
+    fn copy_test(value: &Value, ty: &TypeSignature) {
+        let mut gen = WasmGenerator::empty();
+
+        gen.create_module(ty, |gen, builder| {
+            let memory = gen.get_memory().expect("couldn't find memory");
+
+            let copy_offset_int = 65536 - get_type_in_memory_size(ty, true);
+            let copy_offset = gen.module.locals.add(walrus::ValType::I32);
+
+            gen.pass_value(builder, value, ty)
+                .expect("failed to write instructions for passed value");
+
+            let value_locals = gen.save_to_locals(builder, ty, true);
+
+            builder.i32_const(copy_offset_int).local_set(copy_offset);
+
+            gen.copy_value(builder, ty, &value_locals, copy_offset)
+                .expect("couldn't copy the value");
+
+            // We memset the memory before the copied value to 0 to make sure we don't reuse
+            // any part of the original value.
+            builder
+                .i32_const(0)
+                .i32_const(0)
+                .i32_const(copy_offset_int)
+                .memory_fill(memory);
+
+            for l in value_locals {
+                builder.local_get(l);
+            }
+        });
+
+        let res = gen.execute_module(ty);
+        assert_eq!(value, &res);
+    }
+
+    #[test]
+    fn copy_int() {
+        // should be a no-op
+        let v = Value::Int(42);
+        let ty = TypeSignature::type_of(&v).unwrap();
+        copy_test(&v, &ty);
+    }
+
+    #[test]
+    fn copy_buffer() {
+        let v = Value::buff_from(vec![1, 2, 3, 4, 5]).unwrap();
+        let ty = TypeSignature::type_of(&v).unwrap();
+        copy_test(&v, &ty);
+    }
+
+    #[test]
+    fn copy_principal() {
+        let v = PrincipalData::parse("STB44HYPYAT2BB2QE513NSP81HTMYWBJP02HPGK6.foobar")
+            .unwrap()
+            .into();
+        let ty = TypeSignature::type_of(&v).unwrap();
+        copy_test(&v, &ty);
+    }
+
+    #[test]
+    fn copy_string_ascii() {
+        let v = Value::string_ascii_from_bytes(b"Hello, World!".to_vec()).unwrap();
+        let ty = TypeSignature::type_of(&v).unwrap();
+        copy_test(&v, &ty);
+    }
+
+    #[test]
+    fn copy_string_utf8() {
+        let v = Value::string_utf8_from_bytes(
+            "Hello, 🌍! 你好, Привет, صباح الخير!"
+                .to_owned()
+                .into_bytes(),
+        )
+        .unwrap();
+        let ty = TypeSignature::type_of(&v).unwrap();
+        copy_test(&v, &ty);
+    }
+
+    #[test]
+    fn copy_some_string_utf8() {
+        let v = Value::some(
+            Value::string_utf8_from_bytes(
+                "Hello, 🌍! 你好, Привет, صباح الخير!"
+                    .to_owned()
+                    .into_bytes(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let ty = TypeSignature::type_of(&v).unwrap();
+        copy_test(&v, &ty);
+    }
+
+    #[test]
+    fn copy_ok_string_utf8() {
+        let v = Value::okay(
+            Value::string_utf8_from_bytes(
+                "Hello, 🌍! 你好, Привет, صباح الخير!"
+                    .to_owned()
+                    .into_bytes(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let ty = TypeSignature::new_response(
+            TypeSignature::SequenceType(clarity_types::types::SequenceSubtype::StringType(
+                clarity_types::types::StringSubtype::UTF8(100u32.try_into().unwrap()),
+            )),
+            TypeSignature::IntType,
+        )
+        .unwrap();
+        copy_test(&v, &ty);
+    }
+
+    #[test]
+    fn copy_err_string_utf8() {
+        let v = Value::error(
+            Value::string_utf8_from_bytes(
+                "Hello, 🌍! 你好, Привет, صباح الخير!"
+                    .to_owned()
+                    .into_bytes(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let ty = TypeSignature::new_response(
+            TypeSignature::IntType,
+            TypeSignature::SequenceType(clarity_types::types::SequenceSubtype::StringType(
+                clarity_types::types::StringSubtype::UTF8(100u32.try_into().unwrap()),
+            )),
+        )
+        .unwrap();
+        copy_test(&v, &ty);
+    }
+
+    #[test]
+    fn copy_list_int() {
+        let v = Value::cons_list_unsanitized((0i128..=5).map(Value::Int).collect()).unwrap();
+        let ty = TypeSignature::list_of(TypeSignature::IntType, 100).unwrap();
+        copy_test(&v, &ty);
+    }
+
+    #[test]
+    fn copy_list_buff() {
+        let v =
+            Value::cons_list_unsanitized((0u8..=125).map(Value::buff_from_byte).collect()).unwrap();
+        let ty = TypeSignature::type_of(&v).unwrap();
+        copy_test(&v, &ty);
+    }
+
+    #[test]
+    fn copy_tuple() {
+        let v = TupleData::from_data(vec![
+            ("uint".into(), Value::UInt(5)),
+            ("buff".into(), Value::buff_from(vec![52, 53, 54]).unwrap()),
+            (
+                "list".into(),
+                Value::cons_list_unsanitized((1u8..10u8).map(Value::buff_from_byte).collect())
+                    .unwrap(),
+            ),
+            (
+                "tuple".into(),
+                TupleData::from_data(vec![
+                    ("subint".into(), Value::Int(0)),
+                    ("subbool".into(), Value::Bool(true)),
+                ])
+                .unwrap()
+                .into(),
+            ),
+        ])
+        .unwrap()
+        .into();
+        let ty = TypeSignature::type_of(&v).unwrap();
+        copy_test(&v, &ty);
+    }
+}
