@@ -7,7 +7,7 @@ use clarity::vm::types::{
     QualifiedContractIdentifier, SequenceData, SequenceSubtype, TypeSignature,
 };
 use clarity::vm::{ClarityVersion, Value};
-use walrus::{FunctionBuilder, InstrSeqBuilder};
+use walrus::{FunctionBuilder, InstrSeqBuilder, MemoryId};
 use wasmtime::{Engine, Module, Store};
 
 use crate::linker::dummy_linker;
@@ -28,6 +28,12 @@ impl WasmGenerator {
         );
         WasmGenerator::new(empty_analysis)
             .expect("failed to build WasmGenerator for empty contract")
+    }
+
+    pub fn get_memory_with_pages(&mut self, pages: u32) -> MemoryId {
+        let memory = self.module.memories.iter_mut().next().unwrap();
+        memory.initial = pages;
+        memory.id()
     }
 
     /// Adds the instructions to have a value of some type on top of the stack.
