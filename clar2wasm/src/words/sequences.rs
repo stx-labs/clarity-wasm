@@ -671,8 +671,6 @@ impl ComplexWord for Map {
             .ok_or_else(|| GeneratorError::TypeError("list expression must be typed".to_owned()))?
             .clone();
 
-        eprintln!("TY: {ty:?}");
-
         let (return_element_type, return_list_max_size) =
             if let TypeSignature::SequenceType(SequenceSubtype::ListType(list_type)) = &ty {
                 (list_type.get_list_item_type(), list_type.get_max_len())
@@ -683,7 +681,6 @@ impl ComplexWord for Map {
             };
 
         let (result_offset, _len) = generator.create_call_stack_local(builder, &ty, true, true);
-        eprintln!("LEN: {_len}");
 
         let result_length = generator.borrow_local(ValType::I32);
         builder.i32_const(0).local_set(*result_length);
@@ -696,7 +693,7 @@ impl ComplexWord for Map {
             builder
                 .local_get(result_offset)
                 .i32_const(dbg!(
-                    (get_type_size(return_element_type) * return_list_max_size as i32)
+                    get_type_size(dbg!(return_element_type)) * dbg!(return_list_max_size) as i32
                 ))
                 .binop(BinaryOp::I32Add)
                 .local_set(l);
@@ -911,7 +908,7 @@ impl ComplexWord for Map {
                     fname,
                     &user_defined_return_type,
                     Some(return_element_type),
-                    None,
+                    in_memory_offset,
                 )?;
             }
 
@@ -924,9 +921,9 @@ impl ComplexWord for Map {
             )? as i32;
 
             // Finally, we update all our current locals for the next loop turn
-            loop_
-                .local_get(*current_stack_pointer)
-                .global_set(generator.stack_pointer);
+            // loop_
+            //     .local_get(*current_stack_pointer)
+            //     .global_set(generator.stack_pointer);
             loop_
                 .local_get(*result_length)
                 .i32_const(return_element_size)
@@ -2977,16 +2974,36 @@ mod tests {
 
     #[test]
     fn map_cannot_oom() {
-        let snippet = "
-            (define-private (foo (a (list 100 {CgKqvgr: (buff 79),})) (b {CgKqvgr: (buff 79),}))
-                (append a b)
-            ) 
+        // let snippet = "
+        //     (define-private (foo (a (list 100 (buff 79))) (b (buff 79)))
+        //         (append a b)
+        //     )
 
-            (map foo (list (list (tuple (CgKqvgr 0x7d008ba1f4ed1955af2b67c290f7875aac0014b5d271a69e9b3b7c1d569599eb1d44673f4a63bdc33cc903933bf4c08cfd9ed861fe53767db39c6faf6e1c156433295e75bb24bed21180fdfeb8ce9d)) (tuple (CgKqvgr 0x3c494e7db0dfab3592837879dbf942c47a63afc13aab52e84cb26d9598fc7bf5ab0944da410957e2875630a00044821340b25bce91f9d40756db18e559ede1aa8f9b8dae6e7ea5844e3b2c8e0d785f))) (list (tuple (CgKqvgr 0x4baa30e193557d264bf9221b85f1c6bc0785df4af8dac870c8a2f9c67b112a5d7cb747a95f96c828553586e8abf2961a5c8a4e10597e7571b7158d0194de9d561feb634adf6c91887e71dc2a0d978c)) (tuple (CgKqvgr 0xc4cb3cbe486c51fd1214ef7f70b4d9ef5a5db64b67a3809d80c654262d6ce7fdfbc7a0955c5dd424981eda828b40b5840cf628259c24e64c3a43e5817d13bf24976760f3f76f0349601e149ee37511)) (tuple (CgKqvgr 0xd946bad7920fc3edc8f8959bf9a9bc781aebbd4f1fa7b880384e648eb53e4fc5feeaa4d4657184e136d7b785b9884c80c8906e5cf98eaaabec88c3d5f865f245e3a522faef4e60f61910dde9d2a402)) (tuple (CgKqvgr 0x8cdfd327efd7d3ebbb700e15dc16f138b41d4a821144aa097994a8c07e4ecd9fd2e873b0415a65ff8fbd68475a46da8cf75a46335c4719a4e6a6e08e3b6d6b6c731fd23a97d5261486955d47d57482)) (tuple (CgKqvgr 0x86dc880db5bad7366fb951bb036f544b4cea799281879392902c10109307e14fb54af576c5c2f52b7d5bc8fe0d881fee69b1c5ed15f8ae7ac8bc902bf1d8f8d9ab89338f16e00232d94dfc402a1dee)) (tuple (CgKqvgr 0xf0fb280e91628b982e4005df73e4d04dcb4f7cb99da029d46a97ad578dd27fd7d08c7efa112b1ef2933dcb7b42a31d1f8cafa5abe5a34a223796f484488970e766f9ef4d71ca578b0d5b1fa306a61f)) (tuple (CgKqvgr 0x5b361847f6b8be43704ac8872895764f8e03a1cc7df0eb9e0e7f798f2ca050173d7c8bddb194824f7bb986ad0c94877787867ee338234785f9bb0de9feb1fe2562534b9446fa34eda00278baa63862)) (tuple (CgKqvgr 0xb96a708b0bde21ddfc31e472b2af88e457d2c8a205ad5b5380e4ee524d11d4a6381852396a8b1b85392c2160003cc778f38eec653e074d93b3313f6be41617997a8b2687c95f5a699af806386c91e9)) (tuple (CgKqvgr 0xb62dd47e5f5bf920b8fc84e8351df559c3dfdda1daec131c5287e6dcb929459ba474b65d4c5a5c296e5182f2726d68224924ce54bce1cefa1243cdea7cc028fdfc06245d6b4c72a131bfae95f17192)) (tuple (CgKqvgr 0x11565d956bfec3f277b3beaeffd8b70a810052f59eb6f4cf2d4ca8509adb1ebbe786252e5842e194862ce607bdee92947939b49c01bdba7abadc6a6091798e2886e8f0aadc3223646113cf2a4a37b6))) (list (tuple (CgKqvgr 0x53e60ea1ef01c9002a6a9cd2c777482119f36baf31f0fa55f695f0690e7f065c8a32da786f7a2635bee06983773ba9807f712652922014474fd893deafd11612c96557de994cfdb68f8c0c1f721ef1)) (tuple (CgKqvgr 0x247d7c5cf35c73ca5eb5c60ce7c0112013a5e85425904f62d811ea50f513129d561a1ee083b88c39500816471c35fc59e200bf63e4dedae2b1922140398754f0742918f103b95b89bfcf9d626acbb6)) (tuple (CgKqvgr 0x19bed1545914c48f0339573a77ac8d05fac795794ffdbfedadc78d2ceb1e1edd5c372990de641e41510f9cd81695de591cba7a08d80523ba26b1ac79ba1dcac5edd148b64eabea7558da5484a47b8d)) (tuple (CgKqvgr 0x4785456c87b46816fb19a6487ee97bc614abf05ca7d3a5bca66f3bc9c96de1871b3b4185f734effc86a0eafb9f0f665f6ce9b4afe228a1e980b653026b0bdddfdfe6d484da8126e1d19ec6e97e031b)) (tuple (CgKqvgr 0x259152508c6928c6e44a0ca0b75a60ccd8384357ff19221aa448a011c78317cd7eb22179271d7ebdc9dce9f2cbcd0709c54118800d2cf82d6f22228f9352a7bcf424f263ff514cea126baf9a3b3cba)) (tuple (CgKqvgr 0xb2d4ba5183fa85f85cb23a019a911faa95b79645fe763eab6031352f7405111f656871f720916db93ec5afd369a2fa880a91d05283e3ef008981980ec1cb4e8dcc500a4c361267f7a631a579e2243b))) (list (tuple (CgKqvgr 0x80fb00dee5dde4918843d329c8ec257fa29d937642413c20be2012e73d410665f9174c700f39c1c7b9fdc8f741e292c3b09beccc57a1f45c666d2f0690524fad67dc989b5f21ece3bbcb212b671e83)) (tuple (CgKqvgr 0x16c504f9675b02c2da65956d1fd6da1ac711dcba848b3d8ffdbe3ed352476ff59e36ad004dfb12ade328efd793255d654f0cb7102da6c4b0810de8b2b036186f99b97e67054b4a6e85c276b8da28da)))) (list (tuple (CgKqvgr 0x51ababa90b38940b6700791bf48329ee7bea78e9d0b59cc597a35b6681a53ddacb76efbc62fdb00cc50f13b0230494d6d3f91be7f8569831a5d546d485261188b0e1787d8fcb1cfb519c22b7f98577)) (tuple (CgKqvgr 0x3fdf5fc9c52ea0200ed5aea6fa9230c43012b22fc205372a4e101cd01d6ce624af992fa36450f06ccd6452ed16a368c983a2b5c3eddf7d79e863e90fb17c876187904cae374872f8d4b0019e927cc2)) (tuple (CgKqvgr 0x4e76293871093c0cb1182ebf3affbafb8dbb445e7183a97758190116b557f8e63fef3c758752e6e11d0caec4dce3f3abcaeb650558959f120299ccd0a06e17d9444f42bc9f7801bc13941687d84e33)) (tuple (CgKqvgr 0x35a44071d0f6479b2e51d897c8ccdcc331d03a767ecb9d17171830d75ba065229e5ba88bdf299f69290ff17c290d9ab2354122fd7f74d991cb0c19033123991bb453872484b333aa79d59efc4b625a)) (tuple (CgKqvgr 0x1bfaa564fca25d8ab6f6d5b71c01c2485b7286ff0218abcd827a40b14afa5d11ac400a9f742c9e9ac24e7d696fe90f955b1580718673e76bc2389b33b547a85ef39dba5bd6ec12fbf395f8b5759be8)) (tuple (CgKqvgr 0x723997e5a77d3389c2f2bcdad63ebb3f03cb012ae0c8a1e7adf65191a9f424aa7804114c44575221247e2a865bcc4b82e2572bf518078ccef655fbcc7b371ca04b61eb833039a8b88fc680e6cee0fe)) (tuple (CgKqvgr 0x23d80ff91c979ef484bd47b146e9c23e06357baf57c56c59a1603deaaccc89c7ec698219e6f0aa80c0e40400f6850dfc8376b58233b0075562ea532d0769957049d61856f46b0e54fdab3093ae3ab9)) (tuple (CgKqvgr 0xfdab1ac288936663e8c2629035542d49d1fe0dff4225fbfb44c94065a34405cfdf3a1668fa117deb867d53c44d1c975ec6f49ae30e4dc4fa155939f46bc8b026ce1734217b82936456473f997b8456)) (tuple (CgKqvgr 0x939b7f418fcec9c1deb98a1f2304bd039beba615004f4908a3b545da43705dada8bf2e4a88370c7b26ffe81797cbdc33224457c0045cd856c5c68fca0f393d0e53a1d5379450c75f4e4aa9f7b2b7c4)) (tuple (CgKqvgr 0x1e2e203068f653df8fff263c320e3ab02552e25fb37bdbbd716dc16fde00df45c75c50e2b9ecc4e5345e03a5ac05d376a563bb30e187a696393441650e17466a0ce0d7f1968f6fb46b80095602e9d1))))
-        ";
+        //     (map foo
+        //         (list
+        //             (list
+        //                 0x7d008ba1f4ed1955af2b67c290f7875aac0014b5d271a69e9b3b7c1d569599eb1d44673f4a63bdc33cc903933bf4c08cfd9ed861fe53767db39c6faf6e1c156433295e75bb24bed21180fdfeb8ce9d
+        //             )
+        //             (list
+        //                 0x4baa30e193557d264bf9221b85f1c6bc0785df4af8dac870c8a2f9c67b112a5d7cb747a95f96c828553586e8abf2961a5c8a4e10597e7571b7158d0194de9d561feb634adf6c91887e71dc2a0d978c
+        //             )
+
+        //         )
+        //         (list
+        //             0x51ababa90b38940b6700791bf48329ee7bea78e9d0b59cc597a35b6681a53ddacb76efbc62fdb00cc50f13b0230494d6d3f91be7f8569831a5d546d485261188b0e1787d8fcb1cfb519c22b7f98577
+        //             0x4e76293871093c0cb1182ebf3affbafb8dbb445e7183a97758190116b557f8e63fef3c758752e6e11d0caec4dce3f3abcaeb650558959f120299ccd0a06e17d9444f42bc9f7801bc13941687d84e33
+        //         )
+        //     )
+        // ";
+
+        let snippet = std::fs::read_to_string("../try.clar").unwrap();
+
+        let result = crate::tools::TestEnvironment::default().interpret(&snippet);
 
         let mut env = crate::tools::TestEnvironment::default();
-        let res = env.evaluate(snippet);
-        eprintln!("{res:?}");
+        let compiled = env.evaluate(&snippet);
+        eprintln!("{compiled:?}");
+
+        assert_eq!(result, compiled);
     }
 }

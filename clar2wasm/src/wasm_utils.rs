@@ -482,11 +482,11 @@ pub fn read_from_wasm(
             }
         }
         TypeSignature::SequenceType(SequenceSubtype::BufferType(_b)) => {
-            let mut buffer: Vec<u8> = vec![0; length as usize];
+            let mut buffer: Vec<u8> = vec![0; dbg!(length) as usize];
             memory
                 .read(store, offset as usize, &mut buffer)
                 .map_err(|e| Error::Wasm(WasmError::Runtime(e.into())))?;
-            Value::buff_from(buffer)
+            dbg!(Value::buff_from(buffer))
         }
         TypeSignature::SequenceType(SequenceSubtype::ListType(list)) => {
             let elem_ty = list.get_list_item_type();
