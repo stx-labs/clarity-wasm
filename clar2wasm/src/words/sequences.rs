@@ -10,8 +10,9 @@ use crate::check_args;
 use crate::cost::WordCharge;
 use crate::error_mapping::ErrorMap;
 use crate::wasm_generator::{
-    add_placeholder_for_clarity_type, clar2wasm_ty, drop_value, type_from_sequence_element,
-    ArgumentsExt, GeneratorError, SequenceElementType, WasmGenerator,
+    add_placeholder_for_clarity_type, clar2wasm_ty, drop_value, has_in_memory_type,
+    type_from_sequence_element, ArgumentsExt, BorrowedLocal, GeneratorError, SequenceElementType,
+    WasmGenerator,
 };
 use crate::wasm_utils::{check_argument_count, ArgumentCountCheck};
 use crate::words::{self, ComplexWord, Word};
@@ -636,282 +637,324 @@ impl ComplexWord for Map {
             ArgumentCountCheck::AtLeast
         );
 
-        let fname = args.get_name(0)?;
-
-        let seq_ty = generator
-            .get_expr_type(args.get_expr(1)?)
-            .ok_or_else(|| GeneratorError::TypeError("list expression must be typed".to_owned()))?
-            .clone();
-
-        // WORKAROUND: Get the type of the function being called, and set the
-        // type of the sequence value to match the functions parameter type.
-        // This is a workaround for the typechecker not being able to infer
-        // the complete type of initial value.
-        if let TypeSignature::SequenceType(SequenceSubtype::ListType(lt)) = &seq_ty {
-            let size = get_type_size(lt.get_list_item_type()) as u32;
-
-            if let Some(FunctionType::Fixed(fixed)) = generator.get_function_type(fname) {
-                let function_ty = fixed
-                    .args
-                    .first()
-                    .ok_or_else(|| {
-                        GeneratorError::TypeError("expected function with 2 arguments".into())
-                    })?
-                    .signature
-                    .clone();
-
-                match ListTypeData::new_list(function_ty, size) {
-                    Ok(list_type_data) => {
-                        generator.set_expr_type(
-                            args.get_expr(1)?,
-                            TypeSignature::SequenceType(SequenceSubtype::ListType(list_type_data)),
-                        )?;
-                    }
-                    Err(_) => {
-                        return Err(GeneratorError::TypeError(
-                            "Failed to workaround and create a list type".into(),
-                        ));
-                    }
-                }
-            }
+        struct MapArg {
+            element_type: SequenceElementType,
+            element_size: i32,
+            offset: BorrowedLocal,
+            length: BorrowedLocal,
         }
+
+        let fname = args.get_name(0)?;
 
         let ty = generator
             .get_expr_type(expr)
             .ok_or_else(|| GeneratorError::TypeError("list expression must be typed".to_owned()))?
             .clone();
 
-        let return_element_type =
+        let (return_element_type, return_list_max_size) =
             if let TypeSignature::SequenceType(SequenceSubtype::ListType(list_type)) = &ty {
-                list_type.get_list_item_type()
+                (list_type.get_list_item_type(), list_type.get_max_len())
             } else {
                 return Err(GeneratorError::TypeError(format!(
                     "Expected list type for list expression, but found: {ty:?}"
                 )));
             };
 
-        let return_element_size = get_type_size(return_element_type);
+        let (result_offset, _len) = generator.create_call_stack_local(builder, &ty, true, true);
 
-        let min_num_elements = generator.module.locals.add(ValType::I32);
-        builder.i32_const(i32::MAX);
-        builder.local_set(min_num_elements);
+        let result_length = generator.borrow_local(ValType::I32);
+        builder.i32_const(0).local_set(*result_length);
 
-        let mut input_offsets = vec![];
-        let mut input_element_types = vec![];
-        let mut input_element_sizes = vec![];
-        let mut input_num_elements = vec![];
+        let current_result_offset = generator.borrow_local(ValType::I32);
 
-        for arg in args.iter().skip(1) {
-            // get the type of the seq, and the sizes.
+        // if result needs to be copied back to result_offset, we will copy at the offset in this local
+        let in_memory_offset = has_in_memory_type(return_element_type).then(|| {
+            let l = generator.module.locals.add(ValType::I32);
+            builder
+                .local_get(result_offset)
+                .i32_const(get_type_size(return_element_type) * return_list_max_size as i32)
+                .binop(BinaryOp::I32Add)
+                .local_set(l);
+            l
+        });
 
-            let (element_ty, element_size) = match generator
-                .get_expr_type(arg)
-                .ok_or_else(|| {
-                    GeneratorError::TypeError("sequence expression must be typed".to_owned())
-                })?
-                .clone()
-            {
-                TypeSignature::SequenceType(SequenceSubtype::ListType(lt)) => {
-                    let element_ty = lt.get_list_item_type().clone();
-                    let element_size = get_type_size(&element_ty);
-
-                    (SequenceElementType::Other(element_ty), element_size)
-                }
-                TypeSignature::SequenceType(SequenceSubtype::BufferType(_))
-                | TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::ASCII(
-                    _,
-                ))) => (SequenceElementType::Byte, 1),
-                TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::UTF8(
-                    _,
-                ))) => (SequenceElementType::UnicodeScalar, 4),
-                _ => {
-                    return Err(GeneratorError::TypeError(
-                        "expected sequence type".to_string(),
-                    ));
-                }
-            };
-
-            input_element_types.push(element_ty);
-            input_element_sizes.push(element_size);
-
-            generator.traverse_expr(builder, arg)?;
-            // [ offset, length ]
-            builder.i32_const(element_size);
-            // [ offset, length, element_size ]
-            builder.binop(ir::BinaryOp::I32DivS);
-            // [ offset, num_elements ]
-
-            let num_elements = generator.module.locals.add(ValType::I32);
-            builder.local_tee(num_elements);
-            builder.local_get(num_elements);
-            // [ offset, num_elements, num_elements ]
-            input_num_elements.push(num_elements);
-
-            builder.local_get(min_num_elements);
-            // [ offset, num_elements, num_elements, min_num_elements ]
-
-            builder.binop(ir::BinaryOp::I32LeS);
-            // [ offset, num_elements, is_less ]
-
-            builder.if_else(
-                InstrSeqType::new(&mut generator.module.types, &[ValType::I32], &[]),
-                |t| {
-                    t.local_set(min_num_elements);
-                },
-                |e| {
-                    e.drop();
-                },
-            );
-            // [ offset ]
-
-            let offset = generator.module.locals.add(ValType::I32);
-            builder.local_set(offset);
-            // [ ]
-            input_offsets.push(offset);
-        }
-
-        // Allocate worst case size to ensure enough stack space is reserved at compile time
-        let (output_base, _) = generator.create_call_stack_local(builder, &ty, false, true);
-
-        // Allocate space on the call stack for the output list.
-        let output_offset = generator.module.locals.add(ValType::I32);
-        builder.local_get(output_base).local_set(output_offset);
-
-        // Create an index to count the number of elements to loop over.
-        let index = generator.module.locals.add(ValType::I32);
-        builder.i32_const(0).local_set(index);
-
-        self.charge(generator, builder, min_num_elements)?;
-
-        // Loop over the min_num_elements of the input sequences, calling the
-        // function on each set of elements. The result of the function call
-        // will be written to the output sequence. The loop_exit block allows
-        // us to put the condition at the top of the loop.
-        let mut loop_exit = builder.dangling_instr_seq(None);
-        let loop_exit_id = loop_exit.id();
-        let mut loop_ = loop_exit.dangling_instr_seq(None);
-        let loop_id = loop_.id();
-
-        // See if we're calling a simple function, and if it's variadic
-
-        let mut simple = words::lookup_simple(fname);
-        let mut variadic = false;
-
-        if simple.is_none() {
-            if let Some(simple_variadic) = words::lookup_variadic_simple(fname) {
-                variadic = true;
-                simple = Some(simple_variadic)
-            }
-        }
-
-        let arg_types: Vec<_> = input_element_types
+        // Evaluating all arguments and assigning the results to each maparg
+        let mapargs: Vec<MapArg> = args
             .iter()
-            .map(type_from_sequence_element)
-            .collect();
+            .skip(1)
+            .map(|arg| {
+                let element_type: SequenceElementType = generator
+                    .get_expr_type(arg)
+                    .ok_or_else(|| {
+                        GeneratorError::TypeError("sequence expression must be typed".to_owned())
+                    })?
+                    .try_into()?;
+                let element_size = element_type.type_size();
 
-        // Check if we've reached the min_num_elements
-        loop_
-            .local_get(index)
-            .local_get(min_num_elements)
-            .binop(BinaryOp::I32GeU)
-            .br_if(loop_exit_id);
+                let offset = generator.borrow_local(ValType::I32);
+                let length = generator.borrow_local(ValType::I32);
 
-        // For each input sequence, load the next element, and adjust the
-        // offset for the next iteration.
-        for (i, offset) in input_offsets.iter().enumerate() {
-            match &input_element_types[i] {
-                SequenceElementType::Other(elem_ty) => {
-                    generator.read_from_memory(&mut loop_, *offset, 0, elem_ty)?;
-                }
-                SequenceElementType::Byte => {
-                    // The element type is a byte, so we can just push the
-                    // offset and length (1) to the stack.
-                    loop_.local_get(*offset).i32_const(1);
-                }
-                SequenceElementType::UnicodeScalar => {
-                    // The element type is a 32-bit unicode scalar, so we can just push the
-                    // offset and length (4) to the stack.
-                    loop_.local_get(*offset).i32_const(4);
+                generator.traverse_expr(builder, arg)?;
+                builder.local_set(*length).local_set(*offset);
+
+                Ok(MapArg {
+                    element_type,
+                    element_size,
+                    offset,
+                    length,
+                })
+            })
+            .collect::<Result<_, _>>()?;
+
+        // We need the resulting number of elements for the cost tracking (and since we will compute it, we can use it for looping later)
+        let num_elements = generator.borrow_local(ValType::I32);
+        match mapargs.as_slice() {
+            [single_arg] => {
+                builder
+                    .local_get(*single_arg.length)
+                    .i32_const(single_arg.element_size)
+                    .binop(BinaryOp::I32DivU)
+                    .local_set(*num_elements);
+            }
+            [first_arg, rest_args @ ..] => {
+                builder
+                    .local_get(*first_arg.length)
+                    .i32_const(first_arg.element_size)
+                    .binop(BinaryOp::I32DivU)
+                    .local_set(*num_elements);
+
+                let tmp = generator.borrow_local(ValType::I32);
+                for MapArg {
+                    element_size,
+                    length,
+                    ..
+                } in rest_args
+                {
+                    // putting the actual minimum length on the stack
+                    builder.local_get(*num_elements);
+
+                    // computing next sequence length
+                    builder
+                        .local_get(**length)
+                        .i32_const(*element_size)
+                        .binop(BinaryOp::I32DivU)
+                        .local_tee(*tmp);
+
+                    // checking if actual minimum is still smaller
+                    builder
+                        .local_get(*num_elements)
+                        .local_get(*tmp)
+                        .binop(BinaryOp::I32LtU);
+
+                    // check which is smaller and assign
+                    builder.select(None).local_set(*num_elements);
                 }
             }
+            _ => {
+                return Err(GeneratorError::TypeError(
+                    "There should be at least one sequence argument in a map".to_owned(),
+                ))
+            }
+        }
 
-            // If we have variadics, we need to interleave the calls
-            // if the arg length is 1, this is a no-op
-            if let Some(simple) = simple {
-                if variadic && i > 0 {
-                    simple.visit(
+        // cost tracking: depends on the number of elements in the result
+        self.charge(generator, builder, *num_elements)?;
+
+        // here is the map loop: we go through each corresponding element of each sequence and apply the function
+        let loop_id = {
+            let mut loop_ = builder.dangling_instr_seq(None);
+            let loop_id = loop_.id();
+
+            let current_stack_pointer = generator.borrow_local(ValType::I32);
+
+            loop_
+                .global_get(generator.stack_pointer)
+                .local_set(*current_stack_pointer);
+
+            // Calling the function with its arguments.
+            // We need to handle the arguments of the function differently depending
+            // on the function kind: simple, variadic, or user defined.
+            if let Some(simple_fn) = words::lookup_simple(fname) {
+                // A simple function: we need to load the already evaluated arguments one by one,
+                // then visit the simple function.
+                for MapArg {
+                    element_type,
+                    offset,
+                    ..
+                } in mapargs.iter()
+                {
+                    element_type.load(generator, &mut loop_, **offset)?;
+                }
+                simple_fn.visit(
+                    generator,
+                    &mut loop_,
+                    mapargs
+                        .iter()
+                        .map(|MapArg { element_type, .. }| element_type.into())
+                        .collect::<Vec<_>>()
+                        .as_slice(),
+                    return_element_type,
+                )?;
+
+                // we need to copy the result to the preallocated space if needed.
+                if let Some(copy_offset) = &in_memory_offset {
+                    let locals = generator.save_to_locals(&mut loop_, return_element_type, true);
+                    generator.copy_value(&mut loop_, return_element_type, &locals, *copy_offset)?;
+                    locals.into_iter().for_each(|l| {
+                        loop_.local_get(l);
+                    });
+                }
+            } else if let Some(variadic) = words::lookup_variadic_simple(fname) {
+                // A variadic function: we need to interleave the already evaluated arguments with the function.
+                let Some((
+                    MapArg {
+                        element_type: first_element_type,
+                        offset: first_offset,
+                        ..
+                    },
+                    rest_args,
+                )) = mapargs.split_first()
+                else {
+                    return Err(GeneratorError::TypeError(
+                        "map needs at least one sequence argument".to_owned(),
+                    ));
+                };
+                // if we have only one sequence, we use the function directly, otherwise we load each following arguments
+                // and interleave them with the variadic function.
+                first_element_type.load(generator, &mut loop_, **first_offset)?;
+                if rest_args.is_empty() {
+                    variadic.visit(
                         generator,
                         &mut loop_,
-                        &arg_types[i - 1..=i],
+                        &[first_element_type.into()],
                         return_element_type,
                     )?;
-                }
-            }
-
-            // Increment the offset by the size of the element.
-            loop_
-                .local_get(*offset)
-                .i32_const(input_element_sizes[i])
-                .binop(BinaryOp::I32Add)
-                .local_set(*offset);
-        }
-
-        if let Some(simple) = simple {
-            // If not variadic, _or_ if the arg length is one (unary operations)
-            if !variadic || arg_types.len() == 1 {
-                simple.visit(generator, &mut loop_, &arg_types, return_element_type)?;
-            }
-        } else {
-            let func_return_ty =
-                if let Some(FunctionType::Fixed(FixedFunction { returns, .. })) =
-                    generator.get_function_type(fname)
-                {
-                    returns
                 } else {
-                    return_element_type
+                    for (
+                        MapArg {
+                            element_type: ty1, ..
+                        },
+                        MapArg {
+                            element_type: ty2,
+                            offset: offset2,
+                            ..
+                        },
+                    ) in mapargs.iter().zip(rest_args)
+                    {
+                        ty2.load(generator, &mut loop_, **offset2)?;
+                        variadic.visit(
+                            generator,
+                            &mut loop_,
+                            &[ty1.into(), ty2.into()],
+                            return_element_type,
+                        )?;
+                    }
                 }
-                .clone();
-            // Call user defined function.
-            generator.visit_call_user_defined(
+
+                // we need to copy the result to the preallocated space if needed.
+                if let Some(copy_offset) = &in_memory_offset {
+                    let locals = generator.save_to_locals(&mut loop_, return_element_type, true);
+                    generator.copy_value(&mut loop_, return_element_type, &locals, *copy_offset)?;
+                    locals.into_iter().for_each(|l| {
+                        loop_.local_get(l);
+                    });
+                }
+            } else {
+                // if we have a user defined function, we have to stack all the arguments and call it.
+                let (user_defined_args_types, user_defined_return_type) = {
+                    if let Some(FunctionType::Fixed(FixedFunction { args, returns })) =
+                        generator.get_function_type(fname)
+                    {
+                        (
+                            args.iter().map(|a| a.signature.clone()).collect::<Vec<_>>(),
+                            returns.clone(),
+                        )
+                    } else {
+                        return Err(GeneratorError::TypeError(
+                            "map tries to use an undefined user function".to_owned(),
+                        ));
+                    }
+                };
+
+                for (
+                    MapArg {
+                        element_type,
+                        offset,
+                        ..
+                    },
+                    expected_arg_ty,
+                ) in mapargs.iter().zip(user_defined_args_types)
+                {
+                    element_type.load(generator, &mut loop_, **offset)?;
+                    generator.duck_type(&mut loop_, &element_type.into(), &expected_arg_ty)?;
+                }
+                generator.visit_call_user_defined(
+                    &mut loop_,
+                    fname,
+                    &user_defined_return_type,
+                    Some(return_element_type),
+                    in_memory_offset,
+                )?;
+            }
+
+            // Afer the execution of the function for an element, we have to write the result to memory.
+            let return_element_size = generator.write_to_memory(
                 &mut loop_,
-                fname,
-                &func_return_ty,
-                Some(return_element_type),
-                None,
-            )?;
-        }
+                *current_result_offset,
+                0,
+                return_element_type,
+            )? as i32;
 
-        // Write the result to the output sequence.
-        generator.write_to_memory(&mut loop_, output_offset, 0, return_element_type)?;
+            // Finally, we update all our current locals for the next loop turn
+            // loop_
+            //     .local_get(*current_stack_pointer)
+            //     .global_set(generator.stack_pointer);
+            loop_
+                .local_get(*result_length)
+                .i32_const(return_element_size)
+                .binop(BinaryOp::I32Add)
+                .local_set(*result_length);
+            loop_
+                .local_get(*current_result_offset)
+                .i32_const(return_element_size)
+                .binop(BinaryOp::I32Add)
+                .local_set(*current_result_offset);
+            for MapArg {
+                offset,
+                element_type,
+                ..
+            } in &mapargs
+            {
+                loop_
+                    .local_get(**offset)
+                    .i32_const(element_type.type_size())
+                    .binop(BinaryOp::I32Add)
+                    .local_set(**offset);
+            }
+            loop_
+                .local_get(*num_elements)
+                .i32_const(1)
+                .binop(BinaryOp::I32Sub)
+                .local_tee(*num_elements)
+                .br_if(loop_id);
 
-        // Increment the output offset by the size of the element.
-        loop_
-            .local_get(output_offset)
-            .i32_const(return_element_size)
-            .binop(BinaryOp::I32Add)
-            .local_set(output_offset);
+            loop_id
+        };
 
-        // Increment the index.
-        loop_
-            .local_get(index)
-            .i32_const(1)
-            .binop(BinaryOp::I32Add)
-            .local_tee(index);
+        // Now we insert the loop in the algorithm, and execute it only if we have at least one element in the
+        // returned list.
+        builder.local_get(*num_elements).if_else(
+            None,
+            |then| {
+                then.local_get(result_offset)
+                    .local_set(*current_result_offset);
+                then.instr(Loop { seq: loop_id });
+            },
+            |_else| {},
+        );
 
-        // Loop back to the top.
-        loop_.br(loop_id);
-
-        // Add the loop to the loop_exit block.
-        loop_exit.instr(Loop { seq: loop_id });
-
-        // Add the loop_exit block to the main block.
-        builder.instr(walrus::ir::Block { seq: loop_exit_id });
-
-        builder
-            .local_get(output_base)
-            .local_get(min_num_elements)
-            .i32_const(return_element_size)
-            .binop(ir::BinaryOp::I32Mul);
+        // we finally return the (offset, length) of the result list
+        builder.local_get(result_offset).local_get(*result_length);
 
         Ok(())
     }
@@ -2487,7 +2530,25 @@ mod tests {
     }
 
     #[test]
-    fn map_needs_ducktyping() {
+    fn map_needs_ducktyping_arg() {
+        let snippet = r#"
+            (define-private (foo (a (response int bool)))
+                a
+            )
+
+            (map foo (list (ok 1)))
+        "#;
+
+        crosscheck(
+            snippet,
+            Ok(Some(
+                Value::cons_list_unsanitized(vec![Value::okay(Value::Int(1)).unwrap()]).unwrap(),
+            )),
+        );
+    }
+
+    #[test]
+    fn map_needs_ducktyping_return() {
         let snippet = r#"
             (define-private (foo (a int))
                 (ok a)
@@ -2502,6 +2563,47 @@ mod tests {
                 Value::cons_list_unsanitized(vec![Value::okay(Value::Int(1)).unwrap()]).unwrap(),
             )),
         );
+    }
+
+    #[test]
+    fn map_needs_ducktyping_twice() {
+        let snippet = r#"
+            (define-private (foo (a (response int bool)))
+                (ok (unwrap-panic a))
+            )
+
+            (define-private (bar (a (response int principal)))
+                (ok (unwrap-panic a))
+            )
+
+            (if true
+                (map bar (map foo (list (ok 1))))
+                (list (err "unreachable"))
+            )
+        "#;
+
+        crosscheck(
+            snippet,
+            Ok(Some(
+                Value::cons_list_unsanitized(vec![Value::okay(Value::Int(1)).unwrap()]).unwrap(),
+            )),
+        );
+    }
+
+    #[test]
+    fn map_multiple_argument_needs_workaround() {
+        let snippet = "
+            (define-private (foo (a int) (b (response int int)))
+                (+ a (unwrap-panic b))
+            )
+
+            (map foo (list 1 2 3) (list (ok 1) (ok 2) (ok 3)))
+        ";
+
+        let expected =
+            Value::cons_list_unsanitized([2, 4, 6].into_iter().map(Value::Int).collect()).unwrap();
+
+        crosscheck(snippet, Ok(Some(expected)));
     }
 
     #[test]
