@@ -646,26 +646,6 @@ impl ComplexWord for Map {
 
         let fname = args.get_name(0)?;
 
-        if let Some(FunctionType::Fixed(fixed)) = generator.get_function_type(fname) {
-            for (function_arg, arg) in fixed.args.clone().into_iter().zip(&args[1..]) {
-                if let TypeSignature::SequenceType(SequenceSubtype::ListType(ltd)) =
-                    generator.get_expr_type(arg).cloned().ok_or_else(|| {
-                        GeneratorError::TypeError("map argument should be typed".to_owned())
-                    })?
-                {
-                    let workaround_ty =
-                        TypeSignature::list_of(function_arg.signature, ltd.get_max_len()).map_err(
-                            |e| {
-                                GeneratorError::TypeError(format!(
-                                    "could not create a list type for an argument in map: {e}"
-                                ))
-                            },
-                        )?;
-                    generator.set_expr_type(arg, workaround_ty)?;
-                }
-            }
-        }
-
         let ty = generator
             .get_expr_type(expr)
             .ok_or_else(|| GeneratorError::TypeError("list expression must be typed".to_owned()))?
@@ -692,9 +672,7 @@ impl ComplexWord for Map {
             let l = generator.module.locals.add(ValType::I32);
             builder
                 .local_get(result_offset)
-                .i32_const(dbg!(
-                    get_type_size(dbg!(return_element_type)) * dbg!(return_list_max_size) as i32
-                ))
+                .i32_const(get_type_size(return_element_type) * return_list_max_size as i32)
                 .binop(BinaryOp::I32Add)
                 .local_set(l);
             l
@@ -883,11 +861,14 @@ impl ComplexWord for Map {
                 }
             } else {
                 // if we have a user defined function, we have to stack all the arguments and call it.
-                let user_defined_return_type = {
-                    if let Some(FunctionType::Fixed(FixedFunction { returns, .. })) =
+                let (user_defined_args_types, user_defined_return_type) = {
+                    if let Some(FunctionType::Fixed(FixedFunction { args, returns })) =
                         generator.get_function_type(fname)
                     {
-                        returns.clone()
+                        (
+                            args.iter().map(|a| a.signature.clone()).collect::<Vec<_>>(),
+                            returns.clone(),
+                        )
                     } else {
                         return Err(GeneratorError::TypeError(
                             "map tries to use an undefined user function".to_owned(),
@@ -895,13 +876,17 @@ impl ComplexWord for Map {
                     }
                 };
 
-                for MapArg {
-                    element_type,
-                    offset,
-                    ..
-                } in mapargs.iter()
+                for (
+                    MapArg {
+                        element_type,
+                        offset,
+                        ..
+                    },
+                    expected_arg_ty,
+                ) in mapargs.iter().zip(user_defined_args_types)
                 {
                     element_type.load(generator, &mut loop_, **offset)?;
+                    generator.duck_type(&mut loop_, &element_type.into(), &expected_arg_ty)?;
                 }
                 generator.visit_call_user_defined(
                     &mut loop_,
@@ -2545,13 +2530,56 @@ mod tests {
     }
 
     #[test]
-    fn map_needs_ducktyping() {
+    fn map_needs_ducktyping_arg() {
+        let snippet = r#"
+            (define-private (foo (a (response int bool)))
+                a
+            )
+
+            (map foo (list (ok 1)))
+        "#;
+
+        crosscheck(
+            snippet,
+            Ok(Some(
+                Value::cons_list_unsanitized(vec![Value::okay(Value::Int(1)).unwrap()]).unwrap(),
+            )),
+        );
+    }
+
+    #[test]
+    fn map_needs_ducktyping_return() {
         let snippet = r#"
             (define-private (foo (a int))
                 (ok a)
             )
 
             (if true (map foo (list 1)) (list (err "unreachable")))
+        "#;
+
+        crosscheck(
+            snippet,
+            Ok(Some(
+                Value::cons_list_unsanitized(vec![Value::okay(Value::Int(1)).unwrap()]).unwrap(),
+            )),
+        );
+    }
+
+    #[test]
+    fn map_needs_ducktyping_twice() {
+        let snippet = r#"
+            (define-private (foo (a (response int bool)))
+                (ok (unwrap-panic a))
+            )
+
+            (define-private (bar (a (response int principal)))
+                (ok (unwrap-panic a))
+            )
+
+            (if true
+                (map bar (map foo (list (ok 1))))
+                (list (err "unreachable"))
+            )
         "#;
 
         crosscheck(
@@ -2970,40 +2998,5 @@ mod tests {
         );
 
         crosscheck(snippet, expected);
-    }
-
-    #[test]
-    fn map_cannot_oom() {
-        // let snippet = "
-        //     (define-private (foo (a (list 100 (buff 79))) (b (buff 79)))
-        //         (append a b)
-        //     )
-
-        //     (map foo
-        //         (list
-        //             (list
-        //                 0x7d008ba1f4ed1955af2b67c290f7875aac0014b5d271a69e9b3b7c1d569599eb1d44673f4a63bdc33cc903933bf4c08cfd9ed861fe53767db39c6faf6e1c156433295e75bb24bed21180fdfeb8ce9d
-        //             )
-        //             (list
-        //                 0x4baa30e193557d264bf9221b85f1c6bc0785df4af8dac870c8a2f9c67b112a5d7cb747a95f96c828553586e8abf2961a5c8a4e10597e7571b7158d0194de9d561feb634adf6c91887e71dc2a0d978c
-        //             )
-
-        //         )
-        //         (list
-        //             0x51ababa90b38940b6700791bf48329ee7bea78e9d0b59cc597a35b6681a53ddacb76efbc62fdb00cc50f13b0230494d6d3f91be7f8569831a5d546d485261188b0e1787d8fcb1cfb519c22b7f98577
-        //             0x4e76293871093c0cb1182ebf3affbafb8dbb445e7183a97758190116b557f8e63fef3c758752e6e11d0caec4dce3f3abcaeb650558959f120299ccd0a06e17d9444f42bc9f7801bc13941687d84e33
-        //         )
-        //     )
-        // ";
-
-        let snippet = std::fs::read_to_string("../try.clar").unwrap();
-
-        let result = crate::tools::TestEnvironment::default().interpret(&snippet);
-
-        let mut env = crate::tools::TestEnvironment::default();
-        let compiled = env.evaluate(&snippet);
-        eprintln!("{compiled:?}");
-
-        assert_eq!(result, compiled);
     }
 }
