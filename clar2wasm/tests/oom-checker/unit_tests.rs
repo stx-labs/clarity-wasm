@@ -1,4 +1,4 @@
-use clar2wasm::tools::TestEnvironment;
+use clar2wasm::tools::{interpret, TestEnvironment};
 use clarity::vm::types::{PrincipalData, TypeSignature};
 use clarity::vm::Value;
 
@@ -80,6 +80,49 @@ fn map_oom() {
                 .unwrap(),
         )),
     )
+}
+
+#[test]
+fn map_with_allocation_oom() {
+    let snippet = "
+            (define-private (foo (a (list 100 (buff 79))) (b (buff 79)))
+                (append a b)
+            )
+
+            (map foo
+                (list
+                    (list
+                        0x7d008ba1f4ed1955af2b67c290f7875aac0014b5d271a69e9b3b7c1d569599eb1d44673f4a63bdc33cc903933bf4c08cfd9ed861fe53767db39c6faf6e1c156433295e75bb24bed21180fdfeb8ce9d
+                    )
+                    (list
+                        0x4baa30e193557d264bf9221b85f1c6bc0785df4af8dac870c8a2f9c67b112a5d7cb747a95f96c828553586e8abf2961a5c8a4e10597e7571b7158d0194de9d561feb634adf6c91887e71dc2a0d978c
+                    )
+                )
+                (list
+                    0x51ababa90b38940b6700791bf48329ee7bea78e9d0b59cc597a35b6681a53ddacb76efbc62fdb00cc50f13b0230494d6d3f91be7f8569831a5d546d485261188b0e1787d8fcb1cfb519c22b7f98577
+                    0x4e76293871093c0cb1182ebf3affbafb8dbb445e7183a97758190116b557f8e63fef3c758752e6e11d0caec4dce3f3abcaeb650558959f120299ccd0a06e17d9444f42bc9f7801bc13941687d84e33
+                )
+            )
+    ";
+    let args_types = &[
+        list_of(
+            list_of(
+                TypeSignature::SequenceType(clarity_types::types::SequenceSubtype::BufferType(
+                    4u32.try_into().unwrap(),
+                )),
+                1,
+            ),
+            1,
+        ),
+        list_of(
+            TypeSignature::SequenceType(clarity_types::types::SequenceSubtype::BufferType(
+                4u32.try_into().unwrap(),
+            )),
+            1,
+        ),
+    ];
+    let expected = interpret("(list (list 0x7d008ba1f4ed1955af2b67c290f7875aac0014b5d271a69e9b3b7c1d569599eb1d44673f4a63bdc33cc903933bf4c08cfd9ed861fe53767db39c6faf6e1c156433295e75bb24bed21180fdfeb8ce9d 0x51ababa90b38940b6700791bf48329ee7bea78e9d0b59cc597a35b6681a53ddacb76efbc62fdb00cc50f13b0230494d6d3f91be7f8569831a5d546d485261188b0e1787d8fcb1cfb519c22b7f98577) (list 0x4baa30e193557d264bf9221b85f1c6bc0785df4af8dac870c8a2f9c67b112a5d7cb747a95f96c828553586e8abf2961a5c8a4e10597e7571b7158d0194de9d561feb634adf6c91887e71dc2a0d978c 0x4e76293871093c0cb1182ebf3affbafb8dbb445e7183a97758190116b557f8e63fef3c758752e6e11d0caec4dce3f3abcaeb650558959f120299ccd0a06e17d9444f42bc9f7801bc13941687d84e33))");
+    crosscheck_oom_with_non_literal_args(snippet, args_types, expected);
 }
 
 #[test]
