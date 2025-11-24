@@ -9,7 +9,7 @@ use crate::words::bindings::Let;
 use crate::words::blockinfo::{AtBlock, GetBlockInfo, GetStacksBlockInfo, GetTenureInfo};
 use crate::words::comparison::{CmpGeq, CmpGreater, CmpLeq, CmpLess};
 use crate::words::conditionals::{And, Asserts, Filter, If, Match, Or, Try, Unwrap, UnwrapErr};
-use crate::words::contract::{AsContract, ContractCall};
+use crate::words::contract::ContractCall;
 use crate::words::control_flow::{Begin, UnwrapErrPanic, UnwrapPanic};
 use crate::words::data_vars::{GetDataVar, SetDataVar};
 use crate::words::default_to::DefaultTo;
@@ -20,11 +20,13 @@ use crate::words::logical::Not;
 use crate::words::maps::{MapDelete, MapGet, MapInsert, MapSet};
 use crate::words::noop::{ContractOf, ToInt, ToUint};
 use crate::words::options::{IsNone, IsSome};
-use crate::words::principal::{IsStandard, PrincipalOf};
+use crate::words::principal::PrincipalOf;
 use crate::words::print::Print;
 use crate::words::responses::{IsErr, IsOk};
 use crate::words::secp256k1::{Recover, Verify};
-use crate::words::sequences::{Append, AsMaxLen, Concat, ElementAt, Fold, Len, ListCons, Map};
+use crate::words::sequences::{
+    Append, AsMaxLen, Concat, ElementAt, Fold, Len, ListCons, Map, Slice,
+};
 use crate::words::stx::{StxBurn, StxGetBalance, StxTransfer};
 use crate::words::tokens::{
     BurnFungibleToken, BurnNonFungibleToken, GetBalanceOfFungibleToken, GetOwnerOfNonFungibleToken,
@@ -128,7 +130,7 @@ lazy_static! {
         map.insert(
             CmpGreater.name(),
             WordCost {
-                runtime: Constant(170),
+                runtime: Linear { a: 7, b: 128 },
                 read_count: None,
                 read_length: None,
                 write_count: None,
@@ -138,7 +140,7 @@ lazy_static! {
         map.insert(
             CmpGeq.name(),
             WordCost {
-                runtime: Constant(170),
+                runtime: Linear { a: 7, b: 128 },
                 read_count: None,
                 read_length: None,
                 write_count: None,
@@ -148,7 +150,7 @@ lazy_static! {
         map.insert(
             CmpLess.name(),
             WordCost {
-                runtime: Constant(170),
+                runtime: Linear { a: 7, b: 128 },
                 read_count: None,
                 read_length: None,
                 write_count: None,
@@ -158,7 +160,7 @@ lazy_static! {
         map.insert(
             CmpLeq.name(),
             WordCost {
-                runtime: Constant(170),
+                runtime: Linear { a: 7, b: 128 },
                 read_count: None,
                 read_length: None,
                 write_count: None,
@@ -265,15 +267,14 @@ lazy_static! {
                 write_length: None,
             },
         );
-        // TODO: check if this indeed costs nothing (SUSPICIOUS)
         map.insert(
             StxBurn.name(),
             WordCost {
-                runtime: None,
-                read_count: None,
-                read_length: None,
-                write_count: None,
-                write_length: None,
+                runtime: Constant(612),
+                read_count: Constant(2),
+                read_length: Constant(1),
+                write_count: Constant(2),
+                write_length: Constant(1),
             },
         );
         map.insert(
@@ -432,16 +433,6 @@ lazy_static! {
             },
         );
         map.insert(
-            AsContract.name(),
-            WordCost {
-                runtime: Constant(138),
-                read_count: None,
-                read_length: None,
-                write_count: None,
-                write_length: None,
-            },
-        );
-        map.insert(
             ContractCall.name(),
             WordCost {
                 runtime: Constant(153),
@@ -552,6 +543,16 @@ lazy_static! {
             },
         );
         map.insert(
+            Slice.name(),
+            WordCost {
+                runtime: Constant(498),
+                read_count: None,
+                read_length: None,
+                write_count: None,
+                write_length: None,
+            },
+        );
+        map.insert(
             MapGet.name(),
             WordCost {
                 runtime: Linear { a: 1, b: 1539 },
@@ -617,16 +618,6 @@ lazy_static! {
             IsSome.name(),
             WordCost {
                 runtime: Constant(287),
-                read_count: None,
-                read_length: None,
-                write_count: None,
-                write_length: None,
-            },
-        );
-        map.insert(
-            IsStandard.name(),
-            WordCost {
-                runtime: Constant(127),
                 read_count: None,
                 read_length: None,
                 write_count: None,

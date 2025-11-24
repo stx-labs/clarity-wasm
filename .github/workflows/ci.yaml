@@ -52,6 +52,7 @@ jobs:
     strategy:
       matrix:
         clarity_version: [1, 2, 3]
+
     name: Clarity::V${{ matrix.clarity_version }} Artifacts
     steps:
       - name: Checkout PR
