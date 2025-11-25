@@ -549,7 +549,7 @@ impl ComplexWord for Filter {
                         ))
                     }
                 };
-                generator.duck_type(&mut loop_, list_elem_ty, &arg_ty)?;
+                generator.duck_type(&mut loop_, list_elem_ty, &arg_ty, None)?;
             }
             loop_.call(generator.func_by_name(discriminator.as_str()));
         }

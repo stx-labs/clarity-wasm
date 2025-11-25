@@ -270,7 +270,7 @@ impl ComplexWord for Fold {
             )?;
             // since the accumulator and the return type of the function could have different types, we need to duck-type.
             if let Some(tys) = &fold_func_ty {
-                generator.duck_type(&mut loop_, &tys.return_ty, &tys.acc_ty)?;
+                generator.duck_type(&mut loop_, &tys.return_ty, &tys.acc_ty, None)?;
             }
         }
         // Save the result into the locals (in reverse order as we pop)
@@ -309,7 +309,7 @@ impl ComplexWord for Fold {
 
         // since the return type of the function and the accumulator could have different types, we need to duck-type.
         if let Some(tys) = &fold_func_ty {
-            generator.duck_type(builder, &tys.acc_ty, &tys.return_ty)?;
+            generator.duck_type(builder, &tys.acc_ty, &tys.return_ty, None)?;
         }
 
         Ok(())

@@ -1547,7 +1547,7 @@ impl WasmGenerator {
             builder.call(self.func_by_name("stdlib.load_constant"));
 
             self.read_from_memory(builder, result_local, 0, &cst_ty)?;
-            self.duck_type(builder, &cst_ty, &expected_ty)?;
+            self.duck_type(builder, &cst_ty, &expected_ty, None)?;
 
             Ok(true)
         } else {
@@ -1777,7 +1777,7 @@ impl WasmGenerator {
         let expected_ty = duck_ty.unwrap_or(return_ty);
 
         // if needed, we can convert the argument to another compatible type.
-        self.duck_type(builder, return_ty, expected_ty)?;
+        self.duck_type(builder, return_ty, expected_ty, None)?;
 
         // If an in-memory value is returned from the function, we need to copy
         // it to our frame, from the callee's frame.
