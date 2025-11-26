@@ -812,15 +812,23 @@ pub fn crosscheck_multi_contract(
     contracts: &[(ContractName, &str)],
     expected: Result<Option<Value>, Error>,
 ) {
+    crosscheck_multi_contract_with_env(contracts, expected, TestEnvironment::default())
+}
+
+pub fn crosscheck_multi_contract_with_env(
+    contracts: &[(ContractName, &str)],
+    expected: Result<Option<Value>, Error>,
+    env: TestEnvironment,
+) {
     // compiled version
-    let mut compiled_env = TestEnvironment::default();
+    let mut compiled_env = env.clone();
     let compiled_results: Vec<_> = contracts
         .iter()
         .map(|(name, snippet)| compiled_env.init_contract_with_snippet(name, snippet))
         .collect();
 
     // interpreted version
-    let mut interpreted_env = TestEnvironment::default();
+    let mut interpreted_env = env;
     let interpreted_results: Vec<_> = contracts
         .iter()
         .map(|(name, snippet)| interpreted_env.interpret_contract_with_snippet(name, snippet))
