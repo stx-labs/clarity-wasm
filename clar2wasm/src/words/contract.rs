@@ -201,7 +201,9 @@ impl ComplexWord for ContractCall {
 mod tests {
     use clarity::vm::Value;
 
-    use crate::tools::{crosscheck_multi_contract, evaluate, TestEnvironment};
+    use crate::tools::{
+        crosscheck_multi_contract, crosscheck_multi_contract_with_env, evaluate, TestEnvironment,
+    };
 
     #[test]
     fn as_contract_less_than_one_arg() {
@@ -882,6 +884,36 @@ mod tests {
                 ("bar".into(), bar),
             ],
             Ok(Some(Value::okay_true())),
+        );
+    }
+
+    #[test]
+    fn contract_call_dynamic_traitreferencetype() {
+        let foo = "
+        (define-trait t
+            ((foo () (response bool uint)))
+        )
+
+        (define-public (foo) (ok true))
+    ";
+
+        let bar = r#"
+        (use-trait foo-trait .foo.t)
+
+        (define-private (call-it (tt <foo-trait>))
+            (contract-call? tt foo)
+        )
+
+        (call-it .foo)
+    "#;
+
+        crosscheck_multi_contract_with_env(
+            &[("foo".into(), foo), ("bar".into(), bar)],
+            Ok(Some(Value::okay_true())),
+            TestEnvironment::new(
+                clarity::types::StacksEpochId::Epoch20,
+                clarity::vm::ClarityVersion::Clarity1,
+            ),
         );
     }
 }
