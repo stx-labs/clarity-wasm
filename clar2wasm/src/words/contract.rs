@@ -109,6 +109,7 @@ impl ComplexWord for ContractCall {
                             TypeSignature::CallableType(CallableSubtype::Trait(trait_id)) => {
                                 Some(trait_id)
                             }
+                            TypeSignature::TraitReferenceType(trait_id) => Some(trait_id),
                             _ => None,
                         })
                 })
