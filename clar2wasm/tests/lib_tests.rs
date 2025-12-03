@@ -13,7 +13,7 @@ use clarity::vm::contexts::{CallStack, EventBatch, GlobalContext};
 use clarity::vm::contracts::Contract;
 use clarity::vm::costs::LimitedCostTracker;
 use clarity::vm::database::{ClarityDatabase, MemoryBackingStore};
-use clarity::vm::errors::{CheckErrors, Error, RuntimeErrorType};
+use clarity::vm::errors::{CheckErrorKind, RuntimeError, VmExecutionError as Error};
 use clarity::vm::events::StacksTransactionEvent;
 use clarity::vm::types::{
     PrincipalData, QualifiedContractIdentifier, ResponseData, StandardPrincipalData, TupleData,
@@ -76,7 +76,7 @@ macro_rules! test_multi_contract_init {
                             analysis_db,
                             false,
                         )
-                        .map_err(|_| CheckErrors::Expects("Compilation failure".to_string()))
+                        .map_err(|_| CheckErrorKind::Expects("Compilation failure".to_string()))
                     })
                     .expect("Failed to compile contract.");
 
@@ -4096,7 +4096,7 @@ test_contract_call_error!(
     |error: Error| {
         assert_eq!(
             error,
-            Error::Runtime(RuntimeErrorType::DivisionByZero, Some(Vec::new()))
+            Error::Runtime(RuntimeError::DivisionByZero, Some(Vec::new()))
         );
     }
 );
@@ -4109,7 +4109,7 @@ test_contract_call_error!(
         assert_eq!(
             error,
             Error::Runtime(
-                RuntimeErrorType::Arithmetic(
+                RuntimeError::Arithmetic(
                     "Power argument to (pow ...) must be a u32 integer".to_string()
                 ),
                 Some(Vec::new())
@@ -4126,7 +4126,7 @@ test_contract_call_error!(
         assert_eq!(
             error,
             Error::Runtime(
-                RuntimeErrorType::Arithmetic("sqrti must be passed a positive integer".to_string()),
+                RuntimeError::Arithmetic("sqrti must be passed a positive integer".to_string()),
                 Some(Vec::new())
             )
         );
@@ -4141,7 +4141,7 @@ test_contract_call_error!(
         assert_eq!(
             error,
             Error::Runtime(
-                RuntimeErrorType::Arithmetic("log2 must be passed a positive integer".to_string()),
+                RuntimeError::Arithmetic("log2 must be passed a positive integer".to_string()),
                 Some(Vec::new())
             )
         );
@@ -4155,7 +4155,7 @@ test_contract_call_error!(
     |error: Error| {
         assert_eq!(
             error,
-            Error::Runtime(RuntimeErrorType::ArithmeticOverflow, Some(Vec::new()))
+            Error::Runtime(RuntimeError::ArithmeticOverflow, Some(Vec::new()))
         );
     }
 );
@@ -4167,7 +4167,7 @@ test_contract_call_error!(
     |error: Error| {
         assert_eq!(
             error,
-            Error::Runtime(RuntimeErrorType::ArithmeticUnderflow, Some(Vec::new()))
+            Error::Runtime(RuntimeError::ArithmeticUnderflow, Some(Vec::new()))
         );
     }
 );
@@ -4180,7 +4180,7 @@ test_contract_call_error!(
         assert_eq!(
             error,
             Error::Runtime(
-                RuntimeErrorType::UnknownBlockHeaderHash(BlockHeaderHash([0xff; 32])),
+                RuntimeError::UnknownBlockHeaderHash(BlockHeaderHash([0xff; 32])),
                 None
             )
         );

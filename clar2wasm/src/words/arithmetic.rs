@@ -280,7 +280,7 @@ impl SimpleWord for Sqrti {
 
 #[cfg(test)]
 mod tests {
-    use clarity::vm::errors::{Error, RuntimeErrorType};
+    use clarity::vm::errors::{RuntimeError, VmExecutionError as Error};
     use clarity::vm::Value;
 
     use crate::tools::{crosscheck, crosscheck_expect_failure, evaluate};
@@ -290,7 +290,7 @@ mod tests {
         crosscheck(
             "(+ u340282366920938463463374607431768211455 u1)",
             Err(Error::Runtime(
-                RuntimeErrorType::ArithmeticOverflow,
+                RuntimeError::ArithmeticOverflow,
                 Some(Vec::new()),
             )),
         );
@@ -301,7 +301,7 @@ mod tests {
         crosscheck(
             "(- u0 u1)",
             Err(Error::Runtime(
-                RuntimeErrorType::ArithmeticUnderflow,
+                RuntimeError::ArithmeticUnderflow,
                 Some(Vec::new()),
             )),
         )
@@ -374,7 +374,7 @@ mod tests {
         crosscheck(
             "(log2 -1)",
             Err(Error::Runtime(
-                RuntimeErrorType::Arithmetic("log2 must be passed a positive integer".to_string()),
+                RuntimeError::Arithmetic("log2 must be passed a positive integer".to_string()),
                 Some(Vec::new()),
             )),
         );
@@ -390,7 +390,7 @@ mod tests {
         crosscheck(
             "(pow 2 -3)",
             Err(Error::Runtime(
-                RuntimeErrorType::Arithmetic(
+                RuntimeError::Arithmetic(
                     "Power argument to (pow ...) must be a u32 integer".to_string(),
                 ),
                 Some(Vec::new()),
@@ -408,7 +408,7 @@ mod tests {
         crosscheck(
             "(sqrti -1)",
             Err(Error::Runtime(
-                RuntimeErrorType::Arithmetic("sqrti must be passed a positive integer".to_string()),
+                RuntimeError::Arithmetic("sqrti must be passed a positive integer".to_string()),
                 Some(Vec::new()),
             )),
         );
@@ -476,7 +476,7 @@ mod tests {
         crosscheck(
             "(- u5)",
             Err(Error::Runtime(
-                RuntimeErrorType::ArithmeticUnderflow,
+                RuntimeError::ArithmeticUnderflow,
                 Some(Vec::new()),
             )),
         );

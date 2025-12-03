@@ -237,7 +237,7 @@ impl PropValue {
 }
 
 impl TryFrom<Vec<PropValue>> for PropValue {
-    type Error = clarity::vm::errors::Error;
+    type Error = clarity::vm::errors::VmExecutionError;
 
     fn try_from(values: Vec<PropValue>) -> Result<Self, Self::Error> {
         let values = values.into_iter().map(Value::from).collect();

@@ -7,7 +7,7 @@ use clar2wasm::tools::{crosscheck, crosscheck_with_env, TestConfig, TestEnvironm
 use clar2wasm::wasm_utils::get_type_in_memory_size;
 use clarity::types::StacksEpochId;
 use clarity::vm::costs::LimitedCostTracker;
-use clarity::vm::errors::{CheckErrors, Error};
+use clarity::vm::errors::{CheckErrorKind, VmExecutionError as Error};
 use clarity::vm::types::{
     ListTypeData, QualifiedContractIdentifier, StandardPrincipalData, TypeSignature,
 };
@@ -45,7 +45,7 @@ fn as_oom_check_snippet(
                 analysis_db,
                 false,
             )
-            .map_err(|e| CheckErrors::Expects(format!("Compilation failure {e:?}")))
+            .map_err(|e| CheckErrorKind::Expects(format!("Compilation failure {e:?}")))
         })
         .expect("Could not compile snippet")
         .module;

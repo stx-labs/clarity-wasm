@@ -1,6 +1,8 @@
 use clarity::types::StacksEpochId;
 use clarity::vm::costs::CostErrors;
-use clarity::vm::errors::{CheckErrors, Error, RuntimeErrorType, ShortReturnType, WasmError};
+use clarity::vm::errors::{
+    CheckErrorKind, EarlyReturnError, RuntimeError, VmExecutionError as Error, WasmError,
+};
 use clarity::vm::types::ResponseData;
 use clarity::vm::{ClarityVersion, Value};
 use wasmtime::{AsContextMut, Instance, Trap};
@@ -49,7 +51,7 @@ pub enum ErrorMap {
 
     /// Indicates a failure in an assertion that was expected to cause a short return,
     /// usually triggered by `(asserts!...)`.
-    ShortReturnAssertionFailure = 7,
+    EarlyReturnAssertionFailure = 7,
 
     /// Represents an error in exponentiation operations in a Clarity contract.
     /// This could occur for invalid bases or exponents.
@@ -60,15 +62,15 @@ pub enum ErrorMap {
 
     /// Represents a short-return error for an expected value that wraps a Response type.
     /// Usually triggered by `(try!...)`.
-    ShortReturnExpectedValueResponse = 10,
+    EarlyReturnExpectedValueResponse = 10,
 
     /// Represents a short-return error for an expected value that wraps an Optional type.
     /// Usually triggered by `(try!...)`.
-    ShortReturnExpectedValueOptional = 11,
+    EarlyReturnExpectedValueOptional = 11,
 
     /// Represents a short-return error for an expected value.
     /// usually triggered by `(unwrap!...)` and `(unwrap-err!...)`.
-    ShortReturnExpectedValue = 12,
+    EarlyReturnExpectedValue = 12,
 
     /// Indicates an attempt to use a function with the wrong amount of arguments
     ArgumentCountMismatch = 13,
@@ -110,12 +112,12 @@ impl From<i32> for ErrorMap {
             4 => ErrorMap::ArithmeticSqrtiError,
             5 => ErrorMap::BadTypeConstruction,
             6 => ErrorMap::Panic,
-            7 => ErrorMap::ShortReturnAssertionFailure,
+            7 => ErrorMap::EarlyReturnAssertionFailure,
             8 => ErrorMap::ArithmeticPowError,
             9 => ErrorMap::NameAlreadyUsed,
-            10 => ErrorMap::ShortReturnExpectedValueResponse,
-            11 => ErrorMap::ShortReturnExpectedValueOptional,
-            12 => ErrorMap::ShortReturnExpectedValue,
+            10 => ErrorMap::EarlyReturnExpectedValueResponse,
+            11 => ErrorMap::EarlyReturnExpectedValueOptional,
+            12 => ErrorMap::EarlyReturnExpectedValue,
             13 => ErrorMap::ArgumentCountMismatch,
             14 => ErrorMap::ArgumentCountAtLeast,
             15 => ErrorMap::ArgumentCountAtMost,
@@ -142,7 +144,7 @@ pub(crate) fn resolve_error(
         // This unsafe operation returns the value of a location pointed by `*mut T`.
         //
         // The purpose of this code is to take the ownership of the `vm_error` value
-        // since clarity::vm::errors::Error is not a Clonable type.
+        // since clarity::vm::errors::VmExecutionError is not a Clonable type.
         //
         // Converting a `&T` (vm_error) to a `*mut T` doesn't cause any issues here
         // because the reference is not borrowed elsewhere.
@@ -160,13 +162,13 @@ pub(crate) fn resolve_error(
         };
     }
 
-    if let Some(vm_error) = e.root_cause().downcast_ref::<CheckErrors>() {
+    if let Some(vm_error) = e.root_cause().downcast_ref::<CheckErrorKind>() {
         // SAFETY:
         //
         // This unsafe operation returns the value of a location pointed by `*mut T`.
         //
         // The purpose of this code is to take the ownership of the `vm_error` value
-        // since clarity::vm::errors::Error is not a Clonable type.
+        // since clarity::vm::errors::VmExecutionError is not a Clonable type.
         //
         // Converting a `&T` (vm_error) to a `*mut T` doesn't cause any issues here
         // because the reference is not borrowed elsewhere.
@@ -175,14 +177,14 @@ pub(crate) fn resolve_error(
         // is a dummy value, solely to satisfy the signature of the replace function
         // and not cause harm when it is deallocated.
         //
-        // Specifically, CheckErrors::ExpectedName was selected as the placeholder value.
+        // Specifically, CheckErrorKind::ExpectedName was selected as the placeholder value.
         return unsafe {
             let err = core::ptr::replace(
-                (vm_error as *const CheckErrors) as *mut CheckErrors,
-                CheckErrors::ExpectedName,
+                (vm_error as *const CheckErrorKind) as *mut CheckErrorKind,
+                CheckErrorKind::ExpectedName,
             );
 
-            <CheckErrors as std::convert::Into<Error>>::into(err)
+            <CheckErrorKind as std::convert::Into<Error>>::into(err)
         };
     }
 
@@ -222,36 +224,34 @@ fn from_runtime_error_code(
     match ErrorMap::from(runtime_error_code) {
         ErrorMap::NotClarityError => Error::Wasm(WasmError::Runtime(e)),
         ErrorMap::ArithmeticOverflow => {
-            Error::Runtime(RuntimeErrorType::ArithmeticOverflow, Some(Vec::new()))
+            Error::Runtime(RuntimeError::ArithmeticOverflow, Some(Vec::new()))
         }
         ErrorMap::ArithmeticUnderflow => {
-            Error::Runtime(RuntimeErrorType::ArithmeticUnderflow, Some(Vec::new()))
+            Error::Runtime(RuntimeError::ArithmeticUnderflow, Some(Vec::new()))
         }
-        ErrorMap::DivisionByZero => {
-            Error::Runtime(RuntimeErrorType::DivisionByZero, Some(Vec::new()))
-        }
+        ErrorMap::DivisionByZero => Error::Runtime(RuntimeError::DivisionByZero, Some(Vec::new())),
         ErrorMap::ArithmeticLog2Error => Error::Runtime(
-            RuntimeErrorType::Arithmetic(LOG2_ERROR_MESSAGE.into()),
+            RuntimeError::Arithmetic(LOG2_ERROR_MESSAGE.into()),
             Some(Vec::new()),
         ),
         ErrorMap::ArithmeticSqrtiError => Error::Runtime(
-            RuntimeErrorType::Arithmetic(SQRTI_ERROR_MESSAGE.into()),
+            RuntimeError::Arithmetic(SQRTI_ERROR_MESSAGE.into()),
             Some(Vec::new()),
         ),
         ErrorMap::BadTypeConstruction => {
-            Error::Runtime(RuntimeErrorType::BadTypeConstruction, Some(Vec::new()))
+            Error::Runtime(RuntimeError::BadTypeConstruction, Some(Vec::new()))
         }
         ErrorMap::Panic => {
             // TODO: see issue: #531
-            // This RuntimeErrorType::UnwrapFailure need to have a proper context.
-            Error::Runtime(RuntimeErrorType::UnwrapFailure, Some(Vec::new()))
+            // This RuntimeError::UnwrapFailure need to have a proper context.
+            Error::Runtime(RuntimeError::UnwrapFailure, Some(Vec::new()))
         }
-        ErrorMap::ShortReturnAssertionFailure => {
+        ErrorMap::EarlyReturnAssertionFailure => {
             let clarity_val = short_return_value(&instance, &mut store, epoch_id, clarity_version);
-            Error::ShortReturn(ShortReturnType::AssertionFailed(Box::new(clarity_val)))
+            Error::EarlyReturn(EarlyReturnError::AssertionFailed(Box::new(clarity_val)))
         }
         ErrorMap::ArithmeticPowError => Error::Runtime(
-            RuntimeErrorType::Arithmetic(POW_ERROR_MESSAGE.into()),
+            RuntimeError::Arithmetic(POW_ERROR_MESSAGE.into()),
             Some(Vec::new()),
         ),
         ErrorMap::NameAlreadyUsed => {
@@ -271,37 +271,37 @@ fn from_runtime_error_code(
             )
             .unwrap_or_else(|e| panic!("Could not recover arg_name: {e}"));
 
-            Error::Unchecked(CheckErrors::NameAlreadyUsed(arg_name))
+            Error::Unchecked(CheckErrorKind::NameAlreadyUsed(arg_name))
         }
-        ErrorMap::ShortReturnExpectedValueResponse => {
+        ErrorMap::EarlyReturnExpectedValueResponse => {
             let clarity_val = short_return_value(&instance, &mut store, epoch_id, clarity_version);
-            Error::ShortReturn(ShortReturnType::ExpectedValue(Box::new(Value::Response(
+            Error::EarlyReturn(EarlyReturnError::UnwrapFailed(Box::new(Value::Response(
                 ResponseData {
                     committed: false,
                     data: Box::new(clarity_val),
                 },
             ))))
         }
-        ErrorMap::ShortReturnExpectedValueOptional => {
-            Error::ShortReturn(ShortReturnType::ExpectedValue(Box::new(Value::Optional(
+        ErrorMap::EarlyReturnExpectedValueOptional => {
+            Error::EarlyReturn(EarlyReturnError::UnwrapFailed(Box::new(Value::Optional(
                 clarity::vm::types::OptionalData { data: None },
             ))))
         }
-        ErrorMap::ShortReturnExpectedValue => {
+        ErrorMap::EarlyReturnExpectedValue => {
             let clarity_val = short_return_value(&instance, &mut store, epoch_id, clarity_version);
-            Error::ShortReturn(ShortReturnType::ExpectedValue(Box::new(clarity_val)))
+            Error::EarlyReturn(EarlyReturnError::UnwrapFailed(Box::new(clarity_val)))
         }
         ErrorMap::ArgumentCountMismatch => {
             let (expected, got) = get_runtime_error_arg_lengths(&instance, &mut store);
-            Error::Unchecked(CheckErrors::IncorrectArgumentCount(expected, got))
+            Error::Unchecked(CheckErrorKind::IncorrectArgumentCount(expected, got))
         }
         ErrorMap::ArgumentCountAtLeast => {
             let (expected, got) = get_runtime_error_arg_lengths(&instance, &mut store);
-            Error::Unchecked(CheckErrors::RequiresAtLeastArguments(expected, got))
+            Error::Unchecked(CheckErrorKind::RequiresAtLeastArguments(expected, got))
         }
         ErrorMap::ArgumentCountAtMost => {
             let (expected, got) = get_runtime_error_arg_lengths(&instance, &mut store);
-            Error::Unchecked(CheckErrors::RequiresAtMostArguments(expected, got))
+            Error::Unchecked(CheckErrorKind::RequiresAtMostArguments(expected, got))
         }
         ErrorMap::CostOverrunRuntime => Error::from(CostErrors::CostOverflow),
         ErrorMap::CostOverrunReadCount => Error::from(CostErrors::CostOverflow),

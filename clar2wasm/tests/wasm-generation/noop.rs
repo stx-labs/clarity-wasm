@@ -1,5 +1,5 @@
 use clar2wasm::tools::crosscheck;
-use clarity::vm::errors::{Error, RuntimeErrorType};
+use clarity::vm::errors::{RuntimeError, VmExecutionError as Error};
 use clarity::vm::Value;
 use proptest::arbitrary::any;
 use proptest::proptest;
@@ -18,7 +18,7 @@ proptest! {
             match val.try_into() {
                 Ok(v) => Ok(Some(Value::UInt(v))),
                 Err(_) => Err(Error::Runtime(
-                    RuntimeErrorType::ArithmeticUnderflow,
+                    RuntimeError::ArithmeticUnderflow,
                     Some(Vec::new()),
                 )),
             }
@@ -38,7 +38,7 @@ proptest! {
             match val.try_into() {
                 Ok(v) => Ok(Some(Value::Int(v))),
                 Err(_) => Err(Error::Runtime(
-                    RuntimeErrorType::ArithmeticOverflow,
+                    RuntimeError::ArithmeticOverflow,
                     Some(Vec::new()),
                 )),
             }

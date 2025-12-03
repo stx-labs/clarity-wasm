@@ -15,7 +15,7 @@ use clarity::vm::contexts::{EventBatch, GlobalContext};
 use clarity::vm::contracts::Contract;
 use clarity::vm::costs::{CostTracker, ExecutionCost, LimitedCostTracker};
 use clarity::vm::database::ClarityDatabase;
-use clarity::vm::errors::{CheckErrors, Error, WasmError};
+use clarity::vm::errors::{CheckErrorKind, VmExecutionError as Error, WasmError};
 use clarity::vm::events::{SmartContractEventData, StacksTransactionEvent};
 use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
 use clarity::vm::{eval_all, ClarityVersion, ContractContext, ContractName, Value};
@@ -257,7 +257,7 @@ impl TestEnvironment {
                     analysis_db,
                     !is_boot_contract && self.emit_cost_code,
                 )
-                .map_err(|e| CheckErrors::Expects(format!("Compilation failure {e:?}")))
+                .map_err(|e| CheckErrorKind::Expects(format!("Compilation failure {e:?}")))
             })
             .map_err(|e| Error::Wasm(WasmError::WasmGeneratorError(format!("{e:?}"))))?;
 

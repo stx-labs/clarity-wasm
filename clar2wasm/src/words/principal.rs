@@ -338,7 +338,7 @@ impl ComplexWord for PrincipalOf {
 
 #[cfg(test)]
 mod tests {
-    use clarity::vm::errors::Error;
+    use clarity::vm::errors::VmExecutionError as Error;
     use clarity::vm::types::{
         BuffData, BufferLength, PrincipalData, SequenceData, SequenceSubtype, TypeSignature,
     };
@@ -368,7 +368,7 @@ mod tests {
         crosscheck(
             &format!("(principal-of? 0x{pubkey_32_bytes})"),
             Err(Error::Unchecked(
-                clarity::vm::errors::CheckErrors::TypeValueError(
+                clarity::vm::errors::CheckErrorKind::TypeValueError(
                     Box::new(TypeSignature::SequenceType(SequenceSubtype::BufferType(
                         BufferLength::try_from(33_u32).unwrap(),
                     ))),

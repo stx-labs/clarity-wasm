@@ -19,7 +19,7 @@ use clarity::util::hash::Sha512Trunc256Sum;
 use clarity::vm::analysis::AnalysisDatabase;
 use clarity::vm::costs::ExecutionCost;
 use clarity::vm::database::{BurnStateDB, ClarityBackingStore, HeadersDB};
-use clarity::vm::errors::{InterpreterError, InterpreterResult as Result};
+use clarity::vm::errors::{InterpreterResult as Result, VmInternalError};
 use clarity::vm::types::{QualifiedContractIdentifier, TupleData};
 use clarity::vm::{StacksEpoch, Value};
 use rusqlite::Connection;
@@ -212,7 +212,7 @@ impl ClarityBackingStore for Datastore {
             .block_id_lookup
             .get(&self.current_chain_tip)
             .ok_or_else(|| {
-                InterpreterError::Expect(
+                VmInternalError::Expect(
                     "Could not find current chain tip in block_id_lookup map".to_string(),
                 )
             })?;
@@ -221,7 +221,7 @@ impl ClarityBackingStore for Datastore {
             Ok(map.get(key).cloned())
         } else {
             Err(
-                InterpreterError::Expect("Block does not exist for current chain tip".to_string())
+                VmInternalError::Expect("Block does not exist for current chain tip".to_string())
                     .into(),
             )
         }

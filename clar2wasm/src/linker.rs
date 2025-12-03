@@ -1,8 +1,8 @@
-use clarity::vm::analysis::CheckErrors;
+use clarity::vm::analysis::CheckErrorKind;
 use clarity::vm::callables::{DefineType, DefinedFunction};
 use clarity::vm::costs::{constants as cost_constants, CostTracker};
 use clarity::vm::database::{ClarityDatabase, STXBalance, StoreType};
-use clarity::vm::errors::{Error, RuntimeErrorType, WasmError};
+use clarity::vm::errors::{RuntimeError, VmExecutionError as Error, WasmError};
 use clarity::vm::functions::crypto::{pubkey_to_address_v1, pubkey_to_address_v2};
 use clarity::vm::types::{
     AssetIdentifier, BuffData, BufferLength, FunctionType, ListTypeData, PrincipalData,
@@ -137,7 +137,7 @@ fn link_define_variable_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<()
                     .contract_analysis
                     .ok_or(Error::Wasm(WasmError::DefineFunctionCalledInRunMode))?
                     .get_persisted_variable_type(name.as_str())
-                    .ok_or(Error::Unchecked(CheckErrors::DefineVariableBadSignature))?
+                    .ok_or(Error::Unchecked(CheckErrorKind::DefineVariableBadSignature))?
                     .clone();
 
                 let contract = caller.data().contract_context().contract_identifier.clone();
@@ -310,7 +310,7 @@ fn link_define_nft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Err
                     .ok_or(Error::Wasm(WasmError::DefineFunctionCalledInRunMode))?
                     .non_fungible_tokens
                     .get(&cname)
-                    .ok_or(Error::Unchecked(CheckErrors::DefineNFTBadSignature))?;
+                    .ok_or(Error::Unchecked(CheckErrorKind::DefineNFTBadSignature))?;
 
                 caller
                     .data_mut()
@@ -381,7 +381,7 @@ fn link_define_map_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Err
                     .contract_analysis
                     .ok_or(Error::Wasm(WasmError::DefineFunctionCalledInRunMode))?
                     .get_map_type(&name)
-                    .ok_or(Error::Unchecked(CheckErrors::BadMapTypeDefinition))?;
+                    .ok_or(Error::Unchecked(CheckErrorKind::BadMapTypeDefinition))?;
 
                 caller
                     .data_mut()
@@ -456,7 +456,7 @@ fn link_define_function_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<()
                             .contract_analysis
                             .ok_or(Error::Wasm(WasmError::DefineFunctionCalledInRunMode))?
                             .get_read_only_function_type(&function_name)
-                            .ok_or(Error::Unchecked(CheckErrors::UnknownFunction(
+                            .ok_or(Error::Unchecked(CheckErrorKind::UnknownFunction(
                                 function_name.clone(),
                             )))?,
                     ),
@@ -467,7 +467,7 @@ fn link_define_function_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<()
                             .contract_analysis
                             .ok_or(Error::Wasm(WasmError::DefineFunctionCalledInRunMode))?
                             .get_public_function_type(&function_name)
-                            .ok_or(Error::Unchecked(CheckErrors::UnknownFunction(
+                            .ok_or(Error::Unchecked(CheckErrorKind::UnknownFunction(
                                 function_name.clone(),
                             )))?,
                     ),
@@ -478,7 +478,7 @@ fn link_define_function_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<()
                             .contract_analysis
                             .ok_or(Error::Wasm(WasmError::DefineFunctionCalledInRunMode))?
                             .get_private_function(&function_name)
-                            .ok_or(Error::Unchecked(CheckErrors::UnknownFunction(
+                            .ok_or(Error::Unchecked(CheckErrorKind::UnknownFunction(
                                 function_name.clone(),
                             )))?,
                     ),
@@ -487,7 +487,7 @@ fn link_define_function_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<()
 
                 let fixed_type = match function_type {
                     FunctionType::Fixed(fixed_type) => fixed_type,
-                    _ => Err(Error::Unchecked(CheckErrors::DefineFunctionBadSignature))?,
+                    _ => Err(Error::Unchecked(CheckErrorKind::DefineFunctionBadSignature))?,
                 };
 
                 let function = DefinedFunction::new(
@@ -550,7 +550,7 @@ fn link_define_trait_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), E
                     .contract_analysis
                     .ok_or(Error::Wasm(WasmError::DefineFunctionCalledInRunMode))?
                     .get_defined_trait(name.as_str())
-                    .ok_or(Error::Unchecked(CheckErrors::DefineTraitBadSignature))?;
+                    .ok_or(Error::Unchecked(CheckErrorKind::DefineTraitBadSignature))?;
 
                 caller
                     .data_mut()
@@ -635,7 +635,7 @@ fn link_get_variable_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), E
                     .contract_context()
                     .meta_data_var
                     .get(var_name.as_str())
-                    .ok_or(CheckErrors::NoSuchDataVariable(var_name.to_string()))?
+                    .ok_or(CheckErrorKind::NoSuchDataVariable(var_name.to_string()))?
                     .clone();
 
                 // We would like to call `lookup_variable_with_size`, but since it
@@ -661,7 +661,7 @@ fn link_get_variable_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), E
                 // runtime_cost(ClarityCostFunction::FetchVar, env, result_size)?;
 
                 let value = fetch_result.map(|data| data.value).ok_or(Error::Unchecked(
-                    CheckErrors::NoSuchDataVariable(var_name.to_string()),
+                    CheckErrorKind::NoSuchDataVariable(var_name.to_string()),
                 ))?;
 
                 let memory = caller
@@ -722,7 +722,7 @@ fn link_set_variable_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), E
                     .contract_context()
                     .meta_data_var
                     .get(var_name.as_str())
-                    .ok_or(Error::Unchecked(CheckErrors::NoSuchDataVariable(
+                    .ok_or(Error::Unchecked(CheckErrorKind::NoSuchDataVariable(
                         var_name.to_string(),
                     )))?
                     .clone();
@@ -786,7 +786,7 @@ fn link_tx_sender_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Erro
                     .data()
                     .sender
                     .clone()
-                    .ok_or(Error::Runtime(RuntimeErrorType::NoSenderInContext, None))?;
+                    .ok_or(Error::Runtime(RuntimeError::NoSenderInContext, None))?;
 
                 let memory = caller
                     .get_export("memory")
@@ -829,7 +829,7 @@ fn link_contract_caller_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<()
                     .data()
                     .caller
                     .clone()
-                    .ok_or(Error::Runtime(RuntimeErrorType::NoCallerInContext, None))?;
+                    .ok_or(Error::Runtime(RuntimeError::NoCallerInContext, None))?;
 
                 let memory = caller
                     .get_export("memory")
@@ -1603,7 +1603,7 @@ fn link_ft_get_balance_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(),
                     .contract_context()
                     .meta_ft
                     .get(&token_name)
-                    .ok_or(CheckErrors::NoSuchFT(token_name.to_string()))?
+                    .ok_or(CheckErrorKind::NoSuchFT(token_name.to_string()))?
                     .clone();
 
                 let balance = caller.data_mut().global_context.database.get_ft_balance(
@@ -1812,7 +1812,7 @@ fn link_ft_mint_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Error>
                     .contract_context()
                     .meta_ft
                     .get(token_name.as_str())
-                    .ok_or(CheckErrors::NoSuchFT(token_name.to_string()))?
+                    .ok_or(CheckErrorKind::NoSuchFT(token_name.to_string()))?
                     .clone();
 
                 caller
@@ -1835,7 +1835,7 @@ fn link_ft_mint_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Error>
 
                 let final_to_bal = to_bal
                     .checked_add(amount)
-                    .ok_or(Error::Runtime(RuntimeErrorType::ArithmeticOverflow, None))?;
+                    .ok_or(Error::Runtime(RuntimeError::ArithmeticOverflow, None))?;
 
                 caller
                     .data_mut()
@@ -1958,7 +1958,7 @@ fn link_ft_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Er
                     .contract_context()
                     .meta_ft
                     .get(&token_name)
-                    .ok_or(CheckErrors::NoSuchFT(token_name.to_string()))?
+                    .ok_or(CheckErrorKind::NoSuchFT(token_name.to_string()))?
                     .clone();
 
                 let from_bal = caller.data_mut().global_context.database.get_ft_balance(
@@ -1988,7 +1988,7 @@ fn link_ft_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Er
 
                 let final_to_bal = to_bal
                     .checked_add(amount)
-                    .ok_or(RuntimeErrorType::ArithmeticOverflow)?;
+                    .ok_or(RuntimeError::ArithmeticOverflow)?;
 
                 caller
                     .data_mut()
@@ -2087,7 +2087,7 @@ fn link_nft_get_owner_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
                     .contract_context()
                     .meta_nft
                     .get(&asset_name)
-                    .ok_or(CheckErrors::NoSuchNFT(asset_name.to_string()))?
+                    .ok_or(CheckErrorKind::NoSuchNFT(asset_name.to_string()))?
                     .clone();
 
                 let expected_asset_type = &nft_metadata.key_type;
@@ -2111,7 +2111,7 @@ fn link_nft_get_owner_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
                 // runtime_cost(ClarityCostFunction::NftOwner, env, asset_size)?;
 
                 if !expected_asset_type.admits(&caller.data().global_context.epoch_id, &asset)? {
-                    return Err(CheckErrors::TypeValueError(
+                    return Err(CheckErrorKind::TypeValueError(
                         Box::new(expected_asset_type.clone()),
                         Box::new(asset),
                     )
@@ -2143,7 +2143,7 @@ fn link_nft_get_owner_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
 
                         Ok((1i32, return_offset, bytes_written))
                     }
-                    Err(Error::Runtime(RuntimeErrorType::NoSuchToken, _)) => Ok((0i32, 0i32, 0i32)),
+                    Err(Error::Runtime(RuntimeError::NoSuchToken, _)) => Ok((0i32, 0i32, 0i32)),
                     Err(e) => Err(e)?,
                 }
             },
@@ -2190,7 +2190,7 @@ fn link_nft_burn_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Error
                     .contract_context()
                     .meta_nft
                     .get(&asset_name)
-                    .ok_or(CheckErrors::NoSuchNFT(asset_name.to_string()))?
+                    .ok_or(CheckErrorKind::NoSuchNFT(asset_name.to_string()))?
                     .clone();
 
                 let expected_asset_type = &nft_metadata.key_type;
@@ -2225,7 +2225,7 @@ fn link_nft_burn_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Error
                 // runtime_cost(ClarityCostFunction::NftBurn, env, asset_size)?;
 
                 if !expected_asset_type.admits(&caller.data().global_context.epoch_id, &asset)? {
-                    return Err(CheckErrors::TypeValueError(
+                    return Err(CheckErrorKind::TypeValueError(
                         Box::new(expected_asset_type.clone()),
                         Box::new(asset),
                     )
@@ -2238,7 +2238,7 @@ fn link_nft_burn_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Error
                     &asset,
                     expected_asset_type,
                 ) {
-                    Err(Error::Runtime(RuntimeErrorType::NoSuchToken, _)) => {
+                    Err(Error::Runtime(RuntimeError::NoSuchToken, _)) => {
                         return Ok((0i32, 0i32, BurnAssetErrorCodes::DOES_NOT_EXIST as i64, 0i64));
                     }
                     Ok(owner) => Ok(owner),
@@ -2331,7 +2331,7 @@ fn link_nft_mint_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Error
                     .contract_context()
                     .meta_nft
                     .get(&asset_name)
-                    .ok_or(CheckErrors::NoSuchNFT(asset_name.to_string()))?
+                    .ok_or(CheckErrorKind::NoSuchNFT(asset_name.to_string()))?
                     .clone();
 
                 let expected_asset_type = &nft_metadata.key_type;
@@ -2365,7 +2365,7 @@ fn link_nft_mint_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Error
                 // runtime_cost(ClarityCostFunction::NftMint, env, asset_size)?;
 
                 if !expected_asset_type.admits(&caller.data().global_context.epoch_id, &asset)? {
-                    return Err(CheckErrors::TypeValueError(
+                    return Err(CheckErrorKind::TypeValueError(
                         Box::new(expected_asset_type.clone()),
                         Box::new(asset),
                     )
@@ -2378,7 +2378,7 @@ fn link_nft_mint_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Error
                     &asset,
                     expected_asset_type,
                 ) {
-                    Err(Error::Runtime(RuntimeErrorType::NoSuchToken, _)) => Ok(()),
+                    Err(Error::Runtime(RuntimeError::NoSuchToken, _)) => Ok(()),
                     Ok(_owner) => {
                         return Ok((0i32, 0i32, MintAssetErrorCodes::ALREADY_EXIST as i64, 0i64))
                     }
@@ -2463,7 +2463,7 @@ fn link_nft_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), E
                     .contract_context()
                     .meta_nft
                     .get(&asset_name)
-                    .ok_or(CheckErrors::NoSuchNFT(asset_name.to_string()))?
+                    .ok_or(CheckErrorKind::NoSuchNFT(asset_name.to_string()))?
                     .clone();
 
                 let expected_asset_type = &nft_metadata.key_type;
@@ -2508,7 +2508,7 @@ fn link_nft_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), E
                 // runtime_cost(ClarityCostFunction::NftTransfer, env, asset_size)?;
 
                 if !expected_asset_type.admits(&caller.data().global_context.epoch_id, &asset)? {
-                    return Err(CheckErrors::TypeValueError(
+                    return Err(CheckErrorKind::TypeValueError(
                         Box::new(expected_asset_type.clone()),
                         Box::new(asset),
                     )
@@ -2531,7 +2531,7 @@ fn link_nft_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), E
                     expected_asset_type,
                 ) {
                     Ok(owner) => Ok(owner),
-                    Err(Error::Runtime(RuntimeErrorType::NoSuchToken, _)) => {
+                    Err(Error::Runtime(RuntimeError::NoSuchToken, _)) => {
                         return Ok((
                             0i32,
                             0i32,
@@ -2635,7 +2635,7 @@ fn link_map_get_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Error>
                     .contract_context()
                     .meta_data_map
                     .get(map_name.as_str())
-                    .ok_or(CheckErrors::NoSuchMap(map_name.to_string()))?
+                    .ok_or(CheckErrorKind::NoSuchMap(map_name.to_string()))?
                     .clone();
 
                 // Read in the key from the Wasm memory
@@ -2710,7 +2710,7 @@ fn link_map_set_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Error>
              mut value_offset: i32,
              mut value_length: i32| {
                 if caller.data().global_context.is_read_only() {
-                    return Err(CheckErrors::WriteAttemptedInReadOnly.into());
+                    return Err(CheckErrorKind::WriteAttemptedInReadOnly.into());
                 }
 
                 // Get the memory from the caller
@@ -2732,7 +2732,7 @@ fn link_map_set_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Error>
                     .contract_context()
                     .meta_data_map
                     .get(map_name.as_str())
-                    .ok_or(Error::Unchecked(CheckErrors::NoSuchMap(
+                    .ok_or(Error::Unchecked(CheckErrorKind::NoSuchMap(
                         map_name.to_string(),
                     )))?
                     .clone();
@@ -2820,7 +2820,7 @@ fn link_map_insert_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Err
              mut value_offset: i32,
              mut value_length: i32| {
                 if caller.data().global_context.is_read_only() {
-                    return Err(CheckErrors::WriteAttemptedInReadOnly.into());
+                    return Err(CheckErrorKind::WriteAttemptedInReadOnly.into());
                 }
 
                 // Get the memory from the caller
@@ -2842,7 +2842,7 @@ fn link_map_insert_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Err
                     .contract_context()
                     .meta_data_map
                     .get(map_name.as_str())
-                    .ok_or(Error::Unchecked(CheckErrors::NoSuchMap(
+                    .ok_or(Error::Unchecked(CheckErrorKind::NoSuchMap(
                         map_name.to_string(),
                     )))?
                     .clone();
@@ -2928,7 +2928,7 @@ fn link_map_delete_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Err
              mut key_offset: i32,
              mut key_length: i32| {
                 if caller.data().global_context.is_read_only() {
-                    return Err(CheckErrors::WriteAttemptedInReadOnly.into());
+                    return Err(CheckErrorKind::WriteAttemptedInReadOnly.into());
                 }
 
                 // Get the memory from the caller
@@ -2949,7 +2949,7 @@ fn link_map_delete_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Err
                     .contract_context()
                     .meta_data_map
                     .get(map_name.as_str())
-                    .ok_or(Error::Unchecked(CheckErrors::NoSuchMap(
+                    .ok_or(Error::Unchecked(CheckErrorKind::NoSuchMap(
                         map_name.to_string(),
                     )))?
                     .clone();
@@ -4347,7 +4347,7 @@ fn link_contract_call_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
                 let contract_id = match &contract_val {
                     Value::Principal(PrincipalData::Contract(contract_id)) => contract_id,
                     _ => {
-                        return Err(CheckErrors::ContractCallExpectName.into());
+                        return Err(CheckErrorKind::ContractCallExpectName.into());
                     }
                 };
 
@@ -4371,7 +4371,7 @@ fn link_contract_call_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
                     .contract_context
                     .functions
                     .get(function_name.as_str())
-                    .ok_or(CheckErrors::NoSuchPublicFunction(
+                    .ok_or(CheckErrorKind::NoSuchPublicFunction(
                         contract_id.to_string(),
                         function_name.to_string(),
                     ))?;
@@ -4434,7 +4434,7 @@ fn link_contract_call_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
                     function
                         .get_return_type()
                         .as_ref()
-                        .ok_or(CheckErrors::DefineFunctionBadSignature)?
+                        .ok_or(CheckErrorKind::DefineFunctionBadSignature)?
                 } else {
                     // This is a dynamic call
                     let trait_id =
@@ -4455,7 +4455,7 @@ fn link_contract_call_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
                         .get(trait_id.name.as_str())
                         .and_then(|trait_functions| trait_functions.get(function_name.as_str()))
                         .map(|f_ty| &f_ty.returns)
-                        .ok_or(CheckErrors::DefineFunctionBadSignature)?
+                        .ok_or(CheckErrorKind::DefineFunctionBadSignature)?
                 };
 
                 write_to_wasm(
@@ -4641,12 +4641,12 @@ fn link_enter_at_block_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(),
                 let bhh = match block_hash {
                     Value::Sequence(SequenceData::Buffer(BuffData { data })) => {
                         if data.len() != 32 {
-                            return Err(RuntimeErrorType::BadBlockHash(data).into());
+                            return Err(RuntimeError::BadBlockHash(data).into());
                         }
                         StacksBlockId::from(data.as_slice())
                     }
                     x => {
-                        return Err(CheckErrors::TypeValueError(
+                        return Err(CheckErrorKind::TypeValueError(
                             Box::new(TypeSignature::BUFFER_32.clone()),
                             Box::new(x),
                         )
@@ -4866,7 +4866,7 @@ fn link_secp256k1_recover_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<
                 // To match the interpreter behavior, if the message is the
                 // wrong length, throw a runtime type error.
                 if msg_bytes.len() != 32 {
-                    return Err(CheckErrors::TypeValueError(
+                    return Err(CheckErrorKind::TypeValueError(
                         Box::new(TypeSignature::BUFFER_32.clone()),
                         Box::new(Value::buff_from(msg_bytes)?),
                     )
@@ -4946,7 +4946,7 @@ fn link_secp256k1_verify_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(
                 // To match the interpreter behavior, if the message is the
                 // wrong length, throw a runtime type error.
                 if msg_bytes.len() != 32 {
-                    return Err(CheckErrors::TypeValueError(
+                    return Err(CheckErrorKind::TypeValueError(
                         Box::new(TypeSignature::BUFFER_32.clone()),
                         Box::new(Value::buff_from(msg_bytes)?),
                     )
@@ -4969,7 +4969,7 @@ fn link_secp256k1_verify_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(
                 // To match the interpreter behavior, if the public key is the
                 // wrong length, throw a runtime type error.
                 if pk_bytes.len() != 33 {
-                    return Err(CheckErrors::TypeValueError(
+                    return Err(CheckErrorKind::TypeValueError(
                         Box::new(TypeSignature::BUFFER_33.clone()),
                         Box::new(Value::buff_from(pk_bytes)?),
                     )
@@ -5022,7 +5022,7 @@ fn link_principal_of_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), E
                 let pub_key = match key_val {
                     Value::Sequence(SequenceData::Buffer(BuffData { ref data })) => {
                         if data.len() != 33 {
-                            return Err(CheckErrors::TypeValueError(
+                            return Err(CheckErrorKind::TypeValueError(
                                 Box::new(TypeSignature::BUFFER_33.clone()),
                                 Box::new(key_val),
                             )
@@ -5031,7 +5031,7 @@ fn link_principal_of_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), E
                         data
                     }
                     _ => {
-                        return Err(CheckErrors::TypeValueError(
+                        return Err(CheckErrorKind::TypeValueError(
                             Box::new(TypeSignature::BUFFER_33.clone()),
                             Box::new(key_val),
                         )
@@ -5162,7 +5162,7 @@ fn link_load_constant_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
                     .contract_context()
                     .variables
                     .get(&ClarityName::from(const_name.as_str()))
-                    .ok_or(CheckErrors::UndefinedVariable(const_name.to_string()))?
+                    .ok_or(CheckErrorKind::UndefinedVariable(const_name.to_string()))?
                     .clone();
 
                 // Constant value type

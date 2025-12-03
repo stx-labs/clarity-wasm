@@ -1,6 +1,6 @@
 use clarity::vm::analysis::ContractAnalysis;
 use clarity::vm::contexts::GlobalContext;
-use clarity::vm::errors::{Error, RuntimeErrorType, WasmError};
+use clarity::vm::errors::{RuntimeError, VmExecutionError as Error, WasmError};
 use clarity::vm::events::*;
 use clarity::vm::types::{AssetIdentifier, BuffData, PrincipalData, QualifiedContractIdentifier};
 use clarity::vm::{CallStack, ContractContext, Value};
@@ -93,7 +93,7 @@ impl<'a, 'b> ClarityWasmContext<'a, 'b> {
     pub fn pop_sender(&mut self) -> Result<PrincipalData, Error> {
         self.sender
             .take()
-            .ok_or(RuntimeErrorType::NoSenderInContext.into())
+            .ok_or(RuntimeError::NoSenderInContext.into())
             .inspect(|_| {
                 self.sender = self.sender_stack.pop();
             })
@@ -109,7 +109,7 @@ impl<'a, 'b> ClarityWasmContext<'a, 'b> {
     pub fn pop_caller(&mut self) -> Result<PrincipalData, Error> {
         self.caller
             .take()
-            .ok_or(RuntimeErrorType::NoCallerInContext.into())
+            .ok_or(RuntimeError::NoCallerInContext.into())
             .inspect(|_| {
                 self.caller = self.caller_stack.pop();
             })

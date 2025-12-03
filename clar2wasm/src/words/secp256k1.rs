@@ -101,7 +101,7 @@ impl ComplexWord for Verify {
 
 #[cfg(test)]
 mod tests {
-    use clarity::vm::errors::Error;
+    use clarity::vm::errors::VmExecutionError as Error;
     use clarity::vm::types::{
         BuffData, BufferLength, SequenceData, SequenceSubtype, TypeSignature,
     };
@@ -211,7 +211,7 @@ mod tests {
         crosscheck(&format!("(secp256k1-recover? 0x{short_hash}
             0x8738487ebe69b93d8e51583be8eee50bb4213fc49c767d329632730cc193b873554428fc936ca3569afc15f1c9365f6591d6251a89fee9c9ac661116824d3a1301)"),
             Err(Error::Unchecked(
-                clarity::vm::errors::CheckErrors::TypeValueError(
+                clarity::vm::errors::CheckErrorKind::TypeValueError(
                     Box::new(TypeSignature::SequenceType(SequenceSubtype::BufferType(
                         BufferLength::try_from(32_u32).unwrap(),
                     ))),
@@ -264,7 +264,7 @@ mod tests {
             0x8738487ebe69b93d8e51583be8eee50bb4213fc49c767d329632730cc193b873554428fc936ca3569afc15f1c9365f6591d6251a89fee9c9ac661116824d3a1301
             0x03adb8de4bfb65db2cfd6120d55c6526ae9c52e675db7e47308636534ba7786110)"),
             Err(Error::Unchecked(
-                clarity::vm::errors::CheckErrors::TypeValueError(
+                clarity::vm::errors::CheckErrorKind::TypeValueError(
                     Box::new(TypeSignature::SequenceType(SequenceSubtype::BufferType(
                         BufferLength::try_from(32_u32).unwrap(),
                     ))),
@@ -295,7 +295,7 @@ mod tests {
             0x8738487ebe69b93d8e51583be8eee50bb4213fc49c767d329632730cc193b873554428fc936ca3569afc15f1c9365f6591d6251a89fee9c9ac661116824d3a1301
             0x{short_pubkey})"),
             Err(Error::Unchecked(
-                clarity::vm::errors::CheckErrors::TypeValueError(
+                clarity::vm::errors::CheckErrorKind::TypeValueError(
                     Box::new(TypeSignature::SequenceType(SequenceSubtype::BufferType(
                         BufferLength::try_from(33_u32).unwrap(),
                     ))),

@@ -290,7 +290,7 @@ impl ComplexWord for UnwrapErrPanic {
 
 #[cfg(test)]
 mod tests {
-    use clarity::vm::errors::{Error, RuntimeErrorType};
+    use clarity::vm::errors::{RuntimeError, VmExecutionError as Error};
     use clarity::vm::Value;
 
     use crate::tools::{crosscheck, crosscheck_expect_failure, evaluate};
@@ -362,7 +362,7 @@ mod tests {
         crosscheck(
             snippet,
             Err(Error::Runtime(
-                RuntimeErrorType::UnwrapFailure,
+                RuntimeError::UnwrapFailure,
                 Some(Vec::new()),
             )),
         )
@@ -384,7 +384,7 @@ mod tests {
         crosscheck(
             snippet,
             Err(Error::Runtime(
-                RuntimeErrorType::UnwrapFailure,
+                RuntimeError::UnwrapFailure,
                 Some(Vec::new()),
             )),
         )
@@ -406,7 +406,7 @@ mod tests {
         crosscheck(
             snippet,
             Err(Error::Runtime(
-                RuntimeErrorType::UnwrapFailure,
+                RuntimeError::UnwrapFailure,
                 Some(Vec::new()),
             )),
         )

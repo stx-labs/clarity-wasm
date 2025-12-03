@@ -363,7 +363,7 @@ impl ComplexWord for GetTenureInfo {
 #[cfg(test)]
 mod tests {
     use clarity::types::StacksEpochId;
-    use clarity::vm::errors::{CheckErrors, Error};
+    use clarity::vm::errors::{CheckErrorKind, VmExecutionError as Error};
     use clarity::vm::types::{OptionalData, PrincipalData, TupleData};
     use clarity::vm::{ClarityVersion, Value};
 
@@ -450,7 +450,9 @@ mod tests {
             // This test should be re-worked once the typechecker is fixed
             // and can correctly detect all argument inconsistencies.
             let snippet = "(get-block-info? burnchain-header-hash u0 miner-address)";
-            let expected = Err(Error::Unchecked(CheckErrors::IncorrectArgumentCount(2, 3)));
+            let expected = Err(Error::Unchecked(CheckErrorKind::IncorrectArgumentCount(
+                2, 3,
+            )));
             crosscheck_with_epoch(snippet, expected, StacksEpochId::Epoch24);
         }
     }
@@ -904,7 +906,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             e,
-            Error::Unchecked(CheckErrors::NoSuchDataVariable("data".into()))
+            Error::Unchecked(CheckErrorKind::NoSuchDataVariable("data".into()))
         );
     }
 

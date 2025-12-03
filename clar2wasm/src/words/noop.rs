@@ -92,7 +92,7 @@ impl ComplexWord for ContractOf {
 
 #[cfg(test)]
 mod tests {
-    use clarity::vm::errors::{Error, RuntimeErrorType};
+    use clarity::vm::errors::{RuntimeError, VmExecutionError as Error};
     use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier};
     use clarity::vm::Value;
 
@@ -103,7 +103,7 @@ mod tests {
         crosscheck(
             "(to-int u170141183460469231731687303715884105728)",
             Err(Error::Runtime(
-                RuntimeErrorType::ArithmeticOverflow,
+                RuntimeError::ArithmeticOverflow,
                 Some(Vec::new()),
             )),
         )
@@ -132,7 +132,7 @@ mod tests {
         crosscheck(
             "(to-uint -31)",
             Err(Error::Runtime(
-                RuntimeErrorType::ArithmeticUnderflow,
+                RuntimeError::ArithmeticUnderflow,
                 Some(Vec::new()),
             )),
         )
@@ -194,7 +194,7 @@ mod tests {
 (test-to-int-out-of-boundary)
     ",
             Err(Error::Runtime(
-                RuntimeErrorType::ArithmeticOverflow,
+                RuntimeError::ArithmeticOverflow,
                 Some(Vec::new()),
             )),
         );
@@ -209,7 +209,7 @@ mod tests {
 (test-to-uint-error)
     ",
             Err(Error::Runtime(
-                RuntimeErrorType::ArithmeticUnderflow,
+                RuntimeError::ArithmeticUnderflow,
                 Some(Vec::new()),
             )),
         );

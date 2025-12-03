@@ -1,5 +1,5 @@
 use clar2wasm::tools::{crosscheck, crosscheck_compare_only};
-use clarity::vm::errors::{Error, ShortReturnType};
+use clarity::vm::errors::{EarlyReturnError, VmExecutionError as Error};
 use clarity::vm::types::{ListTypeData, SequenceData, SequenceSubtype, TypeSignature};
 use clarity::vm::Value;
 use proptest::prelude::*;
@@ -100,7 +100,7 @@ proptest! {
 
         crosscheck(
             &snippet,
-            Err(Error::ShortReturn(ShortReturnType::ExpectedValue(Box::new(Value::from(throw_val)))))
+            Err(Error::EarlyReturn(EarlyReturnError::UnwrapFailed(Box::new(Value::from(throw_val)))))
         );
     }
 }
@@ -132,7 +132,7 @@ proptest! {
 
         crosscheck(
             &snippet,
-            Err(Error::ShortReturn(ShortReturnType::ExpectedValue(Box::new(Value::from(throw_val)))))
+            Err(Error::EarlyReturn(EarlyReturnError::UnwrapFailed(Box::new(Value::from(throw_val)))))
         );
     }
 
@@ -214,7 +214,7 @@ proptest! {
 
         crosscheck(
             &snippet,
-            Err(Error::ShortReturn(ShortReturnType::ExpectedValue(Box::new(Value::from(throw_val)))))
+            Err(Error::EarlyReturn(EarlyReturnError::UnwrapFailed(Box::new(Value::from(throw_val)))))
         );
     }
 }
@@ -262,7 +262,7 @@ proptest! {
 
         crosscheck(
             &snippet,
-            Err(Error::ShortReturn(ShortReturnType::ExpectedValue(Box::new(Value::from(throw_val)))))
+            Err(Error::EarlyReturn(EarlyReturnError::UnwrapFailed(Box::new(Value::from(throw_val)))))
         );
     }
 
@@ -329,7 +329,7 @@ proptest! {
 
         crosscheck(
             &snippet,
-            Err(Error::ShortReturn(ShortReturnType::ExpectedValue(Box::new(Value::from(throw_val)))))
+            Err(Error::EarlyReturn(EarlyReturnError::UnwrapFailed(Box::new(Value::from(throw_val)))))
         );
     }
 }
@@ -412,7 +412,7 @@ proptest! {
 
         crosscheck(
             &snippet,
-            Err(Error::ShortReturn(ShortReturnType::ExpectedValue(Box::new(Value::from(throw_val)))))
+            Err(Error::EarlyReturn(EarlyReturnError::UnwrapFailed(Box::new(Value::from(throw_val)))))
         );
     }
 }
@@ -511,7 +511,7 @@ proptest! {
     fn asserts_false(throw_val in PropValue::any()) {
         crosscheck(
             &format!("(asserts! false {throw_val})"),
-            Err(Error::ShortReturn(ShortReturnType::AssertionFailed(Box::new(Value::from(throw_val))))),
+            Err(Error::EarlyReturn(EarlyReturnError::AssertionFailed(Box::new(Value::from(throw_val))))),
         );
     }
 }
@@ -552,7 +552,7 @@ proptest! {
 
         crosscheck(
             &snippet,
-            Err(Error::ShortReturn(ShortReturnType::AssertionFailed(Box::new(Value::from(throw_val))))),
+            Err(Error::EarlyReturn(EarlyReturnError::AssertionFailed(Box::new(Value::from(throw_val))))),
         );
     }
 }
@@ -616,7 +616,7 @@ proptest! {
     fn try_none(val in PropValue::any()) {
         crosscheck(
             &format!("(try! (if false (some {val}) none))"),
-            Err(Error::ShortReturn(ShortReturnType::ExpectedValue(Box::new(Value::none()))))
+            Err(Error::EarlyReturn(EarlyReturnError::UnwrapFailed(Box::new(Value::none()))))
 
         );
     }
@@ -639,7 +639,7 @@ proptest! {
     ) {
         crosscheck(
             &format!("(try! (if false (ok {ok_val}) (err {err_val})))"),
-            Err(Error::ShortReturn(ShortReturnType::ExpectedValue(
+            Err(Error::EarlyReturn(EarlyReturnError::UnwrapFailed(
                 Box::new(Value::error(err_val.into()).unwrap()),
             ))),
         );
@@ -683,7 +683,7 @@ proptest! {
 
         crosscheck(
             &snippet,
-            Err(Error::ShortReturn(ShortReturnType::ExpectedValue(Box::new(Value::none())))),
+            Err(Error::EarlyReturn(EarlyReturnError::UnwrapFailed(Box::new(Value::none())))),
         );
     }
 
@@ -727,7 +727,7 @@ proptest! {
 
         crosscheck(
             &snippet,
-            Err(Error::ShortReturn(ShortReturnType::ExpectedValue(
+            Err(Error::EarlyReturn(EarlyReturnError::UnwrapFailed(
                 Box::new(Value::error(err_val.into()).unwrap()),
             ))),
         );

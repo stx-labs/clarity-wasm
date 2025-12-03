@@ -89,7 +89,7 @@ impl ComplexWord for Let {
 
 #[cfg(test)]
 mod tests {
-    use clarity::vm::errors::{Error, ShortReturnType};
+    use clarity::vm::errors::{EarlyReturnError, VmExecutionError as Error};
     use clarity::vm::Value;
 
     use crate::tools::{crosscheck, crosscheck_compare_only, crosscheck_expect_failure, evaluate};
@@ -202,7 +202,7 @@ mod tests {
 
         crosscheck(
             snippet,
-            Err(Error::ShortReturn(ShortReturnType::ExpectedValue(
+            Err(Error::EarlyReturn(EarlyReturnError::UnwrapFailed(
                 Box::new(Value::err_uint(42)),
             ))),
         );

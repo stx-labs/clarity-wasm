@@ -676,12 +676,12 @@ impl WasmGenerator {
         Ok(func_builder.finish(param_locals, &mut self.module.funcs))
     }
 
-    /// Generates the wasm code for a ShortReturn error.
+    /// Generates the wasm code for a EarlyReturn error.
     ///
     /// It takes for the `runtime_error`
-    /// argument either a [ErrorMap::ShortReturnAssertionFailure], a
-    /// [ErrorMap::ShortReturnExpectedValue], a [ErrorMap::ShortReturnExpectedValueResponse]
-    /// or a [ErrorMap::ShortReturnExpectedValueOptional].
+    /// argument either a [ErrorMap::EarlyReturnAssertionFailure], a
+    /// [ErrorMap::EarlyReturnExpectedValue], a [ErrorMap::EarlyReturnExpectedValueResponse]
+    /// or a [ErrorMap::EarlyReturnExpectedValueOptional].
     pub(crate) fn short_return_error(
         &mut self,
         builder: &mut InstrSeqBuilder,
@@ -689,9 +689,9 @@ impl WasmGenerator {
         runtime_error: ErrorMap,
     ) -> Result<(), GeneratorError> {
         match runtime_error {
-            ErrorMap::ShortReturnAssertionFailure
-            | ErrorMap::ShortReturnExpectedValue
-            | ErrorMap::ShortReturnExpectedValueResponse => {
+            ErrorMap::EarlyReturnAssertionFailure
+            | ErrorMap::EarlyReturnExpectedValue
+            | ErrorMap::EarlyReturnExpectedValueResponse => {
                 let (val_offset, _) = self.create_call_stack_local(builder, ty, false, true);
                 self.write_to_memory(builder, val_offset, 0, ty)?;
 
@@ -723,7 +723,7 @@ impl WasmGenerator {
                     .i32_const(runtime_error as i32)
                     .call(self.func_by_name("stdlib.runtime-error"));
             }
-            ErrorMap::ShortReturnExpectedValueOptional => {
+            ErrorMap::EarlyReturnExpectedValueOptional => {
                 // Simple case: just call runtime error
                 builder
                     .i32_const(runtime_error as i32)
@@ -2074,7 +2074,7 @@ mod tests {
     use clarity::vm::analysis::AnalysisDatabase;
     use clarity::vm::costs::LimitedCostTracker;
     use clarity::vm::database::MemoryBackingStore;
-    use clarity::vm::errors::{CheckErrors, Error};
+    use clarity::vm::errors::{CheckErrorKind, VmExecutionError as Error};
     use clarity::vm::types::{QualifiedContractIdentifier, StandardPrincipalData, TupleData};
     use clarity::vm::{ClarityVersion, Value};
     use walrus::Module;
@@ -2236,7 +2236,9 @@ mod tests {
   (ok true))
 (bar)
 ",
-            Err(Error::Unchecked(CheckErrors::IncorrectArgumentCount(1, 2))),
+            Err(Error::Unchecked(CheckErrorKind::IncorrectArgumentCount(
+                1, 2,
+            ))),
         );
     }
 

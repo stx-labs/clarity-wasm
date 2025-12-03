@@ -2553,7 +2553,7 @@ mod tests {
     #[cfg(not(feature = "test-clarity-v1"))]
     #[cfg(test)]
     mod clarity_v2_v3 {
-        use clarity::vm::errors::RuntimeErrorType;
+        use clarity::vm::errors::RuntimeError;
 
         use super::*;
 
@@ -2676,8 +2676,8 @@ mod tests {
 
             crosscheck(
                 snippet,
-                Err(clarity::vm::errors::Error::Runtime(
-                    RuntimeErrorType::BadTypeConstruction,
+                Err(clarity::vm::errors::VmExecutionError::Runtime(
+                    RuntimeError::BadTypeConstruction,
                     Some(Vec::new()),
                 )),
             )
@@ -2689,8 +2689,8 @@ mod tests {
 
             crosscheck(
                 snippet,
-                Err(clarity::vm::errors::Error::Runtime(
-                    RuntimeErrorType::BadTypeConstruction,
+                Err(clarity::vm::errors::VmExecutionError::Runtime(
+                    RuntimeError::BadTypeConstruction,
                     Some(Vec::new()),
                 )),
             )
@@ -2702,8 +2702,8 @@ mod tests {
 
             crosscheck(
                 snippet,
-                Err(clarity::vm::errors::Error::Runtime(
-                    RuntimeErrorType::BadTypeConstruction,
+                Err(clarity::vm::errors::VmExecutionError::Runtime(
+                    RuntimeError::BadTypeConstruction,
                     Some(Vec::new()),
                 )),
             )
