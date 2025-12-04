@@ -1529,16 +1529,23 @@ impl WasmGenerator {
                 })?
                 .clone();
 
+            let name_offset = *self
+                .literal_memory_offset
+                .get(&LiteralMemoryEntry::Ascii(name.to_owned()))
+                .ok_or_else(|| {
+                    GeneratorError::InternalError(format!(
+                        "Trying to access unsaved constant '{name}'"
+                    ))
+                })?;
+
             // Reserve stack space for the constant copy
             let (result_local, result_size) =
                 self.create_call_stack_local(builder, &expected_ty, true, true);
 
-            let (name_offset, name_length) = self.add_string_literal(name)?;
-
             // Push constant attributes to the stack.
             builder
                 .i32_const(name_offset as i32)
-                .i32_const(name_length as i32)
+                .i32_const(name.len() as i32)
                 .local_get(result_local)
                 .i32_const(result_size);
 
