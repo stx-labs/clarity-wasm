@@ -19,7 +19,7 @@ use clarity::vm::errors::{CheckErrors, Error, WasmError};
 use clarity::vm::events::{SmartContractEventData, StacksTransactionEvent};
 use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
 use clarity::vm::{eval_all, ClarityVersion, ContractContext, ContractName, Value};
-use clarity_types::types::{TypeSignature};
+use clarity_types::types::TypeSignature;
 use regex::Regex;
 
 use crate::compile;
