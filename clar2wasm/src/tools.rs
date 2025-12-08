@@ -1288,7 +1288,7 @@ mod tests {
     }
 
     #[test]
-    fn run_crosscheck_oom_compare_only() {
+    fn crosscheck_oom_compare_only_works() {
         let snippet = "(list 1 2 3)";
         crosscheck_oom_compare_only_with_epoch_and_version(
             snippet,
