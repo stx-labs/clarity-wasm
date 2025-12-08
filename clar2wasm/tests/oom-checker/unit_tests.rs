@@ -250,9 +250,11 @@ fn secp256k1_recover_oom() {
 #[cfg(not(feature = "test-clarity-v1"))]
 #[cfg(test)]
 mod clarity_v2_v3 {
-    use clar2wasm::tools::{crosscheck_oom, crosscheck_oom_with_non_literal_args, list_of};
+    use clar2wasm::tools::{crosscheck_oom, crosscheck_oom_with_non_literal_args};
     use clarity::vm::types::{PrincipalData, TypeSignature};
     use clarity::vm::Value;
+
+    use crate::list_of;
 
     #[test]
     fn principal_construct_oom() {
