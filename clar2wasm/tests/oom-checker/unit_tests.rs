@@ -1,6 +1,6 @@
+use crate::list_of;
 use clar2wasm::tools::{
-    crosscheck_oom, crosscheck_oom_with_env, crosscheck_oom_with_non_literal_args, list_of,
-    TestEnvironment,
+    crosscheck_oom, crosscheck_oom_with_env, crosscheck_oom_with_non_literal_args, TestEnvironment,
 };
 use clarity::vm::types::{PrincipalData, TypeSignature};
 use clarity::vm::Value;

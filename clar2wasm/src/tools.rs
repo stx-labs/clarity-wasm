@@ -1149,11 +1149,6 @@ pub fn crosscheck_oom_with_env(
     );
 }
 
-pub fn list_of(elem: TypeSignature, max_len: u32) -> TypeSignature {
-    TypeSignature::SequenceType(clarity::vm::types::SequenceSubtype::ListType(
-        ListTypeData::new_list(elem, max_len).unwrap(),
-    ))
-}
 #[cfg(test)]
 mod tests {
 
