@@ -22,6 +22,7 @@ use walrus::{
 };
 
 use crate::cost::{ChargeContext, WordCharge};
+use crate::duck_type::need_ducktyping;
 use crate::error_mapping::ErrorMap;
 use crate::wasm_utils::{
     check_argument_count, get_type_in_memory_size, get_type_size, signature_from_string,
@@ -1538,23 +1539,44 @@ impl WasmGenerator {
                     ))
                 })?;
 
-            // Reserve stack space for the constant copy
-            let (result_local, result_size) =
-                self.create_call_stack_local(builder, &expected_ty, true, true);
-
-            // Push constant attributes to the stack.
+            // Pushing the constant name and length on the stack
             builder
                 .i32_const(name_offset as i32)
-                .i32_const(name.len() as i32)
-                .local_get(result_local)
-                .i32_const(result_size);
+                .i32_const(name.len() as i32);
 
-            // Call a host interface function to load
-            // constant attributes from a data structure.
-            builder.call(self.func_by_name("stdlib.load_constant"));
+            if !need_ducktyping(&cst_ty, &expected_ty) {
+                // if we don't need ducktyping, we can just load the constant as it is stored in db
+                let (result_local, result_size) =
+                    self.create_call_stack_local(builder, &cst_ty, true, true);
 
-            self.read_from_memory(builder, result_local, 0, &cst_ty)?;
-            self.duck_type(builder, &cst_ty, &expected_ty, None)?;
+                builder
+                    .local_get(result_local)
+                    .i32_const(result_size)
+                    .call(self.func_by_name("stdlib.load_constant"));
+
+                self.read_from_memory(builder, result_local, 0, &cst_ty)?;
+            } else {
+                // if we need ducktyping, we need some workspace to read the read the constant from db, and
+                // some allocated space for the duck-typed result.
+                let (result_local, _result_size) =
+                    self.create_call_stack_local(builder, &expected_ty, true, true);
+
+                let read_local = self.borrow_local(ValType::I32);
+                builder
+                    .global_get(self.stack_pointer)
+                    .local_set(*read_local);
+                let read_size = get_type_in_memory_size(&cst_ty, true);
+                self.ensure_work_space(read_size as u32);
+
+                builder
+                    .local_get(*read_local)
+                    .i32_const(read_size)
+                    .call(self.func_by_name("stdlib.load_constant"));
+
+                self.read_from_memory(builder, *read_local, 0, &cst_ty)?;
+
+                self.duck_type(builder, &cst_ty, &expected_ty, Some(result_local))?;
+            }
 
             Ok(true)
         } else {
