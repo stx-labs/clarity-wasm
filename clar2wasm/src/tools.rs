@@ -1116,10 +1116,26 @@ pub fn crosscheck_oom_with_non_literal_args(
     );
 }
 
+pub fn crosscheck_oom_with_non_literal_args_compare_only(
+    snippet: &str,
+    args_types: &[TypeSignature],
+    epoch: StacksEpochId,
+    version: ClarityVersion,
+) {
+    crosscheck_compare_only(&as_oom_check_snippet(snippet, args_types, epoch, version));
+}
+
 pub fn crosscheck_oom(snippet: &str, expected: Result<Option<Value>, Error>) {
     crosscheck_oom_with_non_literal_args(snippet, &[], expected)
 }
 
+pub fn crosscheck_oom_compare_only_with_epoch_and_version(
+    snippet: &str,
+    epoch: StacksEpochId,
+    version: ClarityVersion,
+) {
+    crosscheck_oom_with_non_literal_args_compare_only(snippet, &[], epoch, version)
+}
 
 pub fn crosscheck_oom_with_env(
     snippet: &str,
@@ -1274,5 +1290,15 @@ mod tests {
             let res = interpret(snippet_different_err).expect_err("Should detect a syntax error");
             assert!(!KnownBug::has_list_of_qualified_principal_issue(&res));
         }
+    }
+
+    #[test]
+    fn run_crosscheck_oom_compare_only() {
+        let snippet = "(list 1 2 3)";
+        crosscheck_oom_compare_only_with_epoch_and_version(
+            snippet,
+            StacksEpochId::latest(),
+            ClarityVersion::latest(),
+        );
     }
 }
