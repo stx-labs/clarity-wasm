@@ -1,9 +1,10 @@
-use crate::list_of;
 use clar2wasm::tools::{
     crosscheck_oom, crosscheck_oom_with_env, crosscheck_oom_with_non_literal_args, TestEnvironment,
 };
 use clarity::vm::types::{PrincipalData, TypeSignature};
 use clarity::vm::Value;
+
+use crate::list_of;
 
 #[test]
 fn principal_of_oom() {
