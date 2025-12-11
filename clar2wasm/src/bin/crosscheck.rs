@@ -2,7 +2,10 @@ mod utils;
 use std::fs;
 
 use clap::Parser;
-use clar2wasm::tools::crosscheck_compare_only_with_epoch_and_version;
+use clar2wasm::tools::{
+    crosscheck_compare_only_with_epoch_and_version,
+    crosscheck_oom_compare_only_with_epoch_and_version,
+};
 use utils::*;
 
 /// crosscheck is a tool to compare the results of the compiled and interpreted
@@ -18,6 +21,9 @@ struct Args {
     /// The clarity version to use
     #[arg(long)]
     clarity_version: Option<WrappedClarityVersion>,
+    /// To run crosscheck with Out Of Memory check
+    #[arg(long, default_value_t = false)]
+    crosscheck_oom: bool,
 }
 
 fn main() {
@@ -41,5 +47,11 @@ fn main() {
     let epoch = args.stacks_epoch.unwrap_or_default().into();
     let version = args.clarity_version.unwrap_or_default().into();
 
-    crosscheck_compare_only_with_epoch_and_version(&source, epoch, version);
+    if args.crosscheck_oom {
+        println!("Running Crosscheck OOM");
+        crosscheck_oom_compare_only_with_epoch_and_version(&source, epoch, version);
+    } else {
+        println!("Running Crosscheck");
+        crosscheck_compare_only_with_epoch_and_version(&source, epoch, version);
+    }
 }
