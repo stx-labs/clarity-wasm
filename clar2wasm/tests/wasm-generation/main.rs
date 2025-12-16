@@ -245,7 +245,7 @@ impl TryFrom<Vec<PropValue>> for PropValue {
     }
 }
 
-fn prop_value(ty: TypeSignature) -> impl Strategy<Value = Value> {
+pub fn prop_value(ty: TypeSignature) -> impl Strategy<Value = Value> {
     match ty {
         TypeSignature::NoType => unreachable!(),
         TypeSignature::IntType => int().boxed(),
