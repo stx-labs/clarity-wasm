@@ -1556,7 +1556,7 @@ impl WasmGenerator {
 
                 self.read_from_memory(builder, result_local, 0, &cst_ty)?;
             } else {
-                // if we need ducktyping, we need some workspace to read the read the constant from db, and
+                // if we need ducktyping, we need some workspace to read the constant from db, and
                 // some allocated space for the duck-typed result.
                 let (result_local, _result_size) =
                     self.create_call_stack_local(builder, &expected_ty, true, true);
@@ -1803,16 +1803,20 @@ impl WasmGenerator {
             )));
         }
 
-        let expected_ty = duck_ty.unwrap_or(return_ty);
-
         // if needed, we can convert the argument to another compatible type.
-        self.duck_type(builder, return_ty, expected_ty, None)?;
+        let expected_ty = if let Some(ducky) = duck_ty {
+            let (duck_local, _duck_size) = self.create_call_stack_local(builder, ducky, true, true);
+            self.duck_type(builder, return_ty, ducky, Some(duck_local))?;
+            ducky.clone()
+        } else {
+            return_ty.clone()
+        };
 
         // If an in-memory value is returned from the function, we need to copy
         // it to our frame, from the callee's frame.
         if let Some(return_offset) = in_memory_offset {
-            let locals = self.save_to_locals(builder, expected_ty, true);
-            self.copy_value(builder, expected_ty, &locals, return_offset)?;
+            let locals = self.save_to_locals(builder, &expected_ty, true);
+            self.copy_value(builder, &expected_ty, &locals, return_offset)?;
 
             for l in locals {
                 builder.local_get(l);

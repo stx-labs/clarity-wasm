@@ -257,22 +257,22 @@ pub fn need_ducktyping(og_ty: &TypeSignature, tg_ty: &TypeSignature) -> bool {
         | TypeSignature::BoolType
         | TypeSignature::IntType
         | TypeSignature::UIntType => og_ty != tg_ty,
-        TypeSignature::PrincipalType | TypeSignature::CallableType(_) => matches!(
+        TypeSignature::PrincipalType | TypeSignature::CallableType(_) => !matches!(
             tg_ty,
             TypeSignature::PrincipalType | TypeSignature::CallableType(_),
         ),
-        TypeSignature::SequenceType(SequenceSubtype::BufferType(_)) => matches!(
+        TypeSignature::SequenceType(SequenceSubtype::BufferType(_)) => !matches!(
             tg_ty,
             TypeSignature::SequenceType(SequenceSubtype::BufferType(_))
         ),
         TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::ASCII(_))) => {
-            matches!(
+            !matches!(
                 tg_ty,
                 TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::ASCII(_)))
             )
         }
         TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::UTF8(_))) => {
-            matches!(
+            !matches!(
                 tg_ty,
                 TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::UTF8(_)))
             )
@@ -314,7 +314,7 @@ pub fn need_ducktyping(og_ty: &TypeSignature, tg_ty: &TypeSignature) -> bool {
     }
 }
 
-fn dt_needed_workspace(ty: &TypeSignature) -> u32 {
+pub fn dt_needed_workspace(ty: &TypeSignature) -> u32 {
     match ty {
         TypeSignature::OptionalType(opt) => dt_needed_workspace(opt),
         TypeSignature::ResponseType(resp) => {
