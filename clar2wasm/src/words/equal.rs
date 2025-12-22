@@ -49,16 +49,17 @@ impl ComplexWord for IsEq {
         let ty = unified_ty;
 
         for operand in args.iter() {
-            // Get new operand on Top Of Stack
             generator.traverse_expr(builder, operand)?;
-            // Get its serialization size
+            // STACK: [operand]
             generator.serialization_size(builder, &ty)?;
-            // Store it in our running sum
+            // STACK: [operand, serialization_size]
             builder
                 .local_get(serialization_size_sum)
                 .binop(BinaryOp::I32Add)
                 .local_set(serialization_size_sum);
+            // STACK: [operand]
         }
+        // STACK: [operand1, ..., operandN]
 
         self.charge(generator, builder, serialization_size_sum)?;
 
@@ -73,11 +74,11 @@ impl ComplexWord for IsEq {
 
             let last_locals = generator.save_to_locals(builder, &ty, true);
 
-            // Loop through remainder operands, if more than one argument
+            // Loop through n-1 remainder operands
+            // n-1 as one operand is already stored in last_locals
             for _ in args.iter().skip(1) {
                 let top_of_stack_locals = generator.save_to_locals(builder, &ty, true);
 
-                // check equality
                 wasm_equal(&ty, generator, builder, &last_locals, &top_of_stack_locals)?;
 
                 // Do an "and" operation with the result from the previous function call
