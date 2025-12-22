@@ -1441,9 +1441,9 @@ mod word {
         3 => CostMeter { runtime: 216,  read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
     });
     decl_tests!("is_eq", "(is-eq 1 1)", {
-        1 => CostMeter { runtime: 3000, read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
-        2 => CostMeter { runtime: 186,  read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
-        3 => CostMeter { runtime: 153,  read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
+        1 => CostMeter { runtime: 35000, read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
+        2 => CostMeter { runtime: 410,  read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
+        3 => CostMeter { runtime: 185,  read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
     });
     decl_tests!("map_definition", "(define-map squares { x: int } { y: int })", {
         1 => CostMeter { runtime: 0, read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
@@ -1558,9 +1558,9 @@ mod word {
     decl_tests!("map", "(define-private (zero-or-one (char (buff 1))) \
                           (if (is-eq char 0x00) 0x00 0x01)) \
                         (map zero-or-one 0x000102)", {
-        1 => CostMeter { runtime: 16000, read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
-        2 => CostMeter { runtime: 8102,  read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
-        3 => CostMeter { runtime: 7624,  read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
+        1 => CostMeter { runtime: 46000, read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
+        2 => CostMeter { runtime: 8312,  read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
+        3 => CostMeter { runtime: 7654,  read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
     });
     decl_tests!("replace_at", "(replace-at? 0x00112233 u2 0x44)", {
         3 => CostMeter { runtime: 565,  read_count: 0, read_length: 0, write_count: 0, write_length: 0 },

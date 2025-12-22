@@ -30,10 +30,9 @@ impl ComplexWord for IsEq {
         args: &[SymbolicExpression],
     ) -> Result<(), GeneratorError> {
         let args_len = args.len();
+        let serialization_size_sum = generator.module.locals.add(ValType::I32);
 
         check_args!(generator, builder, 1, args_len, ArgumentCountCheck::AtLeast);
-
-        self.charge(generator, builder, args_len as u32)?;
 
         // Since all argument should have compatible types, we unify them so that they all have the same representation.
         let unified_ty = args.iter().try_fold(TypeSignature::NoType, |ty, arg| {
@@ -47,39 +46,48 @@ impl ComplexWord for IsEq {
             generator.set_expr_type(a, unified_ty.clone())?;
         }
 
-        // Traverse the first operand pushing it onto the stack
-        let first_op = args.get_expr(0)?;
-        generator.traverse_expr(builder, first_op)?;
-        let ty = generator
-            .get_expr_type(first_op)
-            .ok_or_else(|| {
-                GeneratorError::TypeError("is-eq value expression must be typed".to_owned())
-            })?
-            .clone();
+        let ty = unified_ty;
+
+        for operand in args.iter() {
+            // Get new operand on Top Of Stack
+            generator.traverse_expr(builder, operand)?;
+            // Get its serialization size
+            generator.serialization_size(builder, &ty)?;
+            // Store it in our running sum
+            builder
+                .local_get(serialization_size_sum)
+                .binop(BinaryOp::I32Add)
+                .local_set(serialization_size_sum);
+        }
+
+        self.charge(generator, builder, serialization_size_sum)?;
 
         // No need to go further if there is only one argument
         if args.len() == 1 {
             drop_value(builder, &ty);
             builder.i32_const(1); // TRUE
-            return Ok(());
-        }
+        } else {
+            let equality_accumulator = generator.module.locals.add(ValType::I32);
+            // Initialize boolean result accumulator to TRUE
+            builder.i32_const(1).local_set(equality_accumulator);
 
-        let val_locals = generator.save_to_locals(builder, &ty, true);
+            let last_locals = generator.save_to_locals(builder, &ty, true);
 
-        // Initialize boolean result accumulator to TRUE
-        builder.i32_const(1);
+            // Loop through remainder operands, if more than one argument
+            for _ in args.iter().skip(1) {
+                let top_of_stack_locals = generator.save_to_locals(builder, &ty, true);
 
-        // Loop through remainder operands, if the case.
-        for operand in args.iter().skip(1) {
-            // push the new operand on the stack
-            generator.traverse_expr(builder, operand)?;
-            let nth_locals = generator.save_to_locals(builder, &ty, true);
+                // check equality
+                wasm_equal(&ty, generator, builder, &last_locals, &top_of_stack_locals)?;
 
-            // check equality
-            wasm_equal(&ty, generator, builder, &val_locals, &nth_locals)?;
-
-            // Do an "and" operation with the result from the previous function call.
-            builder.binop(BinaryOp::I32And);
+                // Do an "and" operation with the result from the previous function call
+                // And store it in the equality accumulator
+                builder
+                    .local_get(equality_accumulator)
+                    .binop(BinaryOp::I32And)
+                    .local_set(equality_accumulator);
+            }
+            builder.local_get(equality_accumulator);
         }
 
         Ok(())
