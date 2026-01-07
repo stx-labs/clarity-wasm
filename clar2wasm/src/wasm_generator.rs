@@ -1510,9 +1510,12 @@ impl WasmGenerator {
                     builder.call(self.func_by_name("stdlib.chain_id"));
                     Ok(true)
                 }
-                NativeVariables::StacksBlockTime | NativeVariables::CurrentContract => {
-                    todo!("Implement NativeVariable")
+                NativeVariables::StacksBlockTime => {
+                    // Call the host interface function, `stacks_block_time`
+                    builder.call(self.func_by_name("stdlib.stacks_block_time"));
+                    Ok(true)
                 }
+                NativeVariables::CurrentContract => todo!("Implement NativeVariable"),
             }
         } else {
             Ok(false)

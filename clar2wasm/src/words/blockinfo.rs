@@ -638,6 +638,35 @@ mod tests {
         }
     }
 
+    // #[cfg(feature = "test-clarity-v4")]
+    mod clarity_v4 {
+        use clarity::types::StacksEpochId;
+        use clarity::vm::ClarityVersion;
+
+        use super::*;
+        use crate::tools::crosscheck_with_env;
+
+        #[test]
+        fn stacks_block_time() {
+            let mut env = TestEnvironment::new(StacksEpochId::Epoch33, ClarityVersion::Clarity4);
+            let expected = chrono::Utc::now().timestamp() as u128;
+            let result = env.evaluate("stacks-block-time").unwrap();
+            assert_eq!(result, Some(Value::UInt(expected)),);
+        }
+
+        #[test]
+        #[ignore = "This test fails due to an interpreter runtime error."]
+        fn stacks_block_time_crosscheck() {
+            let env = TestEnvironment::new(StacksEpochId::Epoch33, ClarityVersion::Clarity4);
+            let expected = chrono::Utc::now().timestamp() as u128;
+            crosscheck_with_env(
+                "stacks-block-time",
+                Ok(Some(Value::some(Value::UInt(expected)).unwrap())),
+                env,
+            );
+        }
+    }
+
     //- Block Info
 
     #[test]
