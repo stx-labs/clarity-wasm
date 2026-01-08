@@ -650,11 +650,7 @@ mod tests {
         fn stacks_block_time_crosscheck() {
             let env = TestEnvironment::new(StacksEpochId::Epoch33, ClarityVersion::Clarity4);
             let expected = chrono::Utc::now().timestamp() as u128;
-            crosscheck_with_env(
-                "stacks-block-time",
-                Ok(Some(Value::UInt(expected))),
-                env,
-            );
+            crosscheck_with_env("stacks-block-time", Ok(Some(Value::UInt(expected))), env);
         }
     }
 
