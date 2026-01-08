@@ -79,6 +79,15 @@ impl TestEnvironment {
             .expect("Failed to set epoch version.");
         conn.commit().expect("Failed to commit.");
 
+        // Setup block metadata for epochs that use marfed block time
+        if epoch.uses_marfed_block_time() {
+            let block_time = chrono::Utc::now().timestamp() as u64;
+            conn.begin();
+            conn.setup_block_metadata(Some(block_time))
+                .expect("Failed to setup block metadata.");
+            conn.commit().expect("Failed to commit block metadata.");
+        }
+
         // Give one account a starting balance, to be used for testing.
         let recipient = PrincipalData::Standard(StandardPrincipalData::transient());
         let mut conn = ClarityDatabase::new(&mut datastore, &burn_datastore, &burn_datastore);
@@ -532,6 +541,7 @@ impl TestConfig {
             _ if cfg!(feature = "test-clarity-v1") => ClarityVersion::Clarity1,
             _ if cfg!(feature = "test-clarity-v2") => ClarityVersion::Clarity2,
             _ if cfg!(feature = "test-clarity-v3") => ClarityVersion::Clarity3,
+            _ if cfg!(feature = "test-clarity-v4") => ClarityVersion::Clarity4,
             // TODO: see issue #731
             // Revert that when support for Clarity4 is implemented
             // _ => ClarityVersion::latest(),

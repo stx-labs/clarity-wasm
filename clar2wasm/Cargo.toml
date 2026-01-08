@@ -31,6 +31,7 @@ pb = []
 test-clarity-v1 = []
 test-clarity-v2 = []
 test-clarity-v3 = []
+test-clarity-v4 = []
 developer-mode = []
 
 [dev-dependencies]

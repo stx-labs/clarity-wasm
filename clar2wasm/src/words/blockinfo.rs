@@ -647,21 +647,12 @@ mod tests {
         use crate::tools::crosscheck_with_env;
 
         #[test]
-        fn stacks_block_time() {
-            let mut env = TestEnvironment::new(StacksEpochId::Epoch33, ClarityVersion::Clarity4);
-            let expected = chrono::Utc::now().timestamp() as u128;
-            let result = env.evaluate("stacks-block-time").unwrap();
-            assert_eq!(result, Some(Value::UInt(expected)),);
-        }
-
-        #[test]
-        #[ignore = "This test fails due to an interpreter runtime error."]
         fn stacks_block_time_crosscheck() {
             let env = TestEnvironment::new(StacksEpochId::Epoch33, ClarityVersion::Clarity4);
             let expected = chrono::Utc::now().timestamp() as u128;
             crosscheck_with_env(
                 "stacks-block-time",
-                Ok(Some(Value::some(Value::UInt(expected)).unwrap())),
+                Ok(Some(Value::UInt(expected))),
                 env,
             );
         }
