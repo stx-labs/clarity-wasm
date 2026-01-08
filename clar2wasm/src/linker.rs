@@ -959,17 +959,11 @@ fn link_stacks_block_time_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<
             "clarity",
             "stacks_block_time",
             |mut caller: Caller<'_, ClarityWasmContext>| {
-                let height = caller
-                    .data_mut()
-                    .global_context
-                    .database
-                    .get_current_block_height();
-
                 let block_time = caller
                     .data_mut()
                     .global_context
                     .database
-                    .get_block_time(height)?;
+                    .get_current_block_time()?;
                 Ok((block_time as i64, 0i64))
             },
         )
