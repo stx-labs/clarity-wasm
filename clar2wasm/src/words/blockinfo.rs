@@ -638,7 +638,7 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "test-clarity-v4")]
+    // #[cfg(feature = "test-clarity-v4")]
     mod clarity_v4 {
         use clarity::types::StacksEpochId;
         use clarity::vm::ClarityVersion;
@@ -649,8 +649,7 @@ mod tests {
         #[test]
         fn stacks_block_time_crosscheck() {
             let env = TestEnvironment::new(StacksEpochId::Epoch33, ClarityVersion::Clarity4);
-            let expected = chrono::Utc::now().timestamp() as u128;
-            crosscheck_with_env("stacks-block-time", Ok(Some(Value::UInt(expected))), env);
+            crosscheck_with_env("stacks-block-time", Ok(Some(Value::UInt(1))), env);
         }
     }
 

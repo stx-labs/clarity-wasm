@@ -81,9 +81,8 @@ impl TestEnvironment {
 
         // Setup block metadata for epochs that use marfed block time
         if epoch.uses_marfed_block_time() {
-            let block_time = chrono::Utc::now().timestamp() as u64;
             conn.begin();
-            conn.setup_block_metadata(Some(block_time))
+            conn.setup_block_metadata(Some(1))
                 .expect("Failed to setup block metadata.");
             conn.commit().expect("Failed to commit block metadata.");
         }
@@ -496,10 +495,7 @@ pub fn evaluate_at_with_amount(
 /// Evaluate a Clarity snippet at the latest epoch and clarity version.
 /// Returns an optional value -- the result of the evaluation.
 pub fn evaluate(snippet: &str) -> Result<Option<Value>, Error> {
-    // TODO: see issue #731
-    // Revert that when support for Clarity4 is implemented
-    // evaluate_at(snippet, StacksEpochId::latest(), ClarityVersion::latest())
-    evaluate_at(snippet, StacksEpochId::latest(), ClarityVersion::Clarity3)
+    evaluate_at(snippet, StacksEpochId::latest(), ClarityVersion::latest())
 }
 
 /// Interpret a Clarity snippet at a specific epoch and version.
@@ -542,19 +538,13 @@ impl TestConfig {
             _ if cfg!(feature = "test-clarity-v2") => ClarityVersion::Clarity2,
             _ if cfg!(feature = "test-clarity-v3") => ClarityVersion::Clarity3,
             _ if cfg!(feature = "test-clarity-v4") => ClarityVersion::Clarity4,
-            // TODO: see issue #731
-            // Revert that when support for Clarity4 is implemented
-            // _ => ClarityVersion::latest(),
-            _ => ClarityVersion::Clarity3,
+            _ => ClarityVersion::latest(),
         }
     }
 
     /// Latest Stacks epoch.
     pub fn latest_epoch() -> StacksEpochId {
-        // TODO: see issue #731
-        // Revert that when support for Clarity4 is implemented
-        // StacksEpochId::latest()
-        StacksEpochId::Epoch32
+        StacksEpochId::latest()
     }
 }
 
