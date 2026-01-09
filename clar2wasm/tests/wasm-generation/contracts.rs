@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use clar2wasm::tools::{crosscheck_multi_contract};
+use clar2wasm::tools::crosscheck_multi_contract;
 use clarity::vm::types::{ResponseData, TupleData};
 use clarity::vm::{ClarityName, Value};
 use proptest::prelude::*;
@@ -148,7 +148,11 @@ proptest! {
     }
 }
 
-#[cfg(any (feature = "test-clarity-v1", feature = "test-clarity-v2", feature = "test-clarity-v3"))]
+#[cfg(any(
+    feature = "test-clarity-v1",
+    feature = "test-clarity-v2",
+    feature = "test-clarity-v3"
+))]
 proptest! {
     #![proptest_config(super::runtime_config())]
 
