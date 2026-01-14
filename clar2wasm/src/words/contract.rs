@@ -203,27 +203,43 @@ mod tests {
     use clarity::vm::Value;
 
     use crate::tools::{
-        crosscheck_multi_contract, crosscheck_multi_contract_with_env, evaluate, TestEnvironment,
+        crosscheck_multi_contract, crosscheck_multi_contract_with_env, TestEnvironment,
     };
 
-    #[test]
-    fn as_contract_less_than_one_arg() {
-        let result = evaluate("(as-contract)");
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("expecting 1 arguments, got 0"));
-    }
+    #[cfg(not(feature = "test-clarity-v4"))]
+    mod clarity_v1_v2_v3 {
+        use clarity::types::StacksEpochId;
+        use clarity::vm::ClarityVersion;
 
-    #[test]
-    fn as_contract_more_than_one_arg() {
-        let result = evaluate("(as-contract 1 2)");
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("expecting 1 arguments, got 2"));
+        use crate::tools::evaluate_at;
+
+        #[test]
+        fn as_contract_less_than_one_arg() {
+            let result = evaluate_at(
+                "(as-contract)",
+                StacksEpochId::Epoch32,
+                ClarityVersion::Clarity3,
+            );
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("expecting 1 arguments, got 0"));
+        }
+
+        #[test]
+        fn as_contract_more_than_one_arg() {
+            let result = evaluate_at(
+                "(as-contract 1 2)",
+                StacksEpochId::Epoch32,
+                ClarityVersion::Clarity3,
+            );
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("expecting 1 arguments, got 2"));
+        }
     }
 
     #[test]

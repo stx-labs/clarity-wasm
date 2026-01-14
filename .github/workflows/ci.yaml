@@ -51,7 +51,7 @@ jobs:
     needs: [fmt, clippy]
     strategy:
       matrix:
-        clarity_version: [1, 2, 3]
+        clarity_version: [1, 2, 3, 4]
 
     name: Clarity::V${{ matrix.clarity_version }} Artifacts
     steps:
@@ -96,7 +96,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        clarity_version: [1, 2, 3]
+        clarity_version: [1, 2, 3, 4]
     name: Clarity::V${{ matrix.clarity_version }} Tests
     steps:
       - name: Checkout PR
@@ -145,7 +145,7 @@ jobs:
   #   strategy:
   #     fail-fast: false
   #     matrix:
-  #       clarity_version: [1, 2, 3]
+  #       clarity_version: [1, 2, 3, 4]
   #   name: Clarity::V${{ matrix.clarity_version }} Code Coverage
   #   steps:
   #     - name: Download codecov.json

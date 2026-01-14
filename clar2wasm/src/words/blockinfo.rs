@@ -638,6 +638,21 @@ mod tests {
         }
     }
 
+    // #[cfg(feature = "test-clarity-v4")]
+    mod clarity_v4 {
+        use clarity::types::StacksEpochId;
+        use clarity::vm::ClarityVersion;
+
+        use super::*;
+        use crate::tools::crosscheck_with_env;
+
+        #[test]
+        fn stacks_block_time_crosscheck() {
+            let env = TestEnvironment::new(StacksEpochId::Epoch33, ClarityVersion::Clarity4);
+            crosscheck_with_env("stacks-block-time", Ok(Some(Value::UInt(1))), env);
+        }
+    }
+
     //- Block Info
 
     #[test]
