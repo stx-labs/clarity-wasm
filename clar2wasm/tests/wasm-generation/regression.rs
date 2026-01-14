@@ -1,3 +1,5 @@
+use clar2wasm::tools::evaluate;
+
 mod tests {
     /// This files purpose is to add examples of generated values that failed,
     /// so that we can be sure they won't fail again after some random refactor
@@ -149,4 +151,11 @@ mod tests {
             );
         }
     }
+}
+
+#[test]
+fn foo() {
+    let snippet = std::fs::read_to_string("../try.clar").unwrap();
+    evaluate(&snippet).expect("Fail");
+    //interpret(&snippet).expect("Fail");
 }

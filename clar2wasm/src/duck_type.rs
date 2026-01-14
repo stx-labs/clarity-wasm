@@ -27,6 +27,7 @@ impl WasmGenerator {
     ) -> Result<(), GeneratorError> {
         // This is a no-op if both types are identical
         if !need_ducktyping(og_ty, target_ty) {
+            eprintln!("NONEED DUCKY");
             return Ok(());
         }
 
@@ -260,6 +261,12 @@ pub fn need_ducktyping(og_ty: &TypeSignature, tg_ty: &TypeSignature) -> bool {
         TypeSignature::PrincipalType | TypeSignature::CallableType(_) => !matches!(
             tg_ty,
             TypeSignature::PrincipalType | TypeSignature::CallableType(_),
+        ),
+        // Hack to make SequenceElementType::Byte::into work
+        &TypeSignature::BUFFER_1 => !matches!(
+            tg_ty,
+            TypeSignature::SequenceType(SequenceSubtype::BufferType(_))
+                | &TypeSignature::STRING_ASCII_MIN
         ),
         TypeSignature::SequenceType(SequenceSubtype::BufferType(_)) => !matches!(
             tg_ty,

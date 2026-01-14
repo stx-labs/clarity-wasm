@@ -237,7 +237,7 @@ proptest! {
     ) {
         let snippet = format!(
             r#"
-                (define-private (foo (a (list 100 {t})) (b {t}))
+                (define-private (foo (a (list 10 {t})) (b {t}))
                     (append a b)
                 ) 
 

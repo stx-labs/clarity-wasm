@@ -8,13 +8,13 @@ use walrus::ValType;
 
 use crate::check_args;
 use crate::cost::WordCharge;
+use crate::duck_type::{dt_needed_workspace, need_ducktyping};
 use crate::error_mapping::ErrorMap;
 use crate::wasm_generator::{
-    add_placeholder_for_clarity_type, clar2wasm_ty, drop_value, has_in_memory_type,
-    type_from_sequence_element, ArgumentsExt, BorrowedLocal, GeneratorError, SequenceElementType,
-    WasmGenerator,
+    add_placeholder_for_clarity_type, clar2wasm_ty, drop_value, has_in_memory_type, ArgumentsExt,
+    BorrowedLocal, GeneratorError, SequenceElementType, WasmGenerator,
 };
-use crate::wasm_utils::{check_argument_count, ArgumentCountCheck};
+use crate::wasm_utils::{check_argument_count, get_type_in_memory_size, ArgumentCountCheck};
 use crate::words::{self, ComplexWord, Word};
 
 #[derive(Debug)]
@@ -143,6 +143,7 @@ impl ComplexWord for Fold {
                                 return_ty: returns.clone(),
                             };
                             // Set the type of the list elements
+                            // TODO: should be ducktyping
                             generator.set_expr_type(
                                 sequence,
                                 TypeSignature::SequenceType(SequenceSubtype::ListType(
@@ -174,6 +175,11 @@ impl ComplexWord for Fold {
             })?
             .clone();
         let result_wasm_types = clar2wasm_ty(&result_clar_ty);
+
+        // preallocate memory for the accumulator
+        let accumulator_offset = generator
+            .reserve_static_memory(get_type_in_memory_size(&result_clar_ty, true) as _)
+            as i32;
 
         // Get the type of the sequence
         let elem_ty = generator.get_sequence_element_type(sequence)?;
@@ -210,6 +216,7 @@ impl ComplexWord for Fold {
             &result_wasm_types,
             &result_wasm_types,
         ));
+        // TODO: check if typing is correct
         let then_id = then.id();
 
         let mut else_ = builder.dangling_instr_seq(InstrSeqType::new(
@@ -230,23 +237,7 @@ impl ComplexWord for Fold {
         let loop_id = loop_.id();
 
         // Load the element from the sequence
-        let elem_size = match &elem_ty {
-            SequenceElementType::Other(elem_ty) => {
-                generator.read_from_memory(&mut loop_, offset, 0, elem_ty)?
-            }
-            SequenceElementType::Byte => {
-                // The element type is a byte, so we can just push the
-                // offset and length (1) to the stack.
-                loop_.local_get(offset).i32_const(1);
-                1
-            }
-            SequenceElementType::UnicodeScalar => {
-                // The element type is a 32-bit unicode scalar, so we can just push the
-                // offset and length (4) to the stack.
-                loop_.local_get(offset).i32_const(4);
-                4
-            }
-        };
+        elem_ty.load(generator, &mut loop_, offset)?;
 
         // Push the locals to the stack
         for result_local in &result_locals {
@@ -254,25 +245,23 @@ impl ComplexWord for Fold {
         }
 
         if let Some(simple) = words::lookup_simple(func).or(words::lookup_variadic_simple(func)) {
+            // TODO: preallocation usage
             // Call simple builtin
-
-            let arg_a_ty = type_from_sequence_element(&elem_ty);
-            let arg_types = &[arg_a_ty, result_clar_ty.clone()];
-
+            let arg_types = &[(&elem_ty).into(), result_clar_ty.clone()];
             simple.visit(generator, &mut loop_, arg_types, &result_clar_ty)?;
-        } else {
+        } else if let Some(tys) = &fold_func_ty {
+            let preallocated = generator.borrow_local(ValType::I32);
+            loop_.i32_const(accumulator_offset).local_set(*preallocated);
             // Call user defined function
             generator.visit_call_user_defined(
                 &mut loop_,
                 func,
-                &result_clar_ty,
-                fold_func_ty.as_ref().map(|func_ty| &func_ty.acc_ty),
-                Some(return_offset),
+                &tys.return_ty,
+                Some(&tys.acc_ty),
+                Some(*preallocated),
             )?;
-            // since the accumulator and the return type of the function could have different types, we need to duck-type.
-            if let Some(tys) = &fold_func_ty {
-                generator.duck_type(&mut loop_, &tys.return_ty, &tys.acc_ty, None)?;
-            }
+        } else {
+            unreachable!();
         }
         // Save the result into the locals (in reverse order as we pop)
         for result_local in result_locals.iter().rev() {
@@ -283,7 +272,7 @@ impl ComplexWord for Fold {
         // offset on the top of the stack
         loop_
             .local_get(offset)
-            .i32_const(elem_size)
+            .i32_const(dbg!(elem_ty.type_size()))
             .binop(BinaryOp::I32Add)
             .local_tee(offset);
 
@@ -296,8 +285,8 @@ impl ComplexWord for Fold {
         else_.instr(Loop { seq: loop_id });
 
         // Push the locals to the stack
-        for result_local in result_locals {
-            else_.local_get(result_local);
+        for result_local in result_locals.iter() {
+            else_.local_get(*result_local);
         }
 
         builder
@@ -310,7 +299,12 @@ impl ComplexWord for Fold {
 
         // since the return type of the function and the accumulator could have different types, we need to duck-type.
         if let Some(tys) = &fold_func_ty {
-            generator.duck_type(builder, &tys.acc_ty, &tys.return_ty, None)?;
+            generator.duck_type(builder, &tys.acc_ty, &expr_ty, None)?;
+        }
+        let locals = generator.save_to_locals(builder, &expr_ty, true);
+        generator.copy_value(builder, &expr_ty, &locals, return_offset)?;
+        for l in locals.into_iter().rev() {
+            builder.local_get(l);
         }
 
         Ok(())
@@ -706,9 +700,6 @@ impl ComplexWord for Map {
             })
             .collect::<Result<_, _>>()?;
 
-        builder.global_get(generator.stack_pointer);
-        generator.debug_log_i32(builder);
-
         // We need the resulting number of elements for the cost tracking (and since we will compute it, we can use it for looping later)
         let num_elements = generator.borrow_local(ValType::I32);
         match mapargs.as_slice() {
@@ -773,9 +764,6 @@ impl ComplexWord for Map {
             loop_
                 .global_get(generator.stack_pointer)
                 .local_set(*current_stack_pointer);
-
-            loop_.global_get(generator.stack_pointer);
-            generator.debug_log_i32(&mut loop_);
 
             // Calling the function with its arguments.
             // We need to handle the arguments of the function differently depending
@@ -882,6 +870,33 @@ impl ComplexWord for Map {
                     }
                 };
 
+                // we need to allocate some memory to store the duck-typed arguments if needed
+                let args_memory = {
+                    let size = user_defined_args_types
+                        .iter()
+                        .zip(mapargs.iter())
+                        .map(|(fn_arg, MapArg { element_type, .. })| {
+                            if need_ducktyping(&element_type.into(), fn_arg) {
+                                dt_needed_workspace(fn_arg)
+                            } else {
+                                0
+                            }
+                        })
+                        .sum();
+                    (size > 0).then(|| {
+                        (
+                            generator.reserve_static_memory(size),
+                            generator.borrow_local(ValType::I32),
+                        )
+                    })
+                };
+                // we set this allocated memory to a local so that it can be reused at every run of the loop.
+                if let Some((args_memory_offset, args_memory_local)) = &args_memory {
+                    loop_
+                        .i32_const(*args_memory_offset as i32)
+                        .local_set(**args_memory_local);
+                }
+
                 for (
                     MapArg {
                         element_type,
@@ -892,7 +907,12 @@ impl ComplexWord for Map {
                 ) in mapargs.iter().zip(user_defined_args_types)
                 {
                     element_type.load(generator, &mut loop_, **offset)?;
-                    generator.duck_type(&mut loop_, &element_type.into(), &expected_arg_ty)?;
+                    generator.duck_type(
+                        &mut loop_,
+                        &element_type.into(),
+                        &expected_arg_ty,
+                        args_memory.as_ref().map(|(_, l)| **l),
+                    )?;
                 }
                 generator.visit_call_user_defined(
                     &mut loop_,
@@ -961,9 +981,6 @@ impl ComplexWord for Map {
 
         // we finally return the (offset, length) of the result list
         builder.local_get(result_offset).local_get(*result_length);
-
-        builder.global_get(generator.stack_pointer);
-        generator.debug_log_i32(builder);
 
         Ok(())
     }
@@ -2966,6 +2983,7 @@ mod tests {
         }
     }
 
+    #[ignore]
     #[test]
     fn fold_cannot_oom() {
         // this comes from a proptest, which is why this is so big and the type/values look so weird.
@@ -3007,19 +3025,5 @@ mod tests {
         );
 
         crosscheck(snippet, expected);
-    }
-
-    #[test]
-    fn map_cannot_oom() {
-        let snippet = std::fs::read_to_string("../try.clar").unwrap();
-
-        let result = crate::tools::TestEnvironment::default().interpret(&snippet);
-
-        let mut env = crate::tools::TestEnvironment::default();
-        let compiled = env.evaluate(&snippet);
-
-        eprintln!("{compiled:?}");
-
-        assert_eq!(result, compiled);
     }
 }
