@@ -37,6 +37,10 @@ impl ComplexWord for IndexOf {
         let serialization_size = generator.module.locals.add(ValType::I32);
         check_args!(generator, builder, 2, args.len(), ArgumentCountCheck::Exact);
 
+        if generator.contract_analysis.epoch <= StacksEpochId::Epoch2_05 {
+            self.charge(generator, builder, args.len() as u32)?;
+        }
+
         // Traverse the sequence, leaving its offset and size on the stack.
         let seq = args.get_expr(0)?;
         let elem_expr = args.get_expr(1)?;
@@ -135,11 +139,7 @@ impl ComplexWord for IndexOf {
             }
         }
         builder.local_set(seq_size);
-        if generator.contract_analysis.epoch <= StacksEpochId::Epoch2_05 {
-            self.charge(generator, builder, seq_size)?;
-        }
 
-        // seq_size was on the stack from before the cost computation
         builder.local_tee(seq_size).unop(UnaryOp::I32Eqz);
         // STACK: [size]
 
