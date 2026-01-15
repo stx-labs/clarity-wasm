@@ -2562,13 +2562,56 @@ mod tests {
     }
 
     #[test]
-    fn map_needs_ducktyping() {
+    fn map_needs_ducktyping_arg() {
+        let snippet = r#"
+            (define-private (foo (a (response int bool)))
+                a
+            )
+
+            (map foo (list (ok 1)))
+        "#;
+
+        crosscheck(
+            snippet,
+            Ok(Some(
+                Value::cons_list_unsanitized(vec![Value::okay(Value::Int(1)).unwrap()]).unwrap(),
+            )),
+        );
+    }
+
+    #[test]
+    fn map_needs_ducktyping_return() {
         let snippet = r#"
             (define-private (foo (a int))
                 (ok a)
             )
 
             (if true (map foo (list 1)) (list (err "unreachable")))
+        "#;
+
+        crosscheck(
+            snippet,
+            Ok(Some(
+                Value::cons_list_unsanitized(vec![Value::okay(Value::Int(1)).unwrap()]).unwrap(),
+            )),
+        );
+    }
+
+    #[test]
+    fn map_needs_ducktyping_twice() {
+        let snippet = r#"
+            (define-private (foo (a (response int bool)))
+                (ok (unwrap-panic a))
+            )
+
+            (define-private (bar (a (response int principal)))
+                (ok (unwrap-panic a))
+            )
+
+            (if true
+                (map bar (map foo (list (ok 1))))
+                (list (err "unreachable"))
+            )
         "#;
 
         crosscheck(
