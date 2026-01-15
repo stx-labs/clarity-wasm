@@ -1,3 +1,4 @@
+use clarity::types::StacksEpochId;
 use clarity::vm::types::{SequenceSubtype, TypeSignature};
 use clarity::vm::{ClarityName, SymbolicExpression};
 use walrus::ir::{BinaryOp, IfElse, InstrSeqType, Loop, UnaryOp};
@@ -6,9 +7,7 @@ use walrus::ValType;
 use super::{ComplexWord, Word};
 use crate::check_args;
 use crate::cost::WordCharge;
-use crate::wasm_generator::{
-    drop_value, ArgumentsExt, GeneratorError, SequenceElementType, WasmGenerator,
-};
+use crate::wasm_generator::{ArgumentsExt, GeneratorError, SequenceElementType, WasmGenerator};
 use crate::wasm_utils::{check_argument_count, get_type_size, ArgumentCountCheck};
 use crate::words::equal::wasm_equal;
 
@@ -35,6 +34,7 @@ impl ComplexWord for IndexOf {
         _expr: &SymbolicExpression,
         args: &[SymbolicExpression],
     ) -> Result<(), GeneratorError> {
+        let serialization_size = generator.module.locals.add(ValType::I32);
         check_args!(generator, builder, 2, args.len(), ArgumentCountCheck::Exact);
 
         // Traverse the sequence, leaving its offset and size on the stack.
@@ -50,12 +50,53 @@ impl ComplexWord for IndexOf {
             generator.set_expr_type(elem_expr, ltd.get_list_item_type().clone())?;
         }
 
+        generator.traverse_expr(builder, elem_expr)?;
+        // STACK: [item]
+
+        // Get the type of the item expression
+        let item_ty = generator
+            .get_expr_type(elem_expr)
+            .ok_or_else(|| {
+                GeneratorError::TypeError("index_of item expression must be typed".to_owned())
+            })?
+            .clone();
+
+        if generator.contract_analysis.epoch > StacksEpochId::Epoch2_05 {
+            generator.serialization_size(builder, &item_ty)?;
+            // STACK: [item, item_serialization_size]
+
+            builder.local_set(serialization_size);
+            // STACK: [item]
+        }
+
+        // Store the item into a local.
+        let item_locals = generator.save_to_locals(builder, &item_ty, true);
+        // STACK: []
+
         // Traverse the sequence, leaving its offset and size on the stack.
         generator.traverse_expr(builder, seq)?;
         // STACK: [offset, size]
 
         // Get type of the Sequence element.
         let elem_ty = generator.get_sequence_element_type(seq)?;
+
+        if generator.contract_analysis.epoch > StacksEpochId::Epoch2_05 {
+            let seq_type = generator
+                .get_expr_type(seq)
+                .ok_or_else(|| {
+                    GeneratorError::TypeError(
+                        "index_of sequence expression must be typed".to_owned(),
+                    )
+                })?
+                .clone();
+
+            generator.serialization_size(builder, &seq_type)?;
+            builder
+                .local_get(serialization_size)
+                .binop(BinaryOp::I32Add)
+                .local_set(serialization_size);
+            self.charge(generator, builder, serialization_size)?;
+        }
 
         // Locals declaration.
         let seq_size = generator.module.locals.add(ValType::I32);
@@ -74,9 +115,9 @@ impl ComplexWord for IndexOf {
             .local_set(end_offset);
         // STACK: []
 
-        // compute the cost depending on the number of elements in sequence.
+        // compute the sequence size.
         // we put seq_size on the stack to retrieve it later,
-        // and again on the stack for the cost computation.
+        // and again on the stack for the cost computation for epoch <= 2.05.
         builder.local_get(seq_size).local_get(seq_size);
         match &elem_ty {
             SequenceElementType::Byte => {
@@ -94,7 +135,9 @@ impl ComplexWord for IndexOf {
             }
         }
         builder.local_set(seq_size);
-        self.charge(generator, builder, seq_size)?;
+        if generator.contract_analysis.epoch <= StacksEpochId::Epoch2_05 {
+            self.charge(generator, builder, seq_size)?;
+        }
 
         // seq_size was on the stack from before the cost computation
         builder.local_tee(seq_size).unop(UnaryOp::I32Eqz);
@@ -114,20 +157,7 @@ impl ComplexWord for IndexOf {
 
         let else_id = {
             let else_case = &mut builder.dangling_instr_seq(ty);
-            let item = args.get_expr(1)?;
-            generator.traverse_expr(else_case, item)?;
-            // STACK: [item]
 
-            // Get the type of the item expression
-            let item_ty = generator
-                .get_expr_type(item)
-                .ok_or_else(|| {
-                    GeneratorError::TypeError("index_of item expression must be typed".to_owned())
-                })?
-                .clone();
-
-            // Store the item into a local.
-            let item_locals = generator.save_to_locals(else_case, &item_ty, true);
             // STACK: []
 
             // Create and store an index into a local.

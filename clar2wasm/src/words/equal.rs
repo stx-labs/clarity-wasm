@@ -1,16 +1,14 @@
 use clarity::vm::types::signatures::CallableSubtype;
 use clarity::vm::types::{SequenceSubtype, TupleTypeSignature, TypeSignature};
 use clarity::vm::{ClarityName, SymbolicExpression};
-use walrus::ir::{BinaryOp, Block, IfElse, InstrSeqType, Loop, UnaryOp};
+use walrus::ir::{BinaryOp, Block, IfElse, Loop, UnaryOp};
 use walrus::{InstrSeqBuilder, LocalId, ValType};
 
 use super::{ComplexWord, Word};
 use crate::check_args;
 use crate::cost::WordCharge;
-use crate::wasm_generator::{
-    clar2wasm_ty, drop_value, ArgumentsExt, GeneratorError, SequenceElementType, WasmGenerator,
-};
-use crate::wasm_utils::{check_argument_count, get_type_size, ArgumentCountCheck};
+use crate::wasm_generator::{clar2wasm_ty, drop_value, GeneratorError, WasmGenerator};
+use crate::wasm_utils::{check_argument_count, ArgumentCountCheck};
 
 #[derive(Debug)]
 pub struct IsEq;
@@ -615,10 +613,9 @@ fn wasm_equal_list(
 
 #[cfg(test)]
 mod tests {
-    use clarity::vm::types::{ListData, ListTypeData, SequenceData};
     use clarity::vm::Value;
 
-    use crate::tools::{crosscheck, evaluate, TestEnvironment};
+    use crate::tools::{crosscheck, evaluate};
 
     #[test]
     fn is_eq_less_than_one_arg() {

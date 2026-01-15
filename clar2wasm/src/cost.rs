@@ -1428,17 +1428,17 @@ mod word {
     decl_tests!("index_of_list", "(index-of (list 1 2 3) 2)", {
         1 => CostMeter { runtime: 8000, read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
         2 => CostMeter { runtime: 486,  read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
-        3 => CostMeter { runtime: 420,  read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
+        3 => CostMeter { runtime: 490,  read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
     });
     decl_tests!("index_of_string_utf8", r#"(index-of u"hello" u"l")"#, {
         1 => CostMeter { runtime: 6000, read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
         2 => CostMeter { runtime: 248,  read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
-        3 => CostMeter { runtime: 216,  read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
+        3 => CostMeter { runtime: 227,  read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
     });
     decl_tests!("index_of_buff", r#"(index-of 0x1234567890 0x34)"#, {
         1 => CostMeter { runtime: 6000, read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
         2 => CostMeter { runtime: 248,  read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
-        3 => CostMeter { runtime: 216,  read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
+        3 => CostMeter { runtime: 227,  read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
     });
     decl_tests!("is_eq_signed_int", "(is-eq 1 1)", {
         1 => CostMeter { runtime: 35000, read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
