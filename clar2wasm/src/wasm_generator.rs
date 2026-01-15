@@ -1405,8 +1405,7 @@ impl WasmGenerator {
             match variable {
                 NativeVariables::TxSender => {
                     // Create a new local to hold the result on the call stack
-                    let (offset, size);
-                    (offset, size) = self.create_call_stack_local(
+                    let (offset, size) = self.create_call_stack_local(
                         builder,
                         &TypeSignature::PrincipalType,
                         false,
@@ -1422,8 +1421,7 @@ impl WasmGenerator {
                 }
                 NativeVariables::ContractCaller => {
                     // Create a new local to hold the result on the call stack
-                    let (offset, size);
-                    (offset, size) = self.create_call_stack_local(
+                    let (offset, size) = self.create_call_stack_local(
                         builder,
                         &TypeSignature::PrincipalType,
                         false,
@@ -1439,8 +1437,7 @@ impl WasmGenerator {
                 }
                 NativeVariables::TxSponsor => {
                     // Create a new local to hold the result on the call stack
-                    let (offset, size);
-                    (offset, size) = self.create_call_stack_local(
+                    let (offset, size) = self.create_call_stack_local(
                         builder,
                         &TypeSignature::PrincipalType,
                         false,
@@ -1515,7 +1512,22 @@ impl WasmGenerator {
                     builder.call(self.func_by_name("stdlib.stacks_block_time"));
                     Ok(true)
                 }
-                NativeVariables::CurrentContract => todo!("Implement NativeVariable"),
+                NativeVariables::CurrentContract => {
+                    // Create a new local to hold the result on the call stack
+                    let (offset, size) = self.create_call_stack_local(
+                        builder,
+                        &TypeSignature::PrincipalType,
+                        false,
+                        true,
+                    );
+
+                    // Push the offset and size to the data stack
+                    builder.local_get(offset).i32_const(size);
+
+                    // Call the host interface function, `current_contract`
+                    builder.call(self.func_by_name("stdlib.current_contract"));
+                    Ok(true)
+                }
             }
         } else {
             Ok(false)

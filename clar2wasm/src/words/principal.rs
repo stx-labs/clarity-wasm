@@ -437,6 +437,8 @@ mod tests {
     #[cfg(test)]
     mod clarity_v2_v3 {
         use clarity::vm::types::{ResponseData, StandardPrincipalData, TupleData};
+        use clarity_types::types::QualifiedContractIdentifier;
+        use clarity_types::ContractName;
 
         use super::*;
 
@@ -801,6 +803,8 @@ mod tests {
 
     (define-public (get-tx-sponsor)
       (ok tx-sponsor?))
+    (define-public (get-current-contract)
+      (ok current-contract))
             ";
 
             crosscheck(
@@ -828,6 +832,19 @@ mod tests {
                 Ok(Some(Value::Response(ResponseData {
                     committed: true,
                     data: Box::new(Value::none()),
+                }))),
+            );
+
+            crosscheck(
+                &format!("{snpt} (get-current-contract)"),
+                Ok(Some(Value::Response(ResponseData {
+                    committed: true,
+                    data: Box::new(Value::Principal(PrincipalData::Contract(
+                        QualifiedContractIdentifier::new(
+                            StandardPrincipalData::transient(),
+                            ContractName::from("snippet"),
+                        ),
+                    ))),
                 }))),
             );
         }
