@@ -240,7 +240,81 @@ impl WasmGenerator {
     }
 }
 
-fn dt_needed_workspace(ty: &TypeSignature) -> u32 {
+pub fn need_ducktyping(og_ty: &TypeSignature, tg_ty: &TypeSignature) -> bool {
+    match og_ty {
+        TypeSignature::NoType
+        | TypeSignature::BoolType
+        | TypeSignature::IntType
+        | TypeSignature::UIntType => og_ty != tg_ty,
+        TypeSignature::PrincipalType
+        | TypeSignature::CallableType(_)
+        | TypeSignature::TraitReferenceType(_) => !matches!(
+            tg_ty,
+            TypeSignature::PrincipalType
+                | TypeSignature::CallableType(_)
+                | TypeSignature::TraitReferenceType(_),
+        ),
+        &TypeSignature::BUFFER_1 => !matches!(
+            tg_ty,
+            TypeSignature::SequenceType(SequenceSubtype::BufferType(_))
+                | &TypeSignature::STRING_ASCII_MIN
+        ),
+        TypeSignature::SequenceType(SequenceSubtype::BufferType(_)) => !matches!(
+            tg_ty,
+            TypeSignature::SequenceType(SequenceSubtype::BufferType(_))
+        ),
+        TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::ASCII(_))) => {
+            !matches!(
+                tg_ty,
+                TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::ASCII(_)))
+            )
+        }
+        TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::UTF8(_))) => {
+            !matches!(
+                tg_ty,
+                TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::UTF8(_)))
+            )
+        }
+        TypeSignature::SequenceType(SequenceSubtype::ListType(og_ltd)) => {
+            if let TypeSignature::SequenceType(SequenceSubtype::ListType(tg_ltd)) = tg_ty {
+                need_ducktyping(og_ltd.get_list_item_type(), tg_ltd.get_list_item_type())
+            } else {
+                false
+            }
+        }
+        TypeSignature::TupleType(og_tup_ty) => {
+            if let TypeSignature::TupleType(tg_tup_ty) = tg_ty {
+                og_tup_ty
+                    .get_type_map()
+                    .values()
+                    .zip(tg_tup_ty.get_type_map().values())
+                    .any(|(og_elem_ty, tg_tup_ty)| need_ducktyping(og_elem_ty, tg_tup_ty))
+            } else {
+                false
+            }
+        }
+        TypeSignature::OptionalType(og_opt_ty) => {
+            if let TypeSignature::OptionalType(tg_opt_ty) = tg_ty {
+                need_ducktyping(og_opt_ty, tg_opt_ty)
+            } else {
+                false
+            }
+        }
+        TypeSignature::ResponseType(og_resp_ty) => {
+            if let TypeSignature::ResponseType(tg_resp_ty) = tg_ty {
+                need_ducktyping(&og_resp_ty.as_ref().0, &tg_resp_ty.as_ref().0)
+                    || need_ducktyping(&og_resp_ty.as_ref().1, &tg_resp_ty.as_ref().1)
+            } else {
+                false
+            }
+        }
+        TypeSignature::ListUnionType(_) => {
+            unreachable!("ListUnionType should not exist at this point")
+        }
+    }
+}
+
+pub fn dt_needed_workspace(ty: &TypeSignature) -> u32 {
     match ty {
         TypeSignature::OptionalType(opt) => dt_needed_workspace(opt),
         TypeSignature::ResponseType(resp) => {
