@@ -5,6 +5,7 @@ use walrus::{InstrSeqBuilder, LocalId, ValType};
 
 use super::{ComplexWord, SimpleWord, Word};
 use crate::cost::WordCharge;
+use crate::duck_type::dt_needed_workspace;
 use crate::error_mapping::ErrorMap;
 use crate::wasm_generator::{
     add_placeholder_for_clarity_type, drop_value, ArgumentsExt, GeneratorError,
@@ -495,23 +496,8 @@ impl ComplexWord for Filter {
         let loop_id = loop_.id();
 
         // Load an element from the sequence
-        let elem_size = match &elem_ty {
-            SequenceElementType::Other(elem_ty) => {
-                generator.read_from_memory(&mut loop_, input_offset, 0, elem_ty)?
-            }
-            SequenceElementType::Byte => {
-                // The element type is a byte, so we can just push the
-                // offset and length (1) to the stack.
-                loop_.local_get(input_offset).i32_const(1);
-                1
-            }
-            SequenceElementType::UnicodeScalar => {
-                // The element type is a 32-bit unicode scalar, so we can just push the
-                // offset and length (4) to the stack.
-                loop_.local_get(input_offset).i32_const(4);
-                4
-            }
-        };
+        elem_ty.load(generator, &mut loop_, input_offset)?;
+        let elem_size = elem_ty.type_size();
 
         if let Some(simple) = words::lookup_simple(discriminator) {
             // Call simple builtin
@@ -549,7 +535,10 @@ impl ComplexWord for Filter {
                         ))
                     }
                 };
-                generator.duck_type(&mut loop_, list_elem_ty, &arg_ty)?;
+                let ducktype_offset = generator.reserve_static_memory(dt_needed_workspace(&arg_ty));
+                let l = generator.borrow_local(ValType::I32);
+                loop_.i32_const(ducktype_offset as _).local_set(*l);
+                generator.duck_type(&mut loop_, list_elem_ty, &arg_ty, Some(*l))?;
             }
             loop_.call(generator.func_by_name(discriminator.as_str()));
         }
