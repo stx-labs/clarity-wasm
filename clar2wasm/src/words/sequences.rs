@@ -132,7 +132,7 @@ impl ComplexWord for Fold {
             match generator.get_expr_type(sequence).ok_or_else(|| {
                 GeneratorError::TypeError("Folded sequence should be typed".to_owned())
             })? {
-                TypeSignature::SequenceType(SequenceSubtype::ListType(ltd)) => {
+                TypeSignature::SequenceType(SequenceSubtype::ListType(_)) => {
                     match generator.get_function_type(func) {
                         Some(FunctionType::Fixed(FixedFunction { args, returns }))
                             if args.len() == 2 =>
@@ -142,17 +142,6 @@ impl ComplexWord for Fold {
                                 acc_ty: args[1].signature.clone(),
                                 return_ty: returns.clone(),
                             };
-                            // Set the type of the list elements
-                            generator.set_expr_type(
-                                sequence,
-                                TypeSignature::SequenceType(SequenceSubtype::ListType(
-                                    ListTypeData::new_list(
-                                        fold_func_ty.elem_ty.clone(),
-                                        ltd.get_max_len(),
-                                    )
-                                    .map_err(|e| GeneratorError::TypeError(e.to_string()))?,
-                                )),
-                            )?;
                             // set the accumulator type
                             generator.set_expr_type(initial, fold_func_ty.acc_ty.clone())?;
                             Some(fold_func_ty)
@@ -174,6 +163,11 @@ impl ComplexWord for Fold {
             })?
             .clone();
         let result_wasm_types = clar2wasm_ty(&result_clar_ty);
+
+        // preallocate memory for the accumulator
+        let accumulator_offset = generator
+            .reserve_static_memory(get_type_in_memory_size(&result_clar_ty, true) as _)
+            as i32;
 
         // Get the type of the sequence
         let elem_ty = generator.get_sequence_element_type(sequence)?;
@@ -219,71 +213,87 @@ impl ComplexWord for Fold {
         ));
         let else_id = else_.id();
 
+        let former_stack_pointer = generator.borrow_local(ValType::I32);
+        else_
+            .global_get(generator.stack_pointer)
+            .local_set(*former_stack_pointer);
+
         // Define local(s) to hold the intermediate result, and initialize them
         // with the initial value. Note that we are looping in reverse order,
         // to pop values from the top of the stack.
         let result_locals = generator.save_to_locals(&mut else_, &result_clar_ty, true);
+        let acc_copy_locals: Vec<_> = result_wasm_types
+            .iter()
+            .map(|&t| generator.module.locals.add(t))
+            .collect();
 
         // Define the body of a loop, to loop over the sequence and make the
         // function call.
         let mut loop_ = else_.dangling_instr_seq(None);
         let loop_id = loop_.id();
 
-        // Load the element from the sequence
-        let elem_size = match &elem_ty {
-            SequenceElementType::Other(elem_ty) => {
-                generator.read_from_memory(&mut loop_, offset, 0, elem_ty)?
-            }
-            SequenceElementType::Byte => {
-                // The element type is a byte, so we can just push the
-                // offset and length (1) to the stack.
-                loop_.local_get(offset).i32_const(1);
-                1
-            }
-            SequenceElementType::UnicodeScalar => {
-                // The element type is a 32-bit unicode scalar, so we can just push the
-                // offset and length (4) to the stack.
-                loop_.local_get(offset).i32_const(4);
-                4
-            }
-        };
+        // Load the element from the sequence and duck-type it to the expected type
+        elem_ty.load(generator, &mut loop_, offset)?;
+        if let Some(FoldFuncTy {
+            elem_ty: expected_elem_ty,
+            ..
+        }) = &fold_func_ty
+        {
+            let (l, _) = generator
+                .create_call_stack_bytes(&mut loop_, dt_needed_workspace(expected_elem_ty) as _);
+            generator.duck_type(&mut loop_, &(&elem_ty).into(), expected_elem_ty, Some(l))?;
+        }
 
-        // Push the locals to the stack
-        for result_local in &result_locals {
-            loop_.local_get(*result_local);
+        // Copy the accumulator for the function call. We need a copy otherwise we would overwrite the value
+        // after each function call.
+        for (&og, &cp) in result_locals.iter().zip(acc_copy_locals.iter()) {
+            loop_.local_get(og).local_set(cp);
+        }
+        let (acc_copy_offset, _) =
+            generator.create_call_stack_local(&mut loop_, &result_clar_ty, true, true);
+        generator.copy_value(
+            &mut loop_,
+            &result_clar_ty,
+            &acc_copy_locals,
+            acc_copy_offset,
+        )?;
+        for &l in acc_copy_locals.iter() {
+            loop_.local_get(l);
         }
 
         if let Some(simple) = words::lookup_simple(func).or(words::lookup_variadic_simple(func)) {
             // Call simple builtin
-
-            let arg_a_ty = type_from_sequence_element(&elem_ty);
-            let arg_types = &[arg_a_ty, result_clar_ty.clone()];
-
+            let arg_types = &[(&elem_ty).into(), result_clar_ty.clone()];
             simple.visit(generator, &mut loop_, arg_types, &result_clar_ty)?;
         } else {
+            let preallocated = generator.borrow_local(ValType::I32);
+            loop_.i32_const(accumulator_offset).local_set(*preallocated);
             // Call user defined function
             generator.visit_call_user_defined(
                 &mut loop_,
                 func,
-                &result_clar_ty,
-                fold_func_ty.as_ref().map(|func_ty| &func_ty.acc_ty),
-                Some(return_offset),
+                fold_func_ty
+                    .as_ref()
+                    .map_or(&result_clar_ty, |fft| &fft.return_ty),
+                fold_func_ty.as_ref().map(|fft| &fft.acc_ty),
+                Some(*preallocated),
             )?;
-            // since the accumulator and the return type of the function could have different types, we need to duck-type.
-            if let Some(tys) = &fold_func_ty {
-                generator.duck_type(&mut loop_, &tys.return_ty, &tys.acc_ty)?;
-            }
         }
         // Save the result into the locals (in reverse order as we pop)
         for result_local in result_locals.iter().rev() {
             loop_.local_set(*result_local);
         }
 
+        // Reset the stack-pointer for the next iteration
+        loop_
+            .local_get(*former_stack_pointer)
+            .global_set(generator.stack_pointer);
+
         // Increment the offset by the size of the element, leaving the
         // offset on the top of the stack
         loop_
             .local_get(offset)
-            .i32_const(elem_size)
+            .i32_const(elem_ty.type_size())
             .binop(BinaryOp::I32Add)
             .local_tee(offset);
 
@@ -296,8 +306,8 @@ impl ComplexWord for Fold {
         else_.instr(Loop { seq: loop_id });
 
         // Push the locals to the stack
-        for result_local in result_locals {
-            else_.local_get(result_local);
+        for result_local in result_locals.iter() {
+            else_.local_get(*result_local);
         }
 
         builder
@@ -310,7 +320,14 @@ impl ComplexWord for Fold {
 
         // since the return type of the function and the accumulator could have different types, we need to duck-type.
         if let Some(tys) = &fold_func_ty {
-            generator.duck_type(builder, &tys.acc_ty, &tys.return_ty)?;
+            generator.duck_type(builder, &tys.acc_ty, &expr_ty, None)?;
+        }
+
+        // we copy the result from the accumulator space to the allocated space for the result
+        let locals = generator.save_to_locals(builder, &expr_ty, true);
+        generator.copy_value(builder, &expr_ty, &locals, return_offset)?;
+        for l in locals.into_iter() {
+            builder.local_get(l);
         }
 
         Ok(())
