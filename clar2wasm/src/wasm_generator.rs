@@ -979,6 +979,12 @@ impl WasmGenerator {
         Ok((offset, len))
     }
 
+    pub(crate) fn reserve_static_memory(&mut self, size: u32) -> u32 {
+        let offset = self.literal_memory_end;
+        self.literal_memory_end += size;
+        offset
+    }
+
     /// Adds a serialized [TraitIdentifier] to the wasm memory.
     /// Returns the offset and length of the bytes written.
     pub(crate) fn add_trait_identifier(
