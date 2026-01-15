@@ -3007,6 +3007,54 @@ mod tests {
     }
 
     #[test]
+    fn fold_needs_workaround_args() {
+        let snippet = "
+            (define-private
+                (foo
+                    (elem (response int int))
+                    (acc (list 20 (response int int)))
+                )
+                (unwrap-panic (as-max-len? (append acc elem) u20))
+            )
+
+            (fold foo (list (ok 1) (ok 2)) (list))
+        ";
+
+        crosscheck(
+            snippet,
+            Ok(Some(
+                Value::cons_list_unsanitized(vec![
+                    Value::okay(Value::Int(1)).unwrap(),
+                    Value::okay(Value::Int(2)).unwrap(),
+                ])
+                .unwrap(),
+            )),
+        );
+    }
+
+    #[test]
+    fn fold_needs_workaround() {
+        // in this snippet, these conversions happen:
+        //   - sequence element: (response int NoType) -> (response int int)
+        //   - accumulator: (response int NoType) -> (response int principal)
+        //   - function result: (response int NoType) -> (response int principal)
+        //   - expression result: (response int principal) -> (response int NoType)
+        let snippet = "
+            (define-private
+                (foo
+                    (elem (response int int))
+                    (acc (response int principal))
+                )
+                (ok (+ (unwrap-panic elem) (unwrap-panic acc)))
+            )
+
+            (fold foo (list (ok 1) (ok 2)) (ok 42))
+        ";
+
+        crosscheck(snippet, Ok(Some(Value::okay(Value::Int(45)).unwrap())));
+    }
+
+    #[test]
     fn fold_cannot_oom() {
         // this comes from a proptest, which is why this is so big and the type/values look so weird.
         let snippet = r#"
