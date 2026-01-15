@@ -803,8 +803,6 @@ mod tests {
 
     (define-public (get-tx-sponsor)
       (ok tx-sponsor?))
-    (define-public (get-current-contract)
-      (ok current-contract))
             ";
 
             crosscheck(
@@ -834,7 +832,24 @@ mod tests {
                     data: Box::new(Value::none()),
                 }))),
             );
+        }
+    }
 
+    #[cfg(feature = "test-clarity-v4")]
+    mod clarity_v4 {
+        use clarity_types::types::{
+            PrincipalData, QualifiedContractIdentifier, ResponseData, StandardPrincipalData,
+        };
+        use clarity_types::{ContractName, Value};
+
+        use crate::tools::crosscheck;
+
+        #[test]
+        fn current_contract_test() {
+            let snpt = "
+    (define-public (get-current-contract)
+      (ok current-contract))
+            ";
             crosscheck(
                 &format!("{snpt} (get-current-contract)"),
                 Ok(Some(Value::Response(ResponseData {
