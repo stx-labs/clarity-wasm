@@ -1078,29 +1078,11 @@ impl WasmGenerator {
         Ok(block.id())
     }
 
-    /// Push a new local onto the call stack, adjusting the stack pointer and
-    /// tracking the current function's frame size accordingly.
-    /// - `include_repr` indicates if space should be reserved for the
-    ///   representation of the value (e.g. the offset, length for an in-memory
-    ///   type)
-    /// - `include_value` indicates if space should be reserved for the value
-    ///
-    /// Returns a local which is a pointer to the beginning of the allocated
-    /// stack space and the size of the allocated space.
-    pub(crate) fn create_call_stack_local(
+    pub(crate) fn create_call_stack_bytes(
         &mut self,
         builder: &mut InstrSeqBuilder,
-        ty: &TypeSignature,
-        include_repr: bool,
-        include_value: bool,
+        size: i32,
     ) -> (LocalId, i32) {
-        let size = match (include_value, include_repr) {
-            (true, true) => get_type_in_memory_size(ty, include_repr) + get_type_size(ty),
-            (true, false) => get_type_in_memory_size(ty, include_repr),
-            (false, true) => get_type_size(ty),
-            (false, false) => unreachable!("must include either repr or value"),
-        };
-
         // Save the offset (current stack pointer) into a local
         let offset = self.module.locals.add(ValType::I32);
         builder
@@ -1125,6 +1107,31 @@ impl WasmGenerator {
         self.frame_size += size;
 
         (offset, size)
+    }
+
+    /// Push a new local onto the call stack, adjusting the stack pointer and
+    /// tracking the current function's frame size accordingly.
+    /// - `include_repr` indicates if space should be reserved for the
+    ///   representation of the value (e.g. the offset, length for an in-memory
+    ///   type)
+    /// - `include_value` indicates if space should be reserved for the value
+    ///
+    /// Returns a local which is a pointer to the beginning of the allocated
+    /// stack space and the size of the allocated space.
+    pub(crate) fn create_call_stack_local(
+        &mut self,
+        builder: &mut InstrSeqBuilder,
+        ty: &TypeSignature,
+        include_repr: bool,
+        include_value: bool,
+    ) -> (LocalId, i32) {
+        let size = match (include_value, include_repr) {
+            (true, true) => get_type_in_memory_size(ty, include_repr) + get_type_size(ty),
+            (true, false) => get_type_in_memory_size(ty, include_repr),
+            (false, true) => get_type_size(ty),
+            (false, false) => unreachable!("must include either repr or value"),
+        };
+        self.create_call_stack_bytes(builder, size)
     }
 
     pub fn borrow_local(&mut self, ty: ValType) -> BorrowedLocal {
