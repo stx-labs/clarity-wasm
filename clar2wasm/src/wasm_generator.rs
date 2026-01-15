@@ -1891,16 +1891,19 @@ impl WasmGenerator {
             )));
         }
 
-        let expected_ty = duck_ty.unwrap_or(return_ty);
-
         // if needed, we can convert the argument to another compatible type.
-        self.duck_type(builder, return_ty, expected_ty)?;
+        let expected_ty = if let Some(ducky) = duck_ty {
+            self.duck_type(builder, return_ty, ducky, None)?;
+            ducky.clone()
+        } else {
+            return_ty.clone()
+        };
 
         // If an in-memory value is returned from the function, we need to copy
         // it to our frame, from the callee's frame.
         if let Some(return_offset) = in_memory_offset {
-            let locals = self.save_to_locals(builder, expected_ty, true);
-            self.copy_value(builder, expected_ty, &locals, return_offset)?;
+            let locals = self.save_to_locals(builder, &expected_ty, true);
+            self.copy_value(builder, &expected_ty, &locals, return_offset)?;
 
             for l in locals {
                 builder.local_get(l);
