@@ -437,8 +437,6 @@ mod tests {
     #[cfg(test)]
     mod clarity_v2_v3 {
         use clarity::vm::types::{ResponseData, StandardPrincipalData, TupleData};
-        use clarity_types::types::QualifiedContractIdentifier;
-        use clarity_types::ContractName;
 
         use super::*;
 
