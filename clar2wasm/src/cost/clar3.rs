@@ -22,8 +22,9 @@ use crate::words::conversion::{IntToAscii, IntToUtf8, StringToInt, StringToUint}
 use crate::words::data_vars::{GetDataVar, SetDataVar};
 use crate::words::default_to::DefaultTo;
 use crate::words::enums::{ClarityErr, ClarityOk, ClaritySome};
-use crate::words::equal::{IndexOf, IsEq};
+use crate::words::equal::IsEq;
 use crate::words::hashing::{Hash160, Keccak256, Sha256, Sha512, Sha512_256};
+use crate::words::index_of::IndexOf;
 use crate::words::logical::Not;
 use crate::words::maps::{MapDelete, MapGet, MapInsert, MapSet};
 use crate::words::noop::{ContractOf, ToInt, ToUint};

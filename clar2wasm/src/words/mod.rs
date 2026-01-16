@@ -25,6 +25,7 @@ pub mod enums;
 pub mod equal;
 pub mod functions;
 pub mod hashing;
+pub mod index_of;
 pub mod logical;
 pub mod maps;
 pub mod noop;
@@ -84,8 +85,8 @@ pub(crate) static COMPLEX_WORDS: &[&'static dyn ComplexWord] = &[
     &enums::ClarityErr,
     &enums::ClarityOk,
     &enums::ClaritySome,
-    &equal::IndexOf::Alias,
-    &equal::IndexOf::Original,
+    &index_of::IndexOf::Alias,
+    &index_of::IndexOf::Original,
     &equal::IsEq,
     &functions::DefinePrivateFunction,
     &functions::DefinePublicFunction,
