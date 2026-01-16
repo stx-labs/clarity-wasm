@@ -37,7 +37,7 @@ impl ComplexWord for IndexOf {
         let serialization_size = generator.module.locals.add(ValType::I32);
         check_args!(generator, builder, 2, args.len(), ArgumentCountCheck::Exact);
 
-        if generator.contract_analysis.epoch <= StacksEpochId::Epoch2_05 {
+        if generator.contract_analysis.epoch < StacksEpochId::Epoch2_05 {
             self.charge(generator, builder, args.len() as u32)?;
         }
 
@@ -65,7 +65,7 @@ impl ComplexWord for IndexOf {
             })?
             .clone();
 
-        if generator.contract_analysis.epoch > StacksEpochId::Epoch2_05 {
+        if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
             generator.serialization_size(builder, &item_ty)?;
             // STACK: [item, item_serialization_size]
 
@@ -84,7 +84,7 @@ impl ComplexWord for IndexOf {
         // Get type of the Sequence element.
         let elem_ty = generator.get_sequence_element_type(seq)?;
 
-        if generator.contract_analysis.epoch > StacksEpochId::Epoch2_05 {
+        if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
             let seq_type = generator
                 .get_expr_type(seq)
                 .ok_or_else(|| {

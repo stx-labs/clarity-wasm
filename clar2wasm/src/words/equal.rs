@@ -1,3 +1,4 @@
+use clarity::types::StacksEpochId;
 use clarity::vm::types::signatures::CallableSubtype;
 use clarity::vm::types::{SequenceSubtype, TupleTypeSignature, TypeSignature};
 use clarity::vm::{ClarityName, SymbolicExpression};
@@ -31,6 +32,9 @@ impl ComplexWord for IsEq {
         let serialization_size_sum = generator.module.locals.add(ValType::I32);
 
         check_args!(generator, builder, 1, args_len, ArgumentCountCheck::AtLeast);
+        if generator.contract_analysis.epoch < StacksEpochId::Epoch2_05 {
+            self.charge(generator, builder, args_len as u32)?;
+        }
 
         // Since all argument should have compatible types, we unify them so that they all have the same representation.
         let unified_ty = args.iter().try_fold(TypeSignature::NoType, |ty, arg| {
@@ -49,17 +53,21 @@ impl ComplexWord for IsEq {
         for operand in args.iter() {
             generator.traverse_expr(builder, operand)?;
             // STACK: [operand]
-            generator.serialization_size(builder, &ty)?;
-            // STACK: [operand, serialization_size]
-            builder
-                .local_get(serialization_size_sum)
-                .binop(BinaryOp::I32Add)
-                .local_set(serialization_size_sum);
-            // STACK: [operand]
+            if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+                generator.serialization_size(builder, &ty)?;
+                // STACK: [operand, serialization_size]
+                builder
+                    .local_get(serialization_size_sum)
+                    .binop(BinaryOp::I32Add)
+                    .local_set(serialization_size_sum);
+                // STACK: [operand]
+            }
         }
         // STACK: [operand1, ..., operandN]
 
-        self.charge(generator, builder, serialization_size_sum)?;
+        if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+            self.charge(generator, builder, serialization_size_sum)?;
+        }
 
         // No need to go further if there is only one argument
         if args.len() == 1 {
