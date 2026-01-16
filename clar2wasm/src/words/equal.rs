@@ -32,7 +32,7 @@ impl ComplexWord for IsEq {
         let serialization_size_sum = generator.module.locals.add(ValType::I32);
 
         check_args!(generator, builder, 1, args_len, ArgumentCountCheck::AtLeast);
-        if generator.contract_analysis.epoch <= StacksEpochId::Epoch2_05 {
+        if generator.contract_analysis.epoch < StacksEpochId::Epoch2_05 {
             self.charge(generator, builder, args_len as u32)?;
         }
 
@@ -53,7 +53,7 @@ impl ComplexWord for IsEq {
         for operand in args.iter() {
             generator.traverse_expr(builder, operand)?;
             // STACK: [operand]
-            if generator.contract_analysis.epoch > StacksEpochId::Epoch2_05 {
+            if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
                 generator.serialization_size(builder, &ty)?;
                 // STACK: [operand, serialization_size]
                 builder
@@ -65,7 +65,7 @@ impl ComplexWord for IsEq {
         }
         // STACK: [operand1, ..., operandN]
 
-        if generator.contract_analysis.epoch > StacksEpochId::Epoch2_05 {
+        if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
             self.charge(generator, builder, serialization_size_sum)?;
         }
 
