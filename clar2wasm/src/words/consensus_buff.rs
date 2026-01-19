@@ -28,6 +28,7 @@ impl ComplexWord for ToConsensusBuff {
         args: &[clarity::vm::SymbolicExpression],
     ) -> Result<(), crate::wasm_generator::GeneratorError> {
         check_args!(generator, builder, 1, args.len(), ArgumentCountCheck::Exact);
+        let length = generator.module.locals.add(walrus::ValType::I32);
 
         generator.traverse_args(builder, args)?;
 
@@ -40,6 +41,11 @@ impl ComplexWord for ToConsensusBuff {
             })?
             .clone();
 
+        generator.serialization_size(builder, &ty)?;
+        builder.local_set(length);
+
+        self.charge(generator, builder, length)?;
+
         let expr_ty = generator
             .get_expr_type(expr)
             .ok_or_else(|| {
@@ -50,14 +56,9 @@ impl ComplexWord for ToConsensusBuff {
             .clone();
         let (offset, _) = generator.create_call_stack_local(builder, &expr_ty, false, true);
 
-        let length = generator.module.locals.add(walrus::ValType::I32);
-
         // Write the serialized value to the top of the call stack
         generator.serialize_to_memory(builder, offset, 0, &ty)?;
-
-        builder.local_set(length);
-
-        self.charge(generator, builder, length)?;
+        builder.drop();
 
         // Check if the serialized value size < MAX_VALUE_SIZE
         builder
