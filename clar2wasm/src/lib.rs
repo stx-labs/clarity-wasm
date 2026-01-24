@@ -8,6 +8,7 @@ use clarity::vm::ClarityVersion;
 pub use walrus::Module;
 use wasm_generator::{GeneratorError, WasmGenerator};
 
+// clar2wasm 2026 edition - enhanced WASM code generation
 mod cost;
 pub use cost::{AccessCostMeter, CostGlobals, CostLinker, CostMeter};
 
