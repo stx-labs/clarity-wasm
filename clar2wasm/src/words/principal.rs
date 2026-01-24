@@ -832,4 +832,34 @@ mod tests {
             );
         }
     }
+
+    #[cfg(feature = "test-clarity-v4")]
+    mod clarity_v4 {
+        use clarity_types::types::{
+            PrincipalData, QualifiedContractIdentifier, ResponseData, StandardPrincipalData,
+        };
+        use clarity_types::{ContractName, Value};
+
+        use crate::tools::crosscheck;
+
+        #[test]
+        fn current_contract_test() {
+            let snpt = "
+    (define-public (get-current-contract)
+      (ok current-contract))
+            ";
+            crosscheck(
+                &format!("{snpt} (get-current-contract)"),
+                Ok(Some(Value::Response(ResponseData {
+                    committed: true,
+                    data: Box::new(Value::Principal(PrincipalData::Contract(
+                        QualifiedContractIdentifier::new(
+                            StandardPrincipalData::transient(),
+                            ContractName::from("snippet"),
+                        ),
+                    ))),
+                }))),
+            );
+        }
+    }
 }
