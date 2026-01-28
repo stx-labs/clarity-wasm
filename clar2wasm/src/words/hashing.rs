@@ -18,17 +18,19 @@ pub fn compute_cost(
     } else {
         match &arg_types[0] {
             TypeSignature::IntType | TypeSignature::UIntType => {
-                // 17 is the serialize size of an Int | Uint
+                // 17 is the serialized size of an Int | Uint
                 word.charge(generator, builder, 17)?
             }
             TypeSignature::SequenceType(SequenceSubtype::BufferType(_)) => {
-                let serialization_size = generator.module.locals.add(ValType::I32);
+                let serialization_size = generator.borrow_local(ValType::I32);
                 generator.serialization_size(builder, &arg_types[0])?;
-                builder.local_set(serialization_size);
-                word.charge(generator, builder, serialization_size)?;
+                builder.local_set(*serialization_size);
+                word.charge(generator, builder, *serialization_size)?;
             }
             _ => {
-                return Err(GeneratorError::NotImplemented);
+                return Err(GeneratorError::TypeError(
+                    format!("invalid type for {}", word.name()).to_string(),
+                ));
             }
         };
     }

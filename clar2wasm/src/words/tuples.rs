@@ -197,33 +197,11 @@ impl ComplexWord for TupleMerge {
         args: &[SymbolicExpression],
     ) -> Result<(), GeneratorError> {
         check_args!(generator, builder, 2, args.len(), ArgumentCountCheck::Exact);
-        let serialization_size = generator.module.locals.add(ValType::I32);
+        let serialization_size = generator.borrow_local(ValType::I32);
 
         if generator.contract_analysis.epoch < StacksEpochId::Epoch2_05 {
             self.charge(generator, builder, args.len() as u32)?;
         }
-
-        // STACK: []
-        // Traverse the RHS tuple argument, leaving it on top of the stack.
-        let rhs_tuple_ty = generator
-            .get_expr_type(&args[1])
-            .ok_or_else(|| GeneratorError::TypeError("tuple expression must be typed".to_string()))
-            .and_then(|lhs_ty| match lhs_ty {
-                TypeSignature::TupleType(tuple) => Ok(tuple),
-                _ => Err(GeneratorError::TypeError("expected tuple type".to_string())),
-            })?
-            .clone();
-
-        generator.traverse_expr(builder, &args[1])?;
-        // STACK: [RHS]
-        if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
-            generator.serialization_size(builder, &rhs_tuple_ty.clone().into())?;
-            // STACK: [item, item_serialization_size]
-
-            builder.local_set(serialization_size);
-            // STACK: [item]
-        }
-
         let lhs_tuple_ty = generator
             .get_expr_type(&args[0])
             .ok_or_else(|| GeneratorError::TypeError("tuple expression must be typed".to_string()))
@@ -233,21 +211,14 @@ impl ComplexWord for TupleMerge {
             })?
             .clone();
 
-        // Traverse the LHS tuple argument, leaving it on top of the stack.
-        generator.traverse_expr(builder, &args[0])?;
-
-        // STACK: [RHS, LHS]
-        if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
-            generator.serialization_size(builder, &lhs_tuple_ty.clone().into())?;
-            // STACK: [RHS, LHS, item_serialization_size]
-
-            builder
-                .local_get(serialization_size)
-                .binop(BinaryOp::I32Add)
-                .local_set(serialization_size);
-            // STACK: [RHS, LHS]
-            self.charge(generator, builder, serialization_size)?;
-        }
+        let rhs_tuple_ty = generator
+            .get_expr_type(&args[1])
+            .ok_or_else(|| GeneratorError::TypeError("tuple expression must be typed".to_string()))
+            .and_then(|lhs_ty| match lhs_ty {
+                TypeSignature::TupleType(tuple) => Ok(tuple),
+                _ => Err(GeneratorError::TypeError("expected tuple type".to_string())),
+            })?
+            .clone();
 
         let result_ty = generator
             .get_expr_type(expr)
@@ -272,7 +243,17 @@ impl ComplexWord for TupleMerge {
             })
             .collect();
 
-        // STACK: [RHS, LHS]
+        // Traverse the LHS tuple argument, leaving it on top of the stack.
+        generator.traverse_expr(builder, &args[0])?;
+
+        if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+            generator.serialization_size(builder, &lhs_tuple_ty.clone().into())?;
+            // STACK: [LHS, item_serialization_size]
+
+            builder.local_set(*serialization_size);
+            // STACK: [LHS]
+        }
+
         // We will copy the values from LHS into the result locals iff the key is not
         // present in RHS. Otherwise, we drop the values.
         for (name, ty_) in lhs_tuple_ty.get_type_map().iter().rev() {
@@ -294,7 +275,23 @@ impl ComplexWord for TupleMerge {
             }
         }
 
-        // STACK: [RHS]
+        // Traverse the RHS tuple argument, leaving it on top of the stack.
+        generator.traverse_expr(builder, &args[1])?;
+
+        if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+            generator.serialization_size(builder, &rhs_tuple_ty.clone().into())?;
+            // STACK: [RHS, item_serialization_size]
+
+            builder
+                .local_get(*serialization_size)
+                .binop(BinaryOp::I32Add)
+                .local_set(*serialization_size);
+
+            // STACK: [RHS]
+            self.charge(generator, builder, *serialization_size)?;
+            // STACK: [RHS]
+        }
+
         // We will copy all values of RHS into the result locals
         for (name, _) in rhs_tuple_ty.get_type_map().iter().rev() {
             result_locals
