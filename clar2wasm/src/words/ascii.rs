@@ -109,3 +109,35 @@ fn to_ascii_bool(
 
     Ok(())
 }
+
+#[cfg(test)]
+#[cfg(not(any(
+    feature = "test-clarity-v1",
+    feature = "test-clarity-v2",
+    feature = "test-clarity-v3"
+)))]
+mod tests {
+    use clarity_types::types::ResponseData;
+    use clarity_types::Value;
+
+    use crate::tools::crosscheck;
+
+    #[test]
+    fn to_ascii_bool() {
+        crosscheck(
+            "(to-ascii? true)",
+            Ok(Some(Value::Response(ResponseData {
+                committed: true,
+                data: Box::new(Value::string_ascii_from_bytes(b"true".to_vec()).unwrap()),
+            }))),
+        );
+
+        crosscheck(
+            "(to-ascii? false)",
+            Ok(Some(Value::Response(ResponseData {
+                committed: true,
+                data: Box::new(Value::string_ascii_from_bytes(b"false".to_vec()).unwrap()),
+            }))),
+        );
+    }
+}
