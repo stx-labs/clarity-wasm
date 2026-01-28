@@ -1,11 +1,10 @@
 use clarity_types::types::{SequenceSubtype, StringSubtype, TypeSignature};
+use walrus::ir::MemArg;
 
-use crate::{
-    check_args,
-    wasm_generator::GeneratorError,
-    wasm_utils::ArgumentCountCheck,
-    words::{ComplexWord, Word},
-};
+use crate::check_args;
+use crate::wasm_generator::GeneratorError;
+use crate::wasm_utils::ArgumentCountCheck;
+use crate::words::{ComplexWord, Word};
 
 #[derive(Debug)]
 pub struct ToAscii;
@@ -21,7 +20,7 @@ impl ComplexWord for ToAscii {
         &self,
         generator: &mut crate::wasm_generator::WasmGenerator,
         builder: &mut walrus::InstrSeqBuilder,
-        _expr: &clarity::vm::SymbolicExpression,
+        expr: &clarity::vm::SymbolicExpression,
         args: &[clarity::vm::SymbolicExpression],
     ) -> Result<(), crate::wasm_generator::GeneratorError> {
         check_args!(generator, builder, 1, args.len(), ArgumentCountCheck::Exact);
@@ -38,7 +37,7 @@ impl ComplexWord for ToAscii {
             .clone();
 
         match arg_ty {
-            TypeSignature::BoolType => todo!(),
+            TypeSignature::BoolType => to_ascii_bool(generator, builder, expr, arg)?,
             TypeSignature::IntType => todo!(),
             TypeSignature::UIntType => todo!(),
             TypeSignature::PrincipalType => todo!(),
@@ -55,4 +54,58 @@ impl ComplexWord for ToAscii {
 
         Ok(())
     }
+}
+
+fn to_ascii_bool(
+    generator: &mut crate::wasm_generator::WasmGenerator,
+    builder: &mut walrus::InstrSeqBuilder,
+    _expr: &clarity::vm::SymbolicExpression,
+    arg: &clarity::vm::SymbolicExpression,
+) -> Result<(), crate::wasm_generator::GeneratorError> {
+    // we should allocate a string of size 5 in memory for either the strings "true" or "false"
+    // however, we will use 8 bytes so that we can write u64 values directly to memory.
+    let (offset, _len) = generator.create_call_stack_local(
+        builder,
+        &TypeSignature::new_ascii_type_checked(8),
+        false,
+        true,
+    );
+
+    // we traverse and the argument and store the boolean result in a local
+    let res = generator.borrow_local(walrus::ValType::I32);
+    generator.traverse_expr(builder, arg)?;
+    builder.local_set(*res);
+
+    // we need to add the offset where to write the result on the stack
+    builder.local_get(offset);
+
+    // we push the "true" or "false" string on the stack
+    builder
+        .i64_const(i64::from_le_bytes(b"true\0\0\0\0".to_owned()))
+        .i64_const(i64::from_le_bytes(b"false\0\0\0".to_owned()))
+        .local_get(*res)
+        .select(None);
+
+    builder.store(
+        generator.get_memory()?,
+        walrus::ir::StoreKind::I64 { atomic: false },
+        MemArg {
+            align: 8,
+            offset: 0,
+        },
+    );
+
+    builder
+        // it's always "ok" for a bool argument
+        .i32_const(1)
+        .local_get(offset)
+        // the size is either 4 for true or 5 for false
+        .i32_const(5)
+        .local_get(*res)
+        .binop(walrus::ir::BinaryOp::I32Sub)
+        // the err value is irrelevant for a bool argument
+        .i64_const(0)
+        .i64_const(0);
+
+    Ok(())
 }
