@@ -8,6 +8,7 @@ use walrus::InstrSeqBuilder;
 use crate::{GeneratorError, WasmGenerator};
 
 pub mod arithmetic;
+pub mod ascii;
 pub mod bindings;
 pub mod bitwise;
 pub mod blockinfo;
@@ -55,6 +56,7 @@ pub trait ComplexWord: Word {
 }
 
 pub(crate) static COMPLEX_WORDS: &[&'static dyn ComplexWord] = &[
+    &ascii::ToAscii,
     &bindings::Let,
     &blockinfo::AtBlock,
     &blockinfo::GetBlockInfo,
