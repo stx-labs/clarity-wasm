@@ -4,7 +4,7 @@ use super::{ComplexWord, Word};
 use crate::check_args;
 use crate::cost::WordCharge;
 use crate::wasm_generator::{ArgumentsExt, GeneratorError, WasmGenerator};
-use crate::wasm_utils::{check_argument_count, ArgumentCountCheck};
+use crate::wasm_utils::ArgumentCountCheck;
 
 #[derive(Debug)]
 pub struct Recover;

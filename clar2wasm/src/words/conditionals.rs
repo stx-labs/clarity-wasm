@@ -10,7 +10,7 @@ use crate::wasm_generator::{
     add_placeholder_for_clarity_type, drop_value, ArgumentsExt, GeneratorError,
     SequenceElementType, WasmGenerator,
 };
-use crate::wasm_utils::{check_argument_count, ArgumentCountCheck};
+use crate::wasm_utils::ArgumentCountCheck;
 use crate::{check_args, words};
 
 /// Handles Wasm values that can be short-returned in functions such as

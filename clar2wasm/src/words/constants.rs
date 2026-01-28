@@ -4,9 +4,7 @@ use walrus::{ActiveData, DataKind, ValType};
 use super::{ComplexWord, Word};
 use crate::check_args;
 use crate::wasm_generator::{ArgumentsExt, GeneratorError, WasmGenerator};
-use crate::wasm_utils::{
-    check_argument_count, get_type_size, is_in_memory_type, ArgumentCountCheck,
-};
+use crate::wasm_utils::{get_type_size, is_in_memory_type, ArgumentCountCheck};
 
 #[derive(Debug)]
 pub struct DefineConstant;

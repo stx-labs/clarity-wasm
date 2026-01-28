@@ -8,7 +8,7 @@ use super::{ComplexWord, Word};
 use crate::check_args;
 use crate::cost::WordCharge;
 use crate::wasm_generator::{ArgumentsExt, GeneratorError, SequenceElementType, WasmGenerator};
-use crate::wasm_utils::{check_argument_count, get_type_size, ArgumentCountCheck};
+use crate::wasm_utils::{get_type_size, ArgumentCountCheck};
 use crate::words::equal::wasm_equal;
 
 #[derive(Debug)]

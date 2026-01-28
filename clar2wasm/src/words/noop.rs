@@ -5,7 +5,7 @@ use super::{ComplexWord, SimpleWord, Word};
 use crate::check_args;
 use crate::cost::WordCharge;
 use crate::wasm_generator::{GeneratorError, WasmGenerator};
-use crate::wasm_utils::{check_argument_count, ArgumentCountCheck};
+use crate::wasm_utils::ArgumentCountCheck;
 
 // Functions below are considered no-op's because they are instructions that does nothing
 // or has no effect when executed.

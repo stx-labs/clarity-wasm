@@ -1794,7 +1794,11 @@ pub fn check_argument_count(
 #[macro_export]
 macro_rules! check_args {
     ($generator:expr, $builder:expr, $expected:expr, $actual:expr, $check:expr) => {
-        if check_argument_count($generator, $builder, $expected, $actual, $check).is_err() {
+        if $crate::wasm_utils::check_argument_count(
+            $generator, $builder, $expected, $actual, $check,
+        )
+        .is_err()
+        {
             // short cutting traverse functions
             $builder.unreachable();
             return Ok(());

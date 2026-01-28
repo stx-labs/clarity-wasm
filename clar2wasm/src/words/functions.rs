@@ -7,7 +7,7 @@ use crate::error_mapping::ErrorMap;
 use crate::wasm_generator::{
     get_global, ArgumentsExt, FunctionKind, GeneratorError, WasmGenerator,
 };
-use crate::wasm_utils::{check_argument_count, ArgumentCountCheck};
+use crate::wasm_utils::ArgumentCountCheck;
 
 #[derive(Debug)]
 pub struct DefinePrivateFunction;

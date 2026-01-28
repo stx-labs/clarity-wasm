@@ -5,7 +5,7 @@ use super::{ComplexWord, Word};
 use crate::check_args;
 use crate::cost::WordCharge;
 use crate::wasm_generator::{ArgumentsExt, GeneratorError, WasmGenerator};
-use crate::wasm_utils::{check_argument_count, signature_from_string, ArgumentCountCheck};
+use crate::wasm_utils::{signature_from_string, ArgumentCountCheck};
 
 #[derive(Debug)]
 pub struct Print;
