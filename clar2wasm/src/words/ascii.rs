@@ -1,5 +1,5 @@
 use clarity_types::types::{SequenceSubtype, StringSubtype, TypeSignature};
-use walrus::ir::{BinaryOp, MemArg, StoreKind, UnaryOp};
+use walrus::ir::{BinaryOp, MemArg, StoreKind};
 use walrus::LocalId;
 
 use crate::check_args;
@@ -233,92 +233,58 @@ fn to_ascii_u128(
             |_else| {},
         );
 
-    // we make a second loop using the faster i64 division when we have only lo
-    builder
-        .local_get(lo)
-        .i64_const(0)
-        .binop(BinaryOp::I64Ne)
-        .if_else(
-            None,
-            |then| {
-                then.loop_(None, |loop_| {
-                    let loop_id = loop_.id();
+    // We make a second loop using the faster i64 division when we have only lo.
+    // We always have to enter at least once in this loop, since it should account for
+    // the input u0.
+    builder.loop_(None, |loop_| {
+        let loop_id = loop_.id();
 
-                    // we update the offset at which the character should be written
-                    loop_
-                        .local_get(offset)
-                        .i32_const(1)
-                        .binop(BinaryOp::I32Sub)
-                        .local_tee(offset);
+        // we update the offset at which the character should be written
+        loop_
+            .local_get(offset)
+            .i32_const(1)
+            .binop(BinaryOp::I32Sub)
+            .local_tee(offset);
 
-                    // we compute (lo % 10) on the stack and set (lo % 10) using the formula
-                    // divmod(lo, 10) => { div = lo / 10 ; mod = (div * -10) + lo }
-                    loop_
-                        .local_get(lo)
-                        .local_get(lo)
-                        .i64_const(10)
-                        .binop(BinaryOp::I64DivU)
-                        .local_tee(lo)
-                        .i64_const(-10)
-                        .binop(BinaryOp::I64Mul)
-                        .binop(BinaryOp::I64Add);
+        // we compute (lo % 10) on the stack and set (lo % 10) using the formula
+        // divmod(lo, 10) => { div = lo / 10 ; mod = (div * -10) + lo }
+        loop_
+            .local_get(lo)
+            .local_get(lo)
+            .i64_const(10)
+            .binop(BinaryOp::I64DivU)
+            .local_tee(lo)
+            .i64_const(-10)
+            .binop(BinaryOp::I64Mul)
+            .binop(BinaryOp::I64Add);
 
-                    // we convert the value on stack to its ascii value
-                    loop_.i64_const(48).binop(BinaryOp::I64Add);
+        // we convert the value on stack to its ascii value
+        loop_.i64_const(48).binop(BinaryOp::I64Add);
 
-                    // we store the value (offset already on stack)
-                    loop_.store(
-                        memory,
-                        StoreKind::I64_8 { atomic: false },
-                        MemArg {
-                            align: 1,
-                            offset: 0,
-                        },
-                    );
-
-                    // we update the result size
-                    loop_
-                        .local_get(length)
-                        .i32_const(1)
-                        .binop(BinaryOp::I32Add)
-                        .local_set(length);
-
-                    // we keep going through the slow loop while lo is > 0
-                    loop_
-                        .local_get(lo)
-                        .i64_const(0)
-                        .binop(BinaryOp::I64Ne)
-                        .br_if(loop_id);
-                });
+        // we store the value (offset already on stack)
+        loop_.store(
+            memory,
+            StoreKind::I64_8 { atomic: false },
+            MemArg {
+                align: 1,
+                offset: 0,
             },
-            |_else| {},
         );
 
-    // we need to account for the printing of 0. We have 0 if we didn't enter any of the previous loops,
-    // which implies that the current value of length is also 0.
-    builder.local_get(length).unop(UnaryOp::I32Eqz).if_else(
-        None,
-        |then| {
-            then
-                // offset
-                .local_get(offset)
-                .i32_const(1)
-                .local_tee(length)
-                .binop(BinaryOp::I32Sub)
-                .local_tee(offset)
-                // value '0'
-                .i32_const(b'0' as i32)
-                .store(
-                    memory,
-                    StoreKind::I32_8 { atomic: false },
-                    MemArg {
-                        align: 1,
-                        offset: 0,
-                    },
-                );
-        },
-        |_else| {},
-    );
+        // we update the result size
+        loop_
+            .local_get(length)
+            .i32_const(1)
+            .binop(BinaryOp::I32Add)
+            .local_set(length);
+
+        // we keep going through the slow loop while lo is > 0
+        loop_
+            .local_get(lo)
+            .i64_const(0)
+            .binop(BinaryOp::I64Ne)
+            .br_if(loop_id);
+    });
 
     Ok(())
 }
