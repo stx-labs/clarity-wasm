@@ -30,30 +30,23 @@ impl ComplexWord for ToAscii {
             // the check above makes sure we have exactly one argument.
             unreachable!()
         };
-        let arg_ty = generator
-            .get_expr_type(arg)
-            .ok_or_else(|| {
-                GeneratorError::TypeError("to-ascii? 's argument should be typed".to_owned())
-            })?
-            .clone();
+        let arg_ty = generator.get_expr_type(arg).ok_or_else(|| {
+            GeneratorError::TypeError("to-ascii? 's argument should be typed".to_owned())
+        })?;
 
         match arg_ty {
-            TypeSignature::BoolType => to_ascii_bool(generator, builder, expr, arg)?,
+            TypeSignature::BoolType => to_ascii_bool(generator, builder, expr, arg),
             TypeSignature::IntType => todo!(),
-            TypeSignature::UIntType => todo!(),
+            TypeSignature::UIntType => to_ascii_uint(generator, builder, expr, arg),
             TypeSignature::PrincipalType => todo!(),
             TypeSignature::SequenceType(SequenceSubtype::BufferType(_)) => todo!(),
             TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::UTF8(_))) => {
                 todo!()
             }
-            _ => {
-                return Err(GeneratorError::TypeError(format!(
-                    "to-ascii? 's argument shouldn't be of type {arg_ty}"
-                )))
-            }
+            _ => Err(GeneratorError::TypeError(format!(
+                "to-ascii? 's argument shouldn't be of type {arg_ty}"
+            ))),
         }
-
-        Ok(())
     }
 }
 
@@ -103,7 +96,7 @@ fn to_ascii_bool(
         // the size is either 4 for true or 5 for false
         .i32_const(5)
         .local_get(*res)
-        .binop(walrus::ir::BinaryOp::I32Sub)
+        .binop(BinaryOp::I32Sub)
         // the err value is irrelevant for a bool argument
         .i64_const(0)
         .i64_const(0);
