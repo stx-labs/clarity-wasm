@@ -353,4 +353,26 @@ mod tests {
             }))),
         );
     }
+
+    #[test]
+    fn to_ascii_uint() {
+        let check = |i: u128| {
+            let i = format!("u{i}");
+            crosscheck(
+                &format!("(to-ascii? {i})"),
+                Ok(Some(
+                    Value::okay(
+                        Value::string_ascii_from_bytes(i.to_string().into_bytes()).unwrap(),
+                    )
+                    .unwrap(),
+                )),
+            )
+        };
+
+        check(0);
+        check(1);
+        check(u64::MAX as u128);
+        check(u64::MAX as u128 + 1);
+        check(u128::MAX);
+    }
 }
