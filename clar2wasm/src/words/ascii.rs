@@ -430,6 +430,24 @@ mod tests {
             crosscheck(
                 &format!("(to-ascii? {i})"),
                 Ok(Some(
+                    Value::okay(Value::string_ascii_from_bytes(i.into_bytes()).unwrap()).unwrap(),
+                )),
+            )
+        };
+
+        check(0);
+        check(1);
+        check(u64::MAX as u128);
+        check(u64::MAX as u128 + 1);
+        check(u128::MAX);
+    }
+
+    #[test]
+    fn to_ascii_int() {
+        let check = |i: i128| {
+            crosscheck(
+                &format!("(to-ascii? {i})"),
+                Ok(Some(
                     Value::okay(
                         Value::string_ascii_from_bytes(i.to_string().into_bytes()).unwrap(),
                     )
@@ -440,8 +458,12 @@ mod tests {
 
         check(0);
         check(1);
-        check(u64::MAX as u128);
-        check(u64::MAX as u128 + 1);
-        check(u128::MAX);
+        check(i64::MAX as i128);
+        check(i64::MAX as i128 + 1);
+        check(i128::MAX);
+        check(-1);
+        check(i64::MIN as i128);
+        check(i64::MIN as i128 - 1);
+        check(i128::MIN);
     }
 }
