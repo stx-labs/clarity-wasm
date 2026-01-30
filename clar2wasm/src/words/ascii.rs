@@ -36,7 +36,7 @@ impl ComplexWord for ToAscii {
 
         match arg_ty {
             TypeSignature::BoolType => to_ascii_bool(generator, builder, expr, arg),
-            TypeSignature::IntType => todo!(),
+            TypeSignature::IntType => to_ascii_int(generator, builder, expr, arg),
             TypeSignature::UIntType => to_ascii_uint(generator, builder, expr, arg),
             TypeSignature::PrincipalType => todo!(),
             TypeSignature::SequenceType(SequenceSubtype::BufferType(_)) => todo!(),
@@ -158,6 +158,109 @@ fn to_ascii_uint(
         .local_get(*length)
         .i32_const(1)
         .binop(BinaryOp::I32Add)
+        .i64_const(0)
+        .i64_const(0);
+
+    Ok(())
+}
+
+fn to_ascii_int(
+    generator: &mut crate::wasm_generator::WasmGenerator,
+    builder: &mut walrus::InstrSeqBuilder,
+    _expr: &clarity::vm::SymbolicExpression,
+    arg: &clarity::vm::SymbolicExpression,
+) -> Result<(), crate::wasm_generator::GeneratorError> {
+    let memory = generator.get_memory()?;
+
+    // the biggest uint we could write will have the length of i128::MIN: 40 characters, including the '-'.
+    let (offset, _len) = generator.create_call_stack_local(
+        builder,
+        &TypeSignature::new_ascii_type_checked(40),
+        false,
+        true,
+    );
+
+    let lo = generator.borrow_local(walrus::ValType::I64);
+    let hi = generator.borrow_local(walrus::ValType::I64);
+    let neg = generator.borrow_local(walrus::ValType::I32);
+    let length = generator.borrow_local(walrus::ValType::I32);
+
+    generator.traverse_expr(builder, arg)?;
+    builder.local_set(*hi).local_set(*lo);
+
+    // checking if our number is negative. If yes, we convert the int value to its
+    // absolute uint value.
+    builder
+        .local_get(*hi)
+        .i64_const(0)
+        .binop(BinaryOp::I64LtS)
+        .local_tee(*neg)
+        .if_else(
+            None,
+            |then| {
+                then.i64_const(0)
+                    .local_get(*lo)
+                    .binop(BinaryOp::I64Sub)
+                    .local_get(*lo)
+                    .local_get(*neg)
+                    .select(None)
+                    .local_set(*lo);
+
+                then.i64_const(0)
+                    .local_get(*hi)
+                    .local_get(*lo)
+                    .i64_const(0)
+                    .binop(BinaryOp::I64Ne)
+                    .unop(walrus::ir::UnaryOp::I64ExtendUI32)
+                    .binop(BinaryOp::I64Add)
+                    .binop(BinaryOp::I64Sub)
+                    .local_get(*hi)
+                    .local_get(*neg)
+                    .select(None)
+                    .local_set(*hi);
+            },
+            |_else| {},
+        );
+
+    builder
+        .local_get(offset)
+        .i32_const(40)
+        .binop(BinaryOp::I32Add)
+        .local_set(offset);
+    builder.i32_const(0).local_set(*length);
+
+    to_ascii_u128(generator, builder, *lo, *hi, offset, *length)?;
+
+    // we write a '-' in front of the result if needed
+    builder.local_get(*neg).if_else(
+        None,
+        |then| {
+            then.local_get(offset)
+                .i32_const(1)
+                .binop(BinaryOp::I32Sub)
+                .local_tee(offset)
+                .i32_const(b'-' as i32)
+                .store(
+                    memory,
+                    StoreKind::I32_8 { atomic: false },
+                    MemArg {
+                        align: 1,
+                        offset: 0,
+                    },
+                );
+
+            then.local_get(*length)
+                .i32_const(1)
+                .binop(BinaryOp::I32Add)
+                .local_set(*length);
+        },
+        |_else| {},
+    );
+
+    builder
+        .i32_const(1)
+        .local_get(offset)
+        .local_get(*length)
         .i64_const(0)
         .i64_const(0);
 
