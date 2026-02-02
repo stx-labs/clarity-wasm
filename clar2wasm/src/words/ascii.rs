@@ -1,5 +1,5 @@
 use clarity_types::types::{SequenceSubtype, StringSubtype, TypeSignature};
-use walrus::ir::{BinaryOp, MemArg, StoreKind};
+use walrus::ir::{BinaryOp, ExtendedLoad, MemArg, StoreKind};
 use walrus::LocalId;
 
 use crate::check_args;
@@ -39,7 +39,9 @@ impl ComplexWord for ToAscii {
             TypeSignature::IntType => to_ascii_int(generator, builder, expr, arg),
             TypeSignature::UIntType => to_ascii_uint(generator, builder, expr, arg),
             TypeSignature::PrincipalType => todo!(),
-            TypeSignature::SequenceType(SequenceSubtype::BufferType(_)) => todo!(),
+            TypeSignature::SequenceType(SequenceSubtype::BufferType(_)) => {
+                to_ascii_buffer(generator, builder, expr, arg)
+            }
             TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::UTF8(_))) => {
                 todo!()
             }
@@ -388,6 +390,163 @@ fn to_ascii_u128(
             .binop(BinaryOp::I64Ne)
             .br_if(loop_id);
     });
+
+    Ok(())
+}
+
+fn to_ascii_buffer(
+    generator: &mut crate::wasm_generator::WasmGenerator,
+    builder: &mut walrus::InstrSeqBuilder,
+    _expr: &clarity::vm::SymbolicExpression,
+    arg: &clarity::vm::SymbolicExpression,
+) -> Result<(), crate::wasm_generator::GeneratorError> {
+    let memory = generator.get_memory()?;
+
+    let arg_size: u32 = match generator.get_expr_type(arg) {
+        Some(TypeSignature::SequenceType(SequenceSubtype::BufferType(len))) => len.into(),
+        _ => {
+            return Err(GeneratorError::TypeError(
+                "Wrong type for to-ascii argument with buffer".to_owned(),
+            ))
+        }
+    };
+    let (result_offset, _len) = generator.create_call_stack_local(
+        builder,
+        &TypeSignature::new_ascii_type_checked(2 * arg_size + 2),
+        false,
+        true,
+    );
+    let result_length = generator.borrow_local(walrus::ValType::I32);
+
+    let current_offset = generator.borrow_local(walrus::ValType::I32);
+    let buff_offset = generator.borrow_local(walrus::ValType::I32);
+    let buff_length = generator.borrow_local(walrus::ValType::I32);
+    let bytes = generator.borrow_local(walrus::ValType::I32);
+
+    generator.traverse_expr(builder, arg)?;
+    builder.local_set(*buff_length).local_set(*buff_offset);
+
+    // write 0x at offset and update the current offset and length
+    builder
+        .local_get(result_offset)
+        .i32_const(u16::from_le_bytes(b"0x".to_owned()) as i32)
+        .store(
+            memory,
+            StoreKind::I32_16 { atomic: false },
+            MemArg {
+                align: 2,
+                offset: 0,
+            },
+        );
+    builder
+        .local_get(result_offset)
+        .i32_const(2)
+        .binop(BinaryOp::I32Add)
+        .local_set(*current_offset);
+    builder.i32_const(2).local_set(*result_length);
+
+    // if we have a non-empty buffer, we start looping through the bytes.
+    builder.local_get(*buff_length).if_else(
+        None,
+        |then| {
+            then.loop_(None, |loop_| {
+                let tmp = generator.borrow_local(walrus::ValType::I32);
+                let loop_id = loop_.id();
+
+                // get the storage offset and push it on the stack
+                loop_.local_get(*current_offset);
+
+                loop_
+                    .local_get(*buff_offset)
+                    .load(
+                        memory,
+                        walrus::ir::LoadKind::I32_8 {
+                            kind: ExtendedLoad::ZeroExtend,
+                        },
+                        MemArg {
+                            align: 1,
+                            offset: 0,
+                        },
+                    )
+                    .local_set(*bytes);
+
+                // convert lo 4 bytes to hex
+                loop_
+                    .i32_const(b'0' as i32)
+                    .i32_const(b'a' as i32 - 10)
+                    .local_get(*bytes)
+                    .i32_const(0xf)
+                    .binop(BinaryOp::I32And)
+                    .local_tee(*tmp)
+                    .i32_const(10)
+                    .binop(BinaryOp::I32LtU)
+                    .select(None)
+                    .local_get(*tmp)
+                    .binop(BinaryOp::I32Add)
+                    .i32_const(8)
+                    .binop(BinaryOp::I32Shl);
+
+                // convert hi 4 bytes to hex
+                loop_
+                    .i32_const(b'0' as i32)
+                    .i32_const(b'a' as i32 - 10)
+                    .local_get(*bytes)
+                    .i32_const(4)
+                    .binop(BinaryOp::I32ShrU)
+                    .local_tee(*tmp)
+                    .i32_const(10)
+                    .binop(BinaryOp::I32LtU)
+                    .select(None)
+                    .local_get(*tmp)
+                    .binop(BinaryOp::I32Add);
+
+                // concat both and store them (offset was already on the stack)
+                loop_.binop(BinaryOp::I32Or).store(
+                    memory,
+                    StoreKind::I32_16 { atomic: false },
+                    MemArg {
+                        align: 2,
+                        offset: 0,
+                    },
+                );
+
+                // update the offsets and lengths and loop if needed
+                loop_
+                    .local_get(*current_offset)
+                    .i32_const(2)
+                    .binop(BinaryOp::I32Add)
+                    .local_set(*current_offset);
+
+                loop_
+                    .local_get(*result_length)
+                    .i32_const(2)
+                    .binop(BinaryOp::I32Add)
+                    .local_set(*result_length);
+
+                loop_
+                    .local_get(*buff_offset)
+                    .i32_const(1)
+                    .binop(BinaryOp::I32Add)
+                    .local_set(*buff_offset);
+
+                loop_
+                    .local_get(*buff_length)
+                    .i32_const(1)
+                    .binop(BinaryOp::I32Sub)
+                    .local_tee(*buff_length)
+                    .br_if(loop_id);
+            });
+        },
+        |_else| {},
+    );
+
+    // The result is always ok - offset - length - 0
+    builder
+        .i32_const(1)
+        .local_get(result_offset)
+        .local_get(*result_length)
+        .i64_const(0)
+        .i64_const(0);
 
     Ok(())
 }
