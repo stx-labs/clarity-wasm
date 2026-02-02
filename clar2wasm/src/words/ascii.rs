@@ -558,7 +558,7 @@ fn to_ascii_buffer(
     feature = "test-clarity-v3"
 )))]
 mod tests {
-    use clarity_types::types::ResponseData;
+    use clarity_types::types::{BuffData, ResponseData};
     use clarity_types::Value;
 
     use crate::tools::crosscheck;
@@ -624,5 +624,30 @@ mod tests {
         check(i64::MIN as i128);
         check(i64::MIN as i128 - 1);
         check(i128::MIN);
+    }
+
+    #[test]
+    fn to_ascii_buffer() {
+        let check = |buff: &[u8]| {
+            let buff_data = BuffData {
+                data: buff.to_owned(),
+            };
+            crosscheck(
+                &format!("(to-ascii? 0x{buff_data})",),
+                Ok(Some(
+                    Value::okay(
+                        Value::string_ascii_from_bytes(format!("0x{buff_data}").into_bytes())
+                            .unwrap(),
+                    )
+                    .unwrap(),
+                )),
+            );
+        };
+
+        check(&[]);
+        check(&[1]);
+        check(&[1, 2]);
+        check(&[1, 2, 3, 4]);
+        check(&[255, 125, 84, 64, 37, 1]);
     }
 }
