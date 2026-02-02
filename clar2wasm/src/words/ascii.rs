@@ -768,4 +768,27 @@ mod tests {
         check(&[1, 2, 3, 4]);
         check(&[255, 125, 84, 64, 37, 1]);
     }
+
+    #[test]
+    fn to_ascii_string_utf8() {
+        let check = |s: &str| {
+            let snippet = format!(r#"(to-ascii? u"{s}")"#);
+            let expected =
+                Value::okay(Value::string_ascii_from_bytes(s.to_string().into_bytes()).unwrap())
+                    .unwrap();
+            crosscheck(&snippet, Ok(Some(expected)));
+        };
+
+        check("");
+        check("a");
+        check("abc");
+        check("AbCDe1234");
+
+        crosscheck(r#"(to-ascii? u"\u{1f601}")"#, Ok(Some(Value::err_uint(1))));
+        crosscheck(r#"(to-ascii? u"a\u{1f601}")"#, Ok(Some(Value::err_uint(1))));
+        crosscheck(
+            r#"(to-ascii? u"a\u{1f601}bcd")"#,
+            Ok(Some(Value::err_uint(1))),
+        );
+    }
 }
