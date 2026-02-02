@@ -1,5 +1,5 @@
 use clarity_types::types::{SequenceSubtype, StringSubtype, TypeSignature};
-use walrus::ir::{BinaryOp, ExtendedLoad, MemArg, StoreKind};
+use walrus::ir::{BinaryOp, ExtendedLoad, LoadKind, MemArg, StoreKind, UnaryOp};
 use walrus::LocalId;
 
 use crate::check_args;
@@ -43,7 +43,7 @@ impl ComplexWord for ToAscii {
                 to_ascii_buffer(generator, builder, expr, arg)
             }
             TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::UTF8(_))) => {
-                todo!()
+                to_ascii_string_utf8(generator, builder, expr, arg)
             }
             _ => Err(GeneratorError::TypeError(format!(
                 "to-ascii? 's argument shouldn't be of type {arg_ty}"
@@ -547,6 +547,124 @@ fn to_ascii_buffer(
         .local_get(*result_length)
         .i64_const(0)
         .i64_const(0);
+
+    Ok(())
+}
+
+fn to_ascii_string_utf8(
+    generator: &mut crate::wasm_generator::WasmGenerator,
+    builder: &mut walrus::InstrSeqBuilder,
+    _expr: &clarity::vm::SymbolicExpression,
+    arg: &clarity::vm::SymbolicExpression,
+) -> Result<(), crate::wasm_generator::GeneratorError> {
+    let memory = generator.get_memory()?;
+    let arg_size: u32 = match generator.get_expr_type(arg) {
+        Some(TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::UTF8(
+            len,
+        )))) => len.into(),
+        _ => {
+            return Err(GeneratorError::TypeError(
+                "Wrong type for to-ascii argument with string-utf8".to_owned(),
+            ))
+        }
+    };
+    let (result_offset, _len) = generator.create_call_stack_local(
+        builder,
+        &TypeSignature::new_ascii_type_checked(arg_size),
+        false,
+        true,
+    );
+    let result_length = generator.borrow_local(walrus::ValType::I32);
+
+    let current_offset = generator.borrow_local(walrus::ValType::I32);
+    let utf8_offset = generator.borrow_local(walrus::ValType::I32);
+    let utf8_length = generator.borrow_local(walrus::ValType::I32);
+
+    generator.traverse_expr(builder, arg)?;
+    builder.local_set(*utf8_length).local_set(*utf8_offset);
+
+    builder.block(None, |block| {
+        let block_id = block.id();
+
+        // skip if we have an empty string
+        block
+            .local_get(*utf8_length)
+            .unop(UnaryOp::I32Eqz)
+            .br_if(block_id);
+
+        block.local_get(result_offset).local_set(*current_offset);
+        block.i32_const(0).local_set(*result_length);
+
+        block.loop_(None, |loop_| {
+            let loop_id = loop_.id();
+            let unicode = generator.borrow_local(walrus::ValType::I32);
+
+            loop_
+                .local_get(*utf8_offset)
+                .load(
+                    memory,
+                    LoadKind::I32 { atomic: false },
+                    MemArg {
+                        align: 4,
+                        offset: 0,
+                    },
+                )
+                .local_tee(*unicode);
+
+            // we break the loop if the character is not ascii
+            loop_
+                .i32_const(!127u32.to_be() as i32)
+                .binop(BinaryOp::I32And)
+                .br_if(block_id);
+
+            // otherwise we store the last byte
+            // CAUTION: for now, string-utf8 are still stored in big-endian order!!!
+            loop_
+                .local_get(*current_offset)
+                .local_get(*unicode)
+                .i32_const(3 * 8)
+                .binop(BinaryOp::I32ShrU)
+                .store(
+                    memory,
+                    StoreKind::I32_8 { atomic: false },
+                    MemArg {
+                        align: 1,
+                        offset: 0,
+                    },
+                );
+
+            // now we update the locals and loop if we still have characters to process
+            loop_
+                .local_get(*current_offset)
+                .i32_const(1)
+                .binop(BinaryOp::I32Add)
+                .local_set(*current_offset);
+            loop_
+                .local_get(*result_length)
+                .i32_const(1)
+                .binop(BinaryOp::I32Add)
+                .local_set(*result_length);
+            loop_
+                .local_get(*utf8_offset)
+                .i32_const(4)
+                .binop(BinaryOp::I32Add)
+                .local_set(*utf8_offset);
+            loop_
+                .local_get(*utf8_length)
+                .i32_const(4)
+                .binop(BinaryOp::I32Sub)
+                .local_tee(*utf8_length)
+                .br_if(loop_id);
+        });
+    });
+
+    // answer is:
+    //   ok if all chars are processed
+    builder.local_get(*utf8_length).unop(UnaryOp::I32Eqz);
+    //   offset - length
+    builder.local_get(result_offset).local_get(*result_length);
+    //   1 if all chars weren't processed
+    builder.i64_const(1).i64_const(0);
 
     Ok(())
 }
