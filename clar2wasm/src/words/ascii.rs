@@ -827,4 +827,20 @@ mod tests {
             Ok(Some(Value::err_uint(1))),
         );
     }
+
+    #[test]
+    fn to_ascii_principal() {
+        let check = |p: &str| {
+            crosscheck(
+                &format!("(to-ascii? '{p})"),
+                Ok(Some(
+                    Value::okay(Value::string_ascii_from_bytes(p.to_owned().into_bytes()).unwrap())
+                        .unwrap(),
+                )),
+            );
+        };
+
+        check("SM3X6QWWETNBZWGBK6DRGTR1KX50S74D341M9C5X7");
+        check("ST1HTBVD3JG9C05J7HBJTHGR0GGW7KXW28M5JS8QE.foo")
+    }
 }
