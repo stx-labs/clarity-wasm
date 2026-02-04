@@ -4610,7 +4610,6 @@ fn link_contract_hash_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
                     .database
                     .get_contract_hash(contract_id)?;
 
-                    println!("gets here");
                 let resp_val = match contract_hash {
                     Some(contract_hash) => {
                         // success: (ok <buff-32>)

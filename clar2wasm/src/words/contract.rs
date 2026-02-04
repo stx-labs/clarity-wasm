@@ -10,6 +10,7 @@ use crate::check_args;
 use crate::cost::WordCharge;
 use crate::wasm_generator::{ArgumentsExt, GeneratorError, WasmGenerator};
 use crate::wasm_utils::{check_argument_count, ArgumentCountCheck};
+use crate::words::SimpleWord;
 
 #[derive(Debug)]
 pub struct AsContract;
@@ -207,31 +208,27 @@ impl Word for ContractHash {
     }
 }
 
-impl ComplexWord for ContractHash {
-    fn traverse(
+impl SimpleWord for ContractHash {
+    fn visit(
         &self,
         generator: &mut WasmGenerator,
         builder: &mut walrus::InstrSeqBuilder,
-        expr: &SymbolicExpression,
-        args: &[SymbolicExpression],
+        arg_types: &[TypeSignature],
+        return_type: &TypeSignature,
     ) -> Result<(), GeneratorError> {
-        check_args!(generator, builder, 1, args.len(), ArgumentCountCheck::Exact);
+        check_args!(
+            generator,
+            builder,
+            1,
+            arg_types.len(),
+            ArgumentCountCheck::Exact
+        );
 
-        // self.charge(generator, builder, 0)?;
-
-        let contract = args.get_expr(0)?;
-
-        generator.traverse_expr(builder, contract)?;
+        self.charge(generator, builder, 0)?;
 
         // Reserve space for the return value (response (buff 32) uint)
-        let return_ty = generator
-            .get_expr_type(expr)
-            .ok_or_else(|| {
-                GeneratorError::TypeError("contract-hash? expression must be typed".to_owned())
-            })?
-            .clone();
         let (return_offset, return_size) =
-            generator.create_call_stack_local(builder, &return_ty, true, true);
+            generator.create_call_stack_local(builder, return_type, true, true);
 
         // Push the return offset and size to the data stack
         builder.local_get(return_offset).i32_const(return_size);
@@ -241,7 +238,7 @@ impl ComplexWord for ContractHash {
 
         // Host interface fills the result into the specified memory. Read it
         // back out, and place the value on the data stack.
-        generator.read_from_memory(builder, return_offset, 0, &return_ty)?;
+        generator.read_from_memory(builder, return_offset, 0, return_type)?;
 
         Ok(())
     }
@@ -983,44 +980,77 @@ mod tests {
         );
     }
 
-    // #[cfg(feature = "test-clarity-v4")]
+    #[cfg(feature = "test-clarity-v4")]
     mod clarity_v4 {
-        use clarity::types::StacksEpochId;
-        use clarity::vm::ClarityVersion;
         use clarity_types::types::StandardPrincipalData;
 
         use super::*;
 
-        fn env_v4() -> TestEnvironment {
-            TestEnvironment::new(StacksEpochId::Epoch33, ClarityVersion::Clarity4)
-        }
-
         #[test]
         fn contract_hash_ok_returns_buff32() {
-            let callee = "(ok u1)";
-            let callee_address = StandardPrincipalData::transient().to_address().to_string();
-            let caller = &format!(
-                "
+            let callee = "
+(define-read-only (something)
+    (ok u1)
+)";
+            let caller = "
             (define-read-only (call-contract-hash)
                 (contract-hash? .callee)
             )
 
             (call-contract-hash)
-            ",
-                // callee_address
-            );
+            ";
+
+            let mut expected = [0u8; 32];
+            hex::decode_to_slice(
+                "487ed1dee379fcaa6bc74455a10833ec011e13fab145b09d93c0c981ba5beacd",
+                &mut expected,
+            )
+            .unwrap();
 
             crosscheck_multi_contract(
                 &[("callee".into(), callee), ("caller".into(), caller)],
                 Ok(Some(
-                    Value::okay(Value::buff_from(vec![32]).unwrap()).unwrap(),
+                    Value::okay(Value::buff_from(expected.to_vec()).unwrap()).unwrap(),
+                )),
+            );
+        }
+
+        #[test]
+        fn contract_hash_ok_returns_buff32_with_full_addr() {
+            let callee = "
+(define-read-only (something)
+    (ok u1)
+)";
+            let callee_address = StandardPrincipalData::transient().to_address();
+            let caller = &format!(
+                "
+            (define-read-only (call-contract-hash)
+                (contract-hash? '{}.callee)
+            )
+
+            (call-contract-hash)
+            ",
+                callee_address
+            );
+
+            let mut expected = [0u8; 32];
+            hex::decode_to_slice(
+                "487ed1dee379fcaa6bc74455a10833ec011e13fab145b09d93c0c981ba5beacd",
+                &mut expected,
+            )
+            .unwrap();
+
+            crosscheck_multi_contract(
+                &[("callee".into(), callee), ("caller".into(), caller)],
+                Ok(Some(
+                    Value::okay(Value::buff_from(expected.to_vec()).unwrap()).unwrap(),
                 )),
             );
         }
 
         #[test]
         fn contract_hash_err_u1_if_not_contract_principal() {
-            let mut env = env_v4();
+            let mut env = TestEnvironment::default();
             let result = env
                 .init_contract_with_snippet("caller", "(contract-hash? tx-sender)")
                 .expect("Failed to init caller contract.")
@@ -1031,7 +1061,7 @@ mod tests {
 
         #[test]
         fn contract_hash_err_u2_if_contract_missing() {
-            let mut env = env_v4();
+            let mut env = TestEnvironment::default();
             let result = env
                 .init_contract_with_snippet("caller", "(contract-hash? .does-not-exist)")
                 .expect("Failed to init caller contract.")
