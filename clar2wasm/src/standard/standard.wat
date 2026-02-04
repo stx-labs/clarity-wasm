@@ -323,6 +323,15 @@
             (param $name_length i32)
             (param $value_offset i32)
             (param $value_length i32)))
+
+    (import "clarity" "principal_to_string_ascii" 
+        (func $stdlib.principal_to_string_ascii
+            (param $principal_offset i32)
+            (param $principal_length i32)
+            (param $result_offset i32)
+            (param $result_length i32)
+            (result i32)))
+
     (import "clarity" "skip_list" (func $skip-list (param $offset i32) (param $offset_end i32) (result i32)))
 
     ;; TODO: these three funcs below could be hard-coded at compile-time.
