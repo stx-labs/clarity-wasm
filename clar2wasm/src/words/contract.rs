@@ -198,6 +198,55 @@ impl ComplexWord for ContractCall {
     }
 }
 
+#[derive(Debug)]
+pub struct ContractHash;
+
+impl Word for ContractHash {
+    fn name(&self) -> ClarityName {
+        "contract-hash?".into()
+    }
+}
+
+impl ComplexWord for ContractHash {
+    fn traverse(
+        &self,
+        generator: &mut WasmGenerator,
+        builder: &mut walrus::InstrSeqBuilder,
+        expr: &SymbolicExpression,
+        args: &[SymbolicExpression],
+    ) -> Result<(), GeneratorError> {
+        check_args!(generator, builder, 1, args.len(), ArgumentCountCheck::Exact);
+
+        // self.charge(generator, builder, 0)?;
+
+        let contract = args.get_expr(0)?;
+
+        generator.traverse_expr(builder, contract)?;
+
+        // Reserve space for the return value (response (buff 32) uint)
+        let return_ty = generator
+            .get_expr_type(expr)
+            .ok_or_else(|| {
+                GeneratorError::TypeError("contract-hash? expression must be typed".to_owned())
+            })?
+            .clone();
+        let (return_offset, return_size) =
+            generator.create_call_stack_local(builder, &return_ty, true, true);
+
+        // Push the return offset and size to the data stack
+        builder.local_get(return_offset).i32_const(return_size);
+
+        // Call the host interface function, `contract_hash`
+        builder.call(generator.func_by_name("stdlib.contract_hash"));
+
+        // Host interface fills the result into the specified memory. Read it
+        // back out, and place the value on the data stack.
+        generator.read_from_memory(builder, return_offset, 0, &return_ty)?;
+
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use clarity::vm::Value;
@@ -932,5 +981,63 @@ mod tests {
                 clarity::vm::ClarityVersion::Clarity1,
             ),
         );
+    }
+
+    // #[cfg(feature = "test-clarity-v4")]
+    mod clarity_v4 {
+        use clarity::types::StacksEpochId;
+        use clarity::vm::ClarityVersion;
+        use clarity_types::types::StandardPrincipalData;
+
+        use super::*;
+
+        fn env_v4() -> TestEnvironment {
+            TestEnvironment::new(StacksEpochId::Epoch33, ClarityVersion::Clarity4)
+        }
+
+        #[test]
+        fn contract_hash_ok_returns_buff32() {
+            let callee = "(ok u1)";
+            let callee_address = StandardPrincipalData::transient().to_address().to_string();
+            let caller = &format!(
+                "
+            (define-read-only (call-contract-hash)
+                (contract-hash? .callee)
+            )
+
+            (call-contract-hash)
+            ",
+                // callee_address
+            );
+
+            crosscheck_multi_contract(
+                &[("callee".into(), callee), ("caller".into(), caller)],
+                Ok(Some(
+                    Value::okay(Value::buff_from(vec![32]).unwrap()).unwrap(),
+                )),
+            );
+        }
+
+        #[test]
+        fn contract_hash_err_u1_if_not_contract_principal() {
+            let mut env = env_v4();
+            let result = env
+                .init_contract_with_snippet("caller", "(contract-hash? tx-sender)")
+                .expect("Failed to init caller contract.")
+                .expect("Expected a value");
+
+            assert_eq!(result, Value::error(Value::UInt(1)).unwrap());
+        }
+
+        #[test]
+        fn contract_hash_err_u2_if_contract_missing() {
+            let mut env = env_v4();
+            let result = env
+                .init_contract_with_snippet("caller", "(contract-hash? .does-not-exist)")
+                .expect("Failed to init caller contract.")
+                .expect("Expected a value");
+
+            assert_eq!(result, Value::error(Value::UInt(2)).unwrap());
+        }
     }
 }
