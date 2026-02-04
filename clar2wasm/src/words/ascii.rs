@@ -1,3 +1,4 @@
+use clarity_types::representations::MAX_STRING_LEN;
 use clarity_types::types::{SequenceSubtype, StringSubtype, TypeSignature};
 use walrus::ir::{BinaryOp, ExtendedLoad, LoadKind, MemArg, StoreKind, UnaryOp};
 use walrus::LocalId;
@@ -38,7 +39,7 @@ impl ComplexWord for ToAscii {
             TypeSignature::BoolType => to_ascii_bool(generator, builder, expr, arg),
             TypeSignature::IntType => to_ascii_int(generator, builder, expr, arg),
             TypeSignature::UIntType => to_ascii_uint(generator, builder, expr, arg),
-            TypeSignature::PrincipalType => todo!(),
+            TypeSignature::PrincipalType => to_ascii_principal(generator, builder, expr, arg),
             TypeSignature::SequenceType(SequenceSubtype::BufferType(_)) => {
                 to_ascii_buffer(generator, builder, expr, arg)
             }
@@ -665,6 +666,41 @@ fn to_ascii_string_utf8(
     builder.local_get(result_offset).local_get(*result_length);
     //   1 if all chars weren't processed
     builder.i64_const(1).i64_const(0);
+
+    Ok(())
+}
+
+fn to_ascii_principal(
+    generator: &mut crate::wasm_generator::WasmGenerator,
+    builder: &mut walrus::InstrSeqBuilder,
+    _expr: &clarity::vm::SymbolicExpression,
+    arg: &clarity::vm::SymbolicExpression,
+) -> Result<(), crate::wasm_generator::GeneratorError> {
+    let (result_offset, length) = generator.create_call_stack_local(
+        builder,
+        // size is 41 for the max size of a standard contract + the dot + the max len of a contract name
+        &TypeSignature::new_ascii_type_checked(41 + 1 + MAX_STRING_LEN as u32),
+        false,
+        true,
+    );
+
+    let principal_to_string_ascii = generator.func_by_name("stdlib.principal_to_string_ascii");
+
+    let result_length = generator.borrow_local(walrus::ValType::I32);
+
+    generator.traverse_expr(builder, arg)?;
+    builder
+        .local_get(result_offset)
+        .i32_const(length)
+        .call(principal_to_string_ascii)
+        .local_set(*result_length);
+
+    builder
+        .i32_const(1)
+        .local_get(result_offset)
+        .local_get(*result_length)
+        .i64_const(0)
+        .i64_const(0);
 
     Ok(())
 }
