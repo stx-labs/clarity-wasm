@@ -803,6 +803,8 @@ mod tests {
         check(&[1, 2]);
         check(&[1, 2, 3, 4]);
         check(&[255, 125, 84, 64, 37, 1]);
+
+        check(&(u8::MIN..=u8::MAX).cycle().take(524284).collect::<Vec<_>>())
     }
 
     #[test]
@@ -820,6 +822,23 @@ mod tests {
         check("abc");
         check("AbCDe1234");
 
+        // max size, all chars
+        let s: String = (0x20..0x7e_u8)
+            .cycle()
+            .take(262144)
+            .map(char::from)
+            .collect();
+        crosscheck(
+            &format!(
+                r#"(to-ascii? u"{}")"#,
+                s.replace('\\', "\\\\").replace('"', "\\\"")
+            ),
+            Ok(Some(
+                Value::okay(Value::string_ascii_from_bytes(s.into_bytes()).unwrap()).unwrap(),
+            )),
+        );
+
+        // invalid
         crosscheck(r#"(to-ascii? u"\u{1f601}")"#, Ok(Some(Value::err_uint(1))));
         crosscheck(r#"(to-ascii? u"a\u{1f601}")"#, Ok(Some(Value::err_uint(1))));
         crosscheck(
