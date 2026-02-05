@@ -224,7 +224,8 @@ impl SimpleWord for ContractHash {
             ArgumentCountCheck::Exact
         );
 
-        self.charge(generator, builder, 0)?;
+        // TODO: add cost tests after the costs are implemented (see issue #783)
+        // self.charge(generator, builder, 0)?;
 
         // Reserve space for the return value (response (buff 32) uint)
         let (return_offset, return_size) =
@@ -980,11 +981,17 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "test-clarity-v4")]
+    #[cfg(not(any(
+        feature = "test-clarity-v1",
+        feature = "test-clarity-v2",
+        feature = "test-clarity-v3"
+    )))]
     mod clarity_v4 {
+        use clarity::util::hash::Sha512Trunc256Sum;
         use clarity_types::types::StandardPrincipalData;
 
         use super::*;
+        use crate::tools::crosscheck;
 
         #[test]
         fn contract_hash_ok_returns_buff32() {
@@ -992,25 +999,14 @@ mod tests {
 (define-read-only (something)
     (ok u1)
 )";
-            let caller = "
-            (define-read-only (call-contract-hash)
-                (contract-hash? .callee)
-            )
+            let caller = "(contract-hash? .callee)";
 
-            (call-contract-hash)
-            ";
-
-            let mut expected = [0u8; 32];
-            hex::decode_to_slice(
-                "487ed1dee379fcaa6bc74455a10833ec011e13fab145b09d93c0c981ba5beacd",
-                &mut expected,
-            )
-            .unwrap();
+            let expected = Sha512Trunc256Sum::from_data(callee.as_bytes());
 
             crosscheck_multi_contract(
                 &[("callee".into(), callee), ("caller".into(), caller)],
                 Ok(Some(
-                    Value::okay(Value::buff_from(expected.to_vec()).unwrap()).unwrap(),
+                    Value::okay(Value::buff_from(expected.0.to_vec()).unwrap()).unwrap(),
                 )),
             );
         }
@@ -1022,52 +1018,32 @@ mod tests {
     (ok u1)
 )";
             let callee_address = StandardPrincipalData::transient().to_address();
-            let caller = &format!(
-                "
-            (define-read-only (call-contract-hash)
-                (contract-hash? '{}.callee)
-            )
+            let caller = &format!("(contract-hash? '{}.callee)", callee_address);
 
-            (call-contract-hash)
-            ",
-                callee_address
-            );
-
-            let mut expected = [0u8; 32];
-            hex::decode_to_slice(
-                "487ed1dee379fcaa6bc74455a10833ec011e13fab145b09d93c0c981ba5beacd",
-                &mut expected,
-            )
-            .unwrap();
+            let expected = Sha512Trunc256Sum::from_data(callee.as_bytes());
 
             crosscheck_multi_contract(
                 &[("callee".into(), callee), ("caller".into(), caller)],
                 Ok(Some(
-                    Value::okay(Value::buff_from(expected.to_vec()).unwrap()).unwrap(),
+                    Value::okay(Value::buff_from(expected.0.to_vec()).unwrap()).unwrap(),
                 )),
             );
         }
 
         #[test]
         fn contract_hash_err_u1_if_not_contract_principal() {
-            let mut env = TestEnvironment::default();
-            let result = env
-                .init_contract_with_snippet("caller", "(contract-hash? tx-sender)")
-                .expect("Failed to init caller contract.")
-                .expect("Expected a value");
-
-            assert_eq!(result, Value::error(Value::UInt(1)).unwrap());
+            crosscheck(
+                "(contract-hash? tx-sender)",
+                Ok(Some(Value::error(Value::UInt(1)).unwrap())),
+            );
         }
 
         #[test]
         fn contract_hash_err_u2_if_contract_missing() {
-            let mut env = TestEnvironment::default();
-            let result = env
-                .init_contract_with_snippet("caller", "(contract-hash? .does-not-exist)")
-                .expect("Failed to init caller contract.")
-                .expect("Expected a value");
-
-            assert_eq!(result, Value::error(Value::UInt(2)).unwrap());
+            crosscheck(
+                "(contract-hash? .does-not-exist)",
+                Ok(Some(Value::error(Value::UInt(2)).unwrap())),
+            );
         }
     }
 }
