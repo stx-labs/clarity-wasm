@@ -1,3 +1,5 @@
+use std::io::{Cursor, Write as _};
+
 use clarity::vm::analysis::CheckErrors;
 use clarity::vm::callables::{DefineType, DefinedFunction};
 use clarity::vm::costs::{constants as cost_constants, CostTracker};
@@ -19,7 +21,6 @@ use wasmtime::{Caller, Engine, Instance, Linker, Memory, Module, Store};
 use crate::cost::CostLinker;
 use crate::initialize::ClarityWasmContext;
 use crate::wasm_utils::*;
-use std::io::{Cursor, Write as _};
 
 /// Link the host interface functions for into the Wasm module.
 pub fn link_host_functions(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Error> {
