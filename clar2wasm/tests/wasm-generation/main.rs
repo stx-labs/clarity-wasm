@@ -26,6 +26,7 @@ pub mod secp256k1;
 pub mod sequences;
 pub mod serialization_size;
 pub mod stx;
+pub mod to_ascii;
 pub mod tokens;
 pub mod traits;
 pub mod tuple;
