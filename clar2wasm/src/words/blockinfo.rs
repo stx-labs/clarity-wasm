@@ -638,7 +638,11 @@ mod tests {
         }
     }
 
-    // #[cfg(feature = "test-clarity-v4")]
+    #[cfg(not(any(
+        feature = "test-clarity-v1",
+        feature = "test-clarity-v2",
+        feature = "test-clarity-v3"
+    )))]
     mod clarity_v4 {
         use clarity::types::StacksEpochId;
         use clarity::vm::ClarityVersion;

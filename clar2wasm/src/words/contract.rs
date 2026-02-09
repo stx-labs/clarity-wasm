@@ -10,6 +10,7 @@ use crate::check_args;
 use crate::cost::WordCharge;
 use crate::wasm_generator::{ArgumentsExt, GeneratorError, WasmGenerator};
 use crate::wasm_utils::{check_argument_count, ArgumentCountCheck};
+use crate::words::SimpleWord;
 
 #[derive(Debug)]
 pub struct AsContract;
@@ -193,6 +194,52 @@ impl ComplexWord for ContractCall {
         // Host interface fills the result into the specified memory. Read it
         // back out, and place the value on the data stack.
         generator.read_from_memory(builder, return_offset, 0, &return_ty)?;
+
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct ContractHash;
+
+impl Word for ContractHash {
+    fn name(&self) -> ClarityName {
+        "contract-hash?".into()
+    }
+}
+
+impl SimpleWord for ContractHash {
+    fn visit(
+        &self,
+        generator: &mut WasmGenerator,
+        builder: &mut walrus::InstrSeqBuilder,
+        arg_types: &[TypeSignature],
+        return_type: &TypeSignature,
+    ) -> Result<(), GeneratorError> {
+        check_args!(
+            generator,
+            builder,
+            1,
+            arg_types.len(),
+            ArgumentCountCheck::Exact
+        );
+
+        // TODO: add cost tests after the costs are implemented (see issue #783)
+        // self.charge(generator, builder, 0)?;
+
+        // Reserve space for the return value (response (buff 32) uint)
+        let (return_offset, return_size) =
+            generator.create_call_stack_local(builder, return_type, true, true);
+
+        // Push the return offset and size to the data stack
+        builder.local_get(return_offset).i32_const(return_size);
+
+        // Call the host interface function, `contract_hash`
+        builder.call(generator.func_by_name("stdlib.contract_hash"));
+
+        // Host interface fills the result into the specified memory. Read it
+        // back out, and place the value on the data stack.
+        generator.read_from_memory(builder, return_offset, 0, return_type)?;
 
         Ok(())
     }
@@ -932,5 +979,71 @@ mod tests {
                 clarity::vm::ClarityVersion::Clarity1,
             ),
         );
+    }
+
+    #[cfg(not(any(
+        feature = "test-clarity-v1",
+        feature = "test-clarity-v2",
+        feature = "test-clarity-v3"
+    )))]
+    mod clarity_v4 {
+        use clarity::util::hash::Sha512Trunc256Sum;
+        use clarity_types::types::StandardPrincipalData;
+
+        use super::*;
+        use crate::tools::crosscheck;
+
+        #[test]
+        fn contract_hash_ok_returns_buff32() {
+            let callee = "
+(define-read-only (something)
+    (ok u1)
+)";
+            let caller = "(contract-hash? .callee)";
+
+            let expected = Sha512Trunc256Sum::from_data(callee.as_bytes());
+
+            crosscheck_multi_contract(
+                &[("callee".into(), callee), ("caller".into(), caller)],
+                Ok(Some(
+                    Value::okay(Value::buff_from(expected.0.to_vec()).unwrap()).unwrap(),
+                )),
+            );
+        }
+
+        #[test]
+        fn contract_hash_ok_returns_buff32_with_full_addr() {
+            let callee = "
+(define-read-only (something)
+    (ok u1)
+)";
+            let callee_address = StandardPrincipalData::transient().to_address();
+            let caller = &format!("(contract-hash? '{}.callee)", callee_address);
+
+            let expected = Sha512Trunc256Sum::from_data(callee.as_bytes());
+
+            crosscheck_multi_contract(
+                &[("callee".into(), callee), ("caller".into(), caller)],
+                Ok(Some(
+                    Value::okay(Value::buff_from(expected.0.to_vec()).unwrap()).unwrap(),
+                )),
+            );
+        }
+
+        #[test]
+        fn contract_hash_err_u1_if_not_contract_principal() {
+            crosscheck(
+                "(contract-hash? tx-sender)",
+                Ok(Some(Value::error(Value::UInt(1)).unwrap())),
+            );
+        }
+
+        #[test]
+        fn contract_hash_err_u2_if_contract_missing() {
+            crosscheck(
+                "(contract-hash? .does-not-exist)",
+                Ok(Some(Value::error(Value::UInt(2)).unwrap())),
+            );
+        }
     }
 }

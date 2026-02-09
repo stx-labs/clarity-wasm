@@ -1,6 +1,12 @@
 use std::fmt::Write;
 
 use clar2wasm::tools::crosscheck_multi_contract;
+#[cfg(not(any(
+    feature = "test-clarity-v1",
+    feature = "test-clarity-v2",
+    feature = "test-clarity-v3"
+)))]
+use clarity::util::hash::Sha512Trunc256Sum;
 use clarity::vm::types::{ResponseData, TupleData};
 use clarity::vm::{ClarityName, Value};
 use proptest::prelude::*;
@@ -634,6 +640,80 @@ proptest! {
                 committed: true,
                 data: Box::new(expected_res.into()),
             }))),
+        );
+    }
+}
+
+#[cfg(not(any(
+    feature = "test-clarity-v1",
+    feature = "test-clarity-v2",
+    feature = "test-clarity-v3"
+)))]
+proptest! {
+    #![proptest_config(super::runtime_config())]
+
+    #[test]
+    fn contract_hash_returns_correct_hash_for_any_contract(
+        function_defs in prop::collection::vec(
+            (
+                prop::sample::select(vec!["define-public", "define-read-only", "define-private"]),
+                prop::string::string_regex("[a-z][a-z0-9]{0,15}").unwrap(),
+                prop::collection::vec(
+                    prop_signature(),
+                    0..=5
+                ),
+                PropValue::any()
+            ),
+            1..=5
+        )
+        .prop_map(|defs| {
+            defs.into_iter().enumerate().map(|(idx, (func_type, name, tys, result))| {
+                // Ensure function name is at least 2 characters and doesn't start with "u" followed by digit
+                // (which could be confused with uint literals like u0, u1, etc.)
+                let func_name = if name.is_empty()
+                    || name.len() == 1
+                    || (name.starts_with('u') && name.chars().nth(1).is_some_and(|c| c.is_ascii_digit()))
+                {
+                    format!("func{}", idx)
+                } else {
+                    name
+                };
+                (func_type, func_name, tys, result)
+            }).collect::<Vec<_>>()
+        })
+        .no_shrink()
+    ) {
+        // callee contract - generate random contract structure
+        let callee_contract_name = "callee".into();
+        let mut callee_snippet = String::new();
+
+        for (func_type, func_name, tys, result) in function_defs.iter() {
+            let mut function_arguments = String::new();
+            for (name, ty) in ('a'..).zip(tys.iter()) {
+                write!(function_arguments, "({name} {}) ", type_string(ty)).unwrap();
+            }
+
+            write!(
+                callee_snippet,
+                "({} ({} {})\n    (ok {}))\n",
+                func_type, func_name, function_arguments.trim_end(), result
+            ).unwrap();
+        }
+
+        // caller contract
+        let caller_contract_name = "caller".into();
+        let caller_snippet = "(contract-hash? .callee)";
+
+        let expected = Sha512Trunc256Sum::from_data(callee_snippet.as_bytes());
+
+        crosscheck_multi_contract(
+            &[
+                (callee_contract_name, &callee_snippet),
+                (caller_contract_name, caller_snippet),
+            ],
+            Ok(Some(
+                Value::okay(Value::buff_from(expected.0.to_vec()).unwrap()).unwrap(),
+            )),
         );
     }
 }

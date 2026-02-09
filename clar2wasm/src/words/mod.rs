@@ -174,6 +174,7 @@ pub(crate) static SIMPLE_WORDS: &[&'static dyn SimpleWord] = &[
     &conversion::IntToUtf8,
     &conversion::StringToInt,
     &conversion::StringToUint,
+    &contract::ContractHash,
     &hashing::Hash160,
     &hashing::Keccak256,
     &hashing::Sha256,

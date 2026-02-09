@@ -254,6 +254,11 @@
                                                            (param $return_offset i32)
                                                            (param $return_length i32)))
 
+    (import "clarity" "contract_hash" (func $stdlib.contract_hash (param $contract_id_offset i32)
+                                                           (param $contract_id_length i32)
+                                                           (param $return_offset i32)
+                                                           (param $return_length i32)))
+
     (import "clarity" "begin_public_call" (func $stdlib.begin_public_call))
     (import "clarity" "begin_read_only_call" (func $stdlib.begin_read_only_call))
     (import "clarity" "commit_call" (func $stdlib.commit_call))

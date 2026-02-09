@@ -270,12 +270,6 @@ impl ClarityBackingStore for Datastore {
         self.open_chain_tip.clone()
     }
 
-    /// The contract commitment is the hash of the contract, plus the block height in
-    ///   which the contract was initialized.
-    fn make_contract_commitment(&mut self, _contract_hash: Sha512Trunc256Sum) -> String {
-        "".to_string()
-    }
-
     fn insert_metadata(
         &mut self,
         contract: &QualifiedContractIdentifier,

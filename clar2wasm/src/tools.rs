@@ -454,7 +454,7 @@ impl TestEnvironment {
 
 impl Default for TestEnvironment {
     fn default() -> Self {
-        Self::new(StacksEpochId::Epoch31, ClarityVersion::Clarity3)
+        Self::new(StacksEpochId::Epoch33, ClarityVersion::Clarity4)
     }
 }
 
