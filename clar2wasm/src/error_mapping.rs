@@ -1,3 +1,26 @@
+//! WebAssembly Runtime Error Mapping
+//!
+//! This module provides functionality to map WebAssembly runtime errors to Clarity errors.
+//! When a Clarity contract is compiled to WebAssembly and executed, various runtime errors
+//! can occur (arithmetic overflow, division by zero, assertion failures, etc.). This module
+//! translates those low-level WebAssembly traps into meaningful Clarity error types.
+//!
+//! # Architecture
+//!
+//! The error handling flow is:
+//! 1. WebAssembly execution traps with an unreachable instruction
+//! 2. The `runtime-error-code` global variable contains the error code
+//! 3. [`resolve_error`] reads this code and maps it to the appropriate [`ErrorMap`] variant
+//! 4. The [`ErrorMap`] variant is then converted to a Clarity `Error`
+//!
+//! # Error Codes
+//!
+//! Error codes are defined in the [`ErrorMap`] enum:
+//! - 0-15: Standard runtime errors (arithmetic, assertions, etc.)
+//! - 100-104: Cost overrun errors
+//! - 99: Unmapped/unknown errors
+//! - -1: Non-Clarity errors
+
 use clarity::types::StacksEpochId;
 use clarity::vm::costs::CostErrors;
 use clarity::vm::errors::{CheckErrors, Error, RuntimeErrorType, ShortReturnType, WasmError};
@@ -129,6 +152,29 @@ impl From<i32> for ErrorMap {
     }
 }
 
+/// Resolves a WebAssembly runtime error into a Clarity error.
+///
+/// This function is the main entry point for error resolution. It examines the
+/// wasmtime error and attempts to translate it into an appropriate Clarity error type.
+///
+/// # Error Resolution Strategy
+///
+/// 1. First checks if the error is already a Clarity `Error` type
+/// 2. Then checks if it's a `CheckErrors` type
+/// 3. For unreachable traps, reads the `runtime-error-code` global and maps accordingly
+/// 4. Falls back to a generic `WasmError::Runtime` for unrecognized errors
+///
+/// # Arguments
+///
+/// * `e` - The wasmtime error to resolve
+/// * `instance` - The WebAssembly instance for reading global variables
+/// * `store` - The wasmtime store context
+/// * `epoch_id` - The Stacks epoch for compatibility
+/// * `clarity_version` - The Clarity version being executed
+///
+/// # Returns
+///
+/// Returns a Clarity `Error` that best represents the runtime error.
 pub(crate) fn resolve_error(
     e: wasmtime::Error,
     instance: Instance,
