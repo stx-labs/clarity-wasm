@@ -2723,16 +2723,13 @@ fn link_map_get_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Error>
                     epoch,
                 )?;
 
-                let result = caller
-                    .data_mut()
-                    .global_context
-                    .database
-                    .fetch_entry_with_size(&contract, &map_name, &key, &data_types, &epoch);
-
-                let _result_size = match &result {
-                    Ok(data) => data.serialized_byte_len,
-                    Err(_e) => (data_types.value_type.size()? + data_types.key_type.size()?) as u64,
-                };
+                let result = caller.data_mut().global_context.database.fetch_entry(
+                    &contract,
+                    &map_name,
+                    &key,
+                    &data_types,
+                    &epoch,
+                );
 
                 if let Err(error) = result {
                     return Ok(handle_vm_execution_errors(&mut caller, error));
@@ -2756,7 +2753,7 @@ fn link_map_get_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Error>
                     true,
                 )?;
 
-                Ok(())
+                Ok(1i32)
             },
         )
         .map(|_| ())
@@ -5827,7 +5824,7 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
          _key_offset: i32,
          _key_length: i32,
          _return_offset: i32,
-         _return_length: i32| { Ok(()) },
+         _return_length: i32| { Ok(0i32) },
     )?;
 
     linker.func_wrap(

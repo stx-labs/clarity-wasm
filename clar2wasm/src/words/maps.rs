@@ -1,10 +1,13 @@
+use clarity::types::StacksEpochId;
 use clarity::vm::types::{TypeSignature, TypeSignatureExt};
 use clarity::vm::{ClarityName, SymbolicExpression};
+use walrus::ir::{BinaryOp, IfElse, InstrSeqType};
 use walrus::ValType;
 
 use super::{ComplexWord, Word};
 use crate::check_args;
 use crate::cost::WordCharge;
+use crate::error_mapping::ErrorMap;
 use crate::wasm_generator::{ArgumentsExt, GeneratorError, LiteralMemoryEntry, WasmGenerator};
 use crate::wasm_utils::ArgumentCountCheck;
 
@@ -93,10 +96,15 @@ impl ComplexWord for MapGet {
         let name = args.get_name(0)?;
         let key = args.get_expr(1)?;
 
-        // WORKAROUND: set correct type for key
-        if let Some((key_ty, _)) = generator.maps_types.get(name) {
-            generator.set_expr_type(key, key_ty.clone())?;
-        }
+        let (key_ty, _) = generator
+            .maps_types
+            .get(name)
+            .ok_or_else(|| {
+                GeneratorError::TypeError("Type should have been set in map creation".to_owned())
+            })?
+            .clone();
+
+        generator.set_expr_type(key, key_ty.clone())?;
 
         // Get the offset and length for this identifier in the literal memory
         let id_offset = *generator
@@ -114,13 +122,20 @@ impl ComplexWord for MapGet {
         let ty = generator
             .get_expr_type(key)
             .ok_or_else(|| {
-                GeneratorError::TypeError("map-set value expression must be typed".to_owned())
+                GeneratorError::TypeError("map-get value expression must be typed".to_owned())
             })?
             .clone();
         let (key_offset, key_size) = generator.create_call_stack_local(builder, &ty, true, false);
 
         // Push the key to the data stack
         generator.traverse_expr(builder, key)?;
+
+        let serialized_key_size = generator.borrow_local(ValType::I32);
+        if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+            // in this case we need to compute the serialized key size
+            generator.serialization_size(builder, &key_ty)?;
+            builder.local_set(*serialized_key_size);
+        }
 
         // Write the key to the memory (it's already on the data stack)
         generator.write_to_memory(builder, key_offset, 0, &ty)?;
@@ -139,28 +154,96 @@ impl ComplexWord for MapGet {
 
         let return_size = generator.module.locals.add(ValType::I32);
         builder.i32_const(size).local_set(return_size);
-        self.charge(generator, builder, return_size)?;
 
         // Push the return value offset and size to the data stack
         builder.local_get(return_offset).local_get(return_size);
 
         // Call the host-interface function, `map_get`
         builder.call(generator.func_by_name("stdlib.map_get"));
+        let entry_status = generator.borrow_local(ValType::I32);
+        builder.local_set(*entry_status);
 
         // Host interface fills the result into the specified memory. Read it
         // back out, and place the value on the data stack.
         generator.read_from_memory(builder, return_offset, 0, &ty)?;
 
+        let serialize_size = generator.borrow_local(ValType::I32);
+        if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+            generator.serialization_size(builder, &ty)?;
+            builder.local_set(*serialize_size);
+        }
+
+        let block_ty = InstrSeqType::new(&mut generator.module.types, &[], &[]);
+
+        let error_block_id = {
+            let mut error_block = builder.dangling_instr_seq(block_ty);
+            if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+                let cost = generator.borrow_local(ValType::I32);
+                error_block
+                    .local_get(return_size)
+                    .i32_const(key_size)
+                    .binop(BinaryOp::I32Add)
+                    .local_set(*cost);
+                self.charge(generator, &mut error_block, *cost)?;
+            }
+            error_block
+                .i32_const(ErrorMap::ExternError as i32)
+                .call(generator.func_by_name("stdlib.runtime-error"));
+            error_block.id()
+        };
+
+        let success_block_id = {
+            let cost = generator.borrow_local(ValType::I32);
+            let mut success_block = builder.dangling_instr_seq(block_ty);
+            if generator.contract_analysis.epoch < StacksEpochId::Epoch2_05 {
+                success_block
+                    .local_get(return_size)
+                    .i32_const(key_size)
+                    .binop(BinaryOp::I32Add)
+                    .local_set(*cost);
+            } else {
+                let found_block_id = {
+                    let mut found_block = success_block.dangling_instr_seq(block_ty);
+                    found_block
+                        .local_get(*serialize_size)
+                        .local_get(*serialized_key_size)
+                        .binop(BinaryOp::I32Add)
+                        .local_set(*cost);
+                    found_block.id()
+                };
+
+                let not_found_block_id = {
+                    let mut not_found_block = success_block.dangling_instr_seq(block_ty);
+                    not_found_block
+                        .local_get(*serialized_key_size)
+                        .local_set(*cost);
+                    not_found_block.id()
+                };
+
+                success_block
+                    .local_get(*serialize_size)
+                    // Size of none
+                    .i32_const(1)
+                    .binop(BinaryOp::I32Ne);
+                success_block.instr(IfElse {
+                    consequent: found_block_id,
+                    alternative: not_found_block_id,
+                });
+            }
+            self.charge(generator, &mut success_block, *cost)?;
+            success_block.id()
+        };
+
+        builder.local_get(*entry_status);
+        builder
+            .i32_const(-1i32)
+            .binop(BinaryOp::I32Ne)
+            .instr(IfElse {
+                consequent: success_block_id,
+                alternative: error_block_id,
+            });
+
         Ok(())
-    }
-}
-
-#[derive(Debug)]
-pub struct MapSet;
-
-impl Word for MapSet {
-    fn name(&self) -> ClarityName {
-        "map-set".into()
     }
 }
 
