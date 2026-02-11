@@ -364,6 +364,7 @@
     (global $runtime-error-value-offset (mut i32) (i32.const -1))
     (global $runtime-error-type-ser-offset (mut i32) (i32.const -1))
     (global $runtime-error-type-ser-len (mut i32) (i32.const -1))
+    (global $runtime-error-linked (export "linked-error") (mut externref) (ref.null extern))
 
     ;; (sha256) initial hash values: first 32 bits of the fractional parts of the square roots of the first 8 primes 2..19
     (data (i32.const 0) "\67\e6\09\6a\85\ae\67\bb\72\f3\6e\3c\3a\f5\4f\a5\7f\52\0e\51\8c\68\05\9b\ab\d9\83\1f\19\cd\e0\5b")
@@ -418,6 +419,7 @@
         ;; 102: read length cost overrun
         ;; 103: write count cost overrun
         ;; 104: write length cost overrun
+        ;; 105: extern error
     (func $stdlib.runtime-error (param $error_code i32)
         (global.set $runtime-error-code (local.get $error_code))
 

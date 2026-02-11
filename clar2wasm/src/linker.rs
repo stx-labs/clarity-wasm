@@ -2734,9 +2734,11 @@ fn link_map_get_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Error>
                     Err(_e) => (data_types.value_type.size()? + data_types.key_type.size()?) as u64,
                 };
 
-                // runtime_cost(ClarityCostFunction::FetchEntry, env, result_size)?;
+                if let Err(error) = result {
+                    return Ok(handle_vm_execution_errors(&mut caller, error));
+                }
 
-                let value = result.map(|data| data.value)?;
+                let value = result.map(|data| data)?;
 
                 let memory = caller
                     .get_export("memory")
@@ -2846,21 +2848,19 @@ fn link_map_set_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Error>
                     &epoch,
                 );
 
-                let result_size = match &result {
-                    Ok(data) => data.serialized_byte_len,
-                    Err(_e) => (data_types.value_type.size()? + data_types.key_type.size()?) as u64,
-                };
+                if let Err(error) = result {
+                    return Ok(handle_vm_execution_errors(&mut caller, error));
+                }
 
-                // runtime_cost(ClarityCostFunction::SetEntry, env, result_size)?;
+                let data = result.map(|data| data)?;
 
                 caller
                     .data_mut()
                     .global_context
-                    .add_memory(result_size)
+                    .add_memory(data.serialized_byte_len)
                     .map_err(Error::from)?;
 
-                let value = result.map(|data| data.value)?;
-                if let Value::Bool(true) = value {
+                if let Value::Bool(true) = data.value {
                     Ok(1i32)
                 } else {
                     Ok(0i32)
@@ -2956,21 +2956,19 @@ fn link_map_insert_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Err
                     &epoch,
                 );
 
-                let result_size = match &result {
-                    Ok(data) => data.serialized_byte_len,
-                    Err(_e) => (data_types.value_type.size()? + data_types.key_type.size()?) as u64,
-                };
+                if let Err(error) = result {
+                    return Ok(handle_vm_execution_errors(&mut caller, error));
+                }
 
-                // runtime_cost(ClarityCostFunction::SetEntry, env, result_size)?;
+                let data = result.map(|data| data)?;
 
                 caller
                     .data_mut()
                     .global_context
-                    .add_memory(result_size)
+                    .add_memory(data.serialized_byte_len)
                     .map_err(Error::from)?;
 
-                let value = result.map(|data| data.value)?;
-                if let Value::Bool(true) = value {
+                if let Value::Bool(true) = data.value {
                     Ok(1i32)
                 } else {
                     Ok(0i32)
@@ -3048,21 +3046,19 @@ fn link_map_delete_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Err
                     &epoch,
                 );
 
-                let result_size = match &result {
-                    Ok(data) => data.serialized_byte_len,
-                    Err(_e) => (data_types.value_type.size()? + data_types.key_type.size()?) as u64,
-                };
+                if let Err(error) = result {
+                    return Ok(handle_vm_execution_errors(&mut caller, error));
+                }
 
-                // runtime_cost(ClarityCostFunction::SetEntry, env, result_size)?;
+                let data = result.map(|data| data)?;
 
                 caller
                     .data_mut()
                     .global_context
-                    .add_memory(result_size)
+                    .add_memory(data.serialized_byte_len)
                     .map_err(Error::from)?;
 
-                let value = result.map(|data| data.value)?;
-                if let Value::Bool(true) = value {
+                if let Value::Bool(true) = data.value {
                     Ok(1i32)
                 } else {
                     Ok(0i32)
@@ -3076,6 +3072,19 @@ fn link_map_delete_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Err
                 e,
             ))
         })
+}
+
+/// Returns -1 and set the linked error with the error returned
+fn handle_vm_execution_errors(caller: &mut Caller<'_, ClarityWasmContext>, error: Error) -> i32 {
+    let linked_error = caller.get_export("linked-error").unwrap();
+    let linked_error = linked_error.into_global().unwrap();
+    linked_error
+        .set(
+            caller.as_context_mut(),
+            Val::ExternRef(Some(ExternRef::new(error))),
+        )
+        .unwrap();
+    -1i32
 }
 
 fn check_height_valid(
