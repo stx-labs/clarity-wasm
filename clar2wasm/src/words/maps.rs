@@ -55,15 +55,7 @@ impl ComplexWord for MapDefinition {
             .i32_const(name_offset as i32)
             .i32_const(name_length as i32);
 
-        builder.call(
-            generator
-                .module
-                .funcs
-                .by_name("stdlib.define_map")
-                .ok_or_else(|| {
-                    GeneratorError::InternalError("stdlib.define_map not found".to_owned())
-                })?,
-        );
+        builder.call(generator.func_by_name("stdlib.define_map"));
 
         // Add the map types to generator
         generator

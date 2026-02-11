@@ -148,7 +148,7 @@ fn ref_error_to_error<T>(ref_error: &T, placeholder_error: T) -> T {
     //
     // Otherwise we would encounter a double free. For example if we had used core::ptr::read to extract the error
     // held in the ref_error.
-    return unsafe { core::ptr::replace((ref_error as *const T) as *mut T, placeholder_error) };
+    unsafe { core::ptr::replace((ref_error as *const T) as *mut T, placeholder_error) }
 }
 pub(crate) fn resolve_error(
     e: wasmtime::Error,
