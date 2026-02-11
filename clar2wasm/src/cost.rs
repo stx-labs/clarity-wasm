@@ -1500,17 +1500,6 @@ mod word {
         2 => CostMeter { runtime: 0,  read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
         3 => CostMeter { runtime: 0,  read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
     });
-    decl_tests!("map_insert", "(define-map squares { x: int } { y: int }) \
-                               (map-insert squares { x: 1 } { y: 1 })", {
-        1 => CostMeter { runtime: 19000, read_count: 1, read_length: 0, write_count: 1, write_length: 17 },
-        2 => CostMeter { runtime: 4470,  read_count: 1, read_length: 0, write_count: 1, write_length: 17 },
-        3 => CostMeter { runtime: 5715,  read_count: 1, read_length: 0, write_count: 1, write_length: 17 },
-    });
-    decl_tests!("map_set", "(define-map squares { x: int } { y: int }) \
-                            (map-set squares { x: 1 } { y: 1 })", {
-        1 => CostMeter { runtime: 19000, read_count: 1, read_length: 0, write_count: 1, write_length: 17 },
-        2 => CostMeter { runtime: 4470,  read_count: 1, read_length: 0, write_count: 1, write_length: 17 },
-        3 => CostMeter { runtime: 5715,  read_count: 1, read_length: 0, write_count: 1, write_length: 17 },
     decl_tests!("map_delete_existing", "(define-map squares { x: int } { y: int }) \
                                         (map-set squares {x: 1} {y : 0})
                                         (map-delete squares { x: 1 })", {
@@ -1539,6 +1528,33 @@ mod word {
         2 => CostMeter { runtime: 7287,  read_count: 2, read_length: 50, write_count: 1, write_length: 49 },
         3 => CostMeter { runtime: 8793,  read_count: 2, read_length: 50, write_count: 1, write_length: 49 },
     });
+    decl_tests!("map_insert_existing", "(define-map squares { x: int } { y: int }) \
+                                        (map-set squares {x: 1} {y : 0})
+                                        (map-insert squares { x: 1 } { y: 1 })", {
+        1 => CostMeter { runtime: 70000, read_count: 2, read_length: 0, write_count: 2, write_length: 66 },
+        2 => CostMeter { runtime: 9100,  read_count: 2, read_length: 0, write_count: 2, write_length: 74 },
+        3 => CostMeter { runtime: 11590,  read_count: 2, read_length: 0, write_count: 2, write_length: 74 },
+    });
+    decl_tests!("map_insert_non_existing", "(define-map squares { x: int } { y: int }) \
+                                            (map-set squares {x: 1} {y : 0})
+                                            (map-insert squares { x: 0 } { y: 1 })", {
+        1 => CostMeter { runtime: 70000, read_count: 2, read_length: 0, write_count: 2, write_length: 66 },
+        2 => CostMeter { runtime: 9196,  read_count: 2, read_length: 0, write_count: 2, write_length: 98 },
+        3 => CostMeter { runtime: 11686,  read_count: 2, read_length: 0, write_count: 2, write_length: 98 },
+    });
+    decl_tests!("map_set_existing", "(define-map squares { x: int } { y: int }) \
+                                     (map-set squares {x: 1} {y : 0})
+                                     (map-set squares { x: 1 } { y: 1 })", {
+        1 => CostMeter { runtime: 70000, read_count: 2, read_length: 0, write_count: 2, write_length: 66 },
+        2 => CostMeter { runtime: 9196,  read_count: 2, read_length: 0, write_count: 2, write_length: 98 },
+        3 => CostMeter { runtime: 11686,  read_count: 2, read_length: 0, write_count: 2, write_length: 98 },
+    });
+    decl_tests!("map_set_non_existing", "(define-map squares { x: int } { y: int }) \
+                                         (map-set squares {x: 1} {y : 0})
+                                         (map-set squares { x: 0 } { y: 1 })", {
+        1 => CostMeter { runtime: 70000, read_count: 2, read_length: 0, write_count: 2, write_length: 66 },
+        2 => CostMeter { runtime: 9196,  read_count: 2, read_length: 0, write_count: 2, write_length: 98 },
+        3 => CostMeter { runtime: 11686,  read_count: 2, read_length: 0, write_count: 2, write_length: 98 },
     });
     decl_tests!("is_none", "(is-none none)", {
         1 => CostMeter { runtime: 1000, read_count: 0, read_length: 0, write_count: 0, write_length: 0 },

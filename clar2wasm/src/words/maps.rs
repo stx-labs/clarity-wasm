@@ -247,13 +247,19 @@ impl ComplexWord for MapGet {
     }
 }
 
-impl ComplexWord for MapSet {
-    fn traverse(
+enum StoreType {
+    Insert,
+    Set,
+}
+/// Trait that rassemble the traverse code of set and insert
+trait StoreWord: ComplexWord {
+    fn traverse_store(
         &self,
         generator: &mut WasmGenerator,
         builder: &mut walrus::InstrSeqBuilder,
         _expr: &SymbolicExpression,
         args: &[SymbolicExpression],
+        put_type: StoreType,
     ) -> Result<(), GeneratorError> {
         check_args!(generator, builder, 3, args.len(), ArgumentCountCheck::Exact);
 
@@ -261,11 +267,13 @@ impl ComplexWord for MapSet {
         let key = args.get_expr(1)?;
         let value = args.get_expr(2)?;
 
-        // WORKAROUND: set correct types for key and value
-        if let Some((key_ty, value_ty)) = generator.maps_types.get(name).cloned() {
-            generator.set_expr_type(key, key_ty)?;
-            generator.set_expr_type(value, value_ty)?;
-        }
+        let (key_ty, value_type) = generator
+            .maps_types
+            .get(name)
+            .ok_or_else(|| {
+                GeneratorError::TypeError("Types should have been set in map creation".to_owned())
+            })?
+            .clone();
 
         // Get the offset and length for this identifier in the literal memory
         let id_offset = *generator
@@ -283,13 +291,23 @@ impl ComplexWord for MapSet {
         let ty = generator
             .get_expr_type(key)
             .ok_or_else(|| {
-                GeneratorError::TypeError("map-set value expression must be typed".to_owned())
+                GeneratorError::TypeError(match put_type {
+                    StoreType::Set => "map-set value expression must be typed".to_owned(),
+                    StoreType::Insert => "map-insert value expression must be typed".to_owned(),
+                })
             })?
             .clone();
         let (key_offset, key_size) = generator.create_call_stack_local(builder, &ty, true, false);
 
         // Push the key to the data stack
         generator.traverse_expr(builder, key)?;
+
+        let serialized_key_size = generator.borrow_local(ValType::I32);
+        if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+            // in this case we need to compute the serialized key size
+            generator.serialization_size(builder, &key_ty)?;
+            builder.local_set(*serialized_key_size);
+        }
 
         // Write the key to the memory (it's already on the data stack)
         generator.write_to_memory(builder, key_offset, 0, &ty)?;
@@ -301,33 +319,140 @@ impl ComplexWord for MapSet {
         let ty = generator
             .get_expr_type(value)
             .ok_or_else(|| {
-                GeneratorError::TypeError("map-set value expression must be typed".to_owned())
+                GeneratorError::TypeError(match put_type {
+                    StoreType::Set => "map-set value expression must be typed".to_owned(),
+                    StoreType::Insert => "map-insert value expression must be typed".to_owned(),
+                })
             })?
             .clone();
         let (val_offset, size) = generator.create_call_stack_local(builder, &ty, true, false);
 
-        let val_size = generator.module.locals.add(ValType::I32);
-        builder.i32_const(size).local_set(val_size);
-        self.charge(generator, builder, val_size)?;
+        let val_size = generator.borrow_local(ValType::I32);
+        builder.i32_const(size).local_set(*val_size);
 
         // Push the value to the data stack
         generator.traverse_expr(builder, value)?;
+        let value_serialized_size = generator.borrow_local(ValType::I32);
+        if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+            generator.serialization_size(builder, &value_type)?;
+            builder.local_set(*value_serialized_size);
+        }
 
         // Write the value to the memory (it's already on the data stack)
         generator.write_to_memory(builder, val_offset, 0, &ty)?;
 
         // Push the value offset and size to the data stack
-        builder.local_get(val_offset).local_get(val_size);
+        builder.local_get(val_offset).local_get(*val_size);
 
         // Call the host interface function, `map_set`
-        builder.call(generator.func_by_name("stdlib.map_set"));
+        builder.call(generator.func_by_name(match put_type {
+            StoreType::Set => "stdlib.map_set",
+            StoreType::Insert => "stdlib.map_insert",
+        }));
+
+        let entry_status = generator.borrow_local(ValType::I32);
+        let block_ty = InstrSeqType::new(&mut generator.module.types, &[], &[]);
+
+        let error_block_id = {
+            let mut error_block = builder.dangling_instr_seq(block_ty);
+
+            if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+                let cost = generator.borrow_local(ValType::I32);
+                error_block
+                    .local_get(*val_size)
+                    .i32_const(key_size)
+                    .binop(BinaryOp::I32Add)
+                    .local_set(*cost);
+                self.charge(generator, &mut error_block, *cost)?;
+            }
+
+            error_block
+                .i32_const(ErrorMap::ExternError as i32)
+                .call(generator.func_by_name("stdlib.runtime-error"));
+
+            error_block.id()
+        };
+
+        let success_block_id = {
+            let mut success_block = builder.dangling_instr_seq(block_ty);
+            let cost = generator.borrow_local(ValType::I32);
+
+            if generator.contract_analysis.epoch < StacksEpochId::Epoch2_05 {
+                success_block
+                    .i32_const(size)
+                    .i32_const(key_size)
+                    .binop(BinaryOp::I32Add)
+                    .local_set(*cost);
+            } else {
+                success_block
+                    .local_get(*serialized_key_size)
+                    .local_set(*cost);
+
+                let found_block_id = {
+                    let mut found_block = success_block.dangling_instr_seq(block_ty);
+                    found_block
+                        .local_get(*value_serialized_size)
+                        .local_get(*cost)
+                        .binop(BinaryOp::I32Add)
+                        .local_set(*cost);
+
+                    found_block.id()
+                };
+                let not_found_block_id = {
+                    let not_found_block = success_block.dangling_instr_seq(block_ty);
+                    not_found_block.id()
+                };
+
+                success_block.local_get(*entry_status).instr(IfElse {
+                    consequent: found_block_id,
+                    alternative: not_found_block_id,
+                });
+            }
+            self.charge(generator, &mut success_block, *cost)?;
+            success_block.id()
+        };
+
+        builder
+            .local_tee(*entry_status)
+            .i32_const(-1i32)
+            .binop(BinaryOp::I32Ne)
+            .instr(IfElse {
+                consequent: success_block_id,
+                alternative: error_block_id,
+            });
+        builder.local_get(*entry_status);
 
         Ok(())
     }
 }
 
 #[derive(Debug)]
+pub struct MapSet;
+
+impl Word for MapSet {
+    fn name(&self) -> ClarityName {
+        "map-set".into()
+    }
+}
+
+impl StoreWord for MapSet {}
+
+impl ComplexWord for MapSet {
+    fn traverse(
+        &self,
+        generator: &mut WasmGenerator,
+        builder: &mut walrus::InstrSeqBuilder,
+        _expr: &SymbolicExpression,
+        args: &[SymbolicExpression],
+    ) -> Result<(), GeneratorError> {
+        self.traverse_store(generator, builder, _expr, args, StoreType::Set)
+    }
+}
+
+#[derive(Debug)]
 pub struct MapInsert;
+
+impl StoreWord for MapInsert {}
 
 impl Word for MapInsert {
     fn name(&self) -> ClarityName {
@@ -343,74 +468,7 @@ impl ComplexWord for MapInsert {
         _expr: &SymbolicExpression,
         args: &[SymbolicExpression],
     ) -> Result<(), GeneratorError> {
-        check_args!(generator, builder, 3, args.len(), ArgumentCountCheck::Exact);
-
-        let name = args.get_name(0)?;
-        let key = args.get_expr(1)?;
-        let value = args.get_expr(2)?;
-
-        // WORKAROUND: set correct types for key and value
-        if let Some((key_ty, value_ty)) = generator.maps_types.get(name).cloned() {
-            generator.set_expr_type(key, key_ty)?;
-            generator.set_expr_type(value, value_ty)?;
-        }
-
-        // Get the offset and length for this identifier in the literal memory
-        let id_offset = *generator
-            .literal_memory_offset
-            .get(&LiteralMemoryEntry::Ascii(name.as_str().into()))
-            .ok_or_else(|| GeneratorError::InternalError(format!("map not found: {name}")))?;
-        let id_length = name.len();
-
-        // Push the identifier offset and length onto the data stack
-        builder
-            .i32_const(id_offset as i32)
-            .i32_const(id_length as i32);
-
-        // Create space on the call stack to write the key
-        let ty = generator
-            .get_expr_type(key)
-            .ok_or_else(|| {
-                GeneratorError::TypeError("map-set value expression must be typed".to_owned())
-            })?
-            .clone();
-        let (key_offset, key_size) = generator.create_call_stack_local(builder, &ty, true, false);
-
-        // Push the key to the data stack
-        generator.traverse_expr(builder, key)?;
-
-        // Write the key to the memory (it's already on the data stack)
-        generator.write_to_memory(builder, key_offset, 0, &ty)?;
-
-        // Push the key offset and size to the data stack
-        builder.local_get(key_offset).i32_const(key_size);
-
-        // Create space on the call stack to write the value
-        let ty = generator
-            .get_expr_type(value)
-            .ok_or_else(|| {
-                GeneratorError::TypeError("map-set value expression must be typed".to_owned())
-            })?
-            .clone();
-        let (val_offset, size) = generator.create_call_stack_local(builder, &ty, true, false);
-
-        let val_size = generator.module.locals.add(ValType::I32);
-        builder.i32_const(size).local_set(val_size);
-        self.charge(generator, builder, val_size)?;
-
-        // Push the value to the data stack
-        generator.traverse_expr(builder, value)?;
-
-        // Write the value to the memory (it's already on the data stack)
-        generator.write_to_memory(builder, val_offset, 0, &ty)?;
-
-        // Push the value offset and size to the data stack
-        builder.local_get(val_offset).local_get(val_size);
-
-        // Call the host interface function, `map_insert`
-        builder.call(generator.func_by_name("stdlib.map_insert"));
-
-        Ok(())
+        self.traverse_store(generator, builder, _expr, args, StoreType::Insert)
     }
 }
 

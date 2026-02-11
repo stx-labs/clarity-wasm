@@ -2860,7 +2860,12 @@ fn link_map_set_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Error>
                 if let Value::Bool(true) = data.value {
                     Ok(1i32)
                 } else {
-                    Ok(0i32)
+                    // we want to return an error here. It's not supposed to happen
+                    Err(Error::Interpreter(InterpreterError::InterpreterError(
+                        "Unexpected case, set should always be valid if ran to completion"
+                            .to_owned(),
+                    ))
+                    .into())
                 }
             },
         )
