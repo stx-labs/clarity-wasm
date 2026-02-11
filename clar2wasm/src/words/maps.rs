@@ -436,10 +436,13 @@ impl ComplexWord for MapDelete {
         let name = args.get_name(0)?;
         let key = args.get_expr(1)?;
 
-        // WORKAROUND: set correct type for key
-        if let Some((key_ty, _)) = generator.maps_types.get(name) {
-            generator.set_expr_type(key, key_ty.clone())?;
-        }
+        let (key_ty, _) = generator
+            .maps_types
+            .get(name)
+            .ok_or_else(|| {
+                GeneratorError::TypeError("Types should have been set in map creation".to_owned())
+            })?
+            .clone();
 
         // Get the offset and length for this identifier in the literal memory
         let id_offset = *generator
@@ -455,37 +458,88 @@ impl ComplexWord for MapDelete {
             .i32_const(id_length as i32);
 
         // Create space on the call stack to write the key
-        let ty = generator
-            .get_expr_type(key)
-            .ok_or_else(|| {
-                GeneratorError::TypeError("map-set value expression must be typed".to_owned())
-            })?
-            .clone();
-        let (key_offset, size) = generator.create_call_stack_local(builder, &ty, true, false);
+        let (key_offset, size) = generator.create_call_stack_local(builder, &key_ty, true, false);
 
-        let key_size = generator.module.locals.add(ValType::I32);
-        builder.i32_const(size).local_set(key_size);
-        self.charge(generator, builder, key_size)?;
+        let key_size = generator.borrow_local(ValType::I32);
+        builder.i32_const(size).local_set(*key_size);
 
         // Push the key to the data stack
         generator.traverse_expr(builder, key)?;
+        let serialize_size = generator.borrow_local(ValType::I32);
+        if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+            generator.serialization_size(builder, &key_ty)?;
+            builder.local_set(*serialize_size);
+        }
 
         // Write the key to the memory (it's already on the data stack)
-        generator.write_to_memory(builder, key_offset, 0, &ty)?;
+        generator.write_to_memory(builder, key_offset, 0, &key_ty)?;
 
         // Push the key offset and size to the data stack
-        builder.local_get(key_offset).local_get(key_size);
+        builder.local_get(key_offset).local_get(*key_size);
 
         // Call the host interface function, `map_delete`
-        builder.call(
-            generator
-                .module
-                .funcs
-                .by_name("stdlib.map_delete")
-                .ok_or_else(|| {
-                    GeneratorError::TypeError("stdlib.map_delete not found".to_owned())
-                })?,
-        );
+        builder.call(generator.func_by_name("stdlib.map_delete"));
+
+        let entry_status = generator.borrow_local(ValType::I32);
+        builder.local_set(*entry_status);
+
+        let block_ty = InstrSeqType::new(&mut generator.module.types, &[], &[]);
+        let error_block_id = {
+            let mut error_block = builder.dangling_instr_seq(block_ty);
+            if generator.contract_analysis.epoch > StacksEpochId::Epoch2_05 {
+                self.charge(generator, &mut error_block, *key_size)?;
+            }
+
+            error_block
+                .i32_const(ErrorMap::ExternError as i32)
+                .call(generator.func_by_name("stdlib.runtime-error"));
+
+            error_block.id()
+        };
+
+        let success_block_id = {
+            let mut success_block = builder.dangling_instr_seq(block_ty);
+
+            if generator.contract_analysis.epoch < StacksEpochId::Epoch2_05 {
+                self.charge(generator, &mut success_block, *key_size)?;
+            } else {
+                let entry_existed_block_id = {
+                    let mut entry_existed_block = success_block.dangling_instr_seq(block_ty);
+                    let cost = generator.borrow_local(ValType::I32);
+                    //Size of None is 1
+                    entry_existed_block
+                        .local_get(*serialize_size)
+                        .i32_const(1)
+                        .binop(BinaryOp::I32Add)
+                        .local_set(*cost);
+                    self.charge(generator, &mut entry_existed_block, *cost)?;
+                    entry_existed_block.id()
+                };
+
+                let entry_did_not_exist_block_id = {
+                    let mut entry_did_not_exist_block = success_block.dangling_instr_seq(block_ty);
+                    self.charge(generator, &mut entry_did_not_exist_block, *serialize_size)?;
+                    entry_did_not_exist_block.id()
+                };
+
+                success_block.local_get(*entry_status).instr(IfElse {
+                    consequent: entry_existed_block_id,
+                    alternative: entry_did_not_exist_block_id,
+                });
+            }
+            success_block.id()
+        };
+
+        builder.local_get(*entry_status);
+        builder
+            .i32_const(-1i32)
+            .binop(BinaryOp::I32Ne)
+            .instr(IfElse {
+                consequent: success_block_id,
+                alternative: error_block_id,
+            });
+
+        builder.local_get(*entry_status);
 
         Ok(())
     }
