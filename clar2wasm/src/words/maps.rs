@@ -80,7 +80,7 @@ impl ComplexWord for MapGet {
         &self,
         generator: &mut WasmGenerator,
         builder: &mut walrus::InstrSeqBuilder,
-        expr: &SymbolicExpression,
+        _expr: &SymbolicExpression,
         args: &[SymbolicExpression],
     ) -> Result<(), GeneratorError> {
         check_args!(generator, builder, 2, args.len(), ArgumentCountCheck::Exact);
@@ -88,15 +88,13 @@ impl ComplexWord for MapGet {
         let name = args.get_name(0)?;
         let key = args.get_expr(1)?;
 
-        let (key_ty, _) = generator
+        let (key_ty, value_type) = generator
             .maps_types
             .get(name)
             .ok_or_else(|| {
                 GeneratorError::TypeError("Type should have been set in map creation".to_owned())
             })?
             .clone();
-
-        generator.set_expr_type(key, key_ty.clone())?;
 
         // Get the offset and length for this identifier in the literal memory
         let id_offset = *generator
@@ -110,18 +108,12 @@ impl ComplexWord for MapGet {
             .i32_const(id_offset as i32)
             .i32_const(id_length as i32);
 
-        // Create space on the call stack to write the key
-        let ty = generator
-            .get_expr_type(key)
-            .ok_or_else(|| {
-                GeneratorError::TypeError("map-get value expression must be typed".to_owned())
-            })?
-            .clone();
-        let (key_offset, key_size) = generator.create_call_stack_local(builder, &ty, true, false);
+        let (key_offset, key_size) =
+            generator.create_call_stack_local(builder, &key_ty, true, false);
 
         // Push the key to the data stack
+        generator.set_expr_type(key, key_ty.clone())?;
         generator.traverse_expr(builder, key)?;
-
         let serialized_key_size = generator.borrow_local(ValType::I32);
         if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
             // in this case we need to compute the serialized key size
@@ -130,19 +122,14 @@ impl ComplexWord for MapGet {
         }
 
         // Write the key to the memory (it's already on the data stack)
-        generator.write_to_memory(builder, key_offset, 0, &ty)?;
+        generator.write_to_memory(builder, key_offset, 0, &key_ty)?;
 
         // Push the key offset and size to the data stack
         builder.local_get(key_offset).i32_const(key_size);
 
-        // Create a new local to hold the result on the call stack
-        let ty = generator
-            .get_expr_type(expr)
-            .ok_or_else(|| {
-                GeneratorError::TypeError("map-get? expression must be typed".to_owned())
-            })?
-            .clone();
-        let (return_offset, size) = generator.create_call_stack_local(builder, &ty, true, true);
+        let value_type = TypeSignature::OptionalType(Box::new(value_type));
+        let (return_offset, size) =
+            generator.create_call_stack_local(builder, &value_type, true, true);
 
         let return_size = generator.module.locals.add(ValType::I32);
         builder.i32_const(size).local_set(return_size);
@@ -157,11 +144,11 @@ impl ComplexWord for MapGet {
 
         // Host interface fills the result into the specified memory. Read it
         // back out, and place the value on the data stack.
-        generator.read_from_memory(builder, return_offset, 0, &ty)?;
+        generator.read_from_memory(builder, return_offset, 0, &value_type)?;
 
         let serialize_size = generator.borrow_local(ValType::I32);
         if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
-            generator.serialization_size(builder, &ty)?;
+            generator.serialization_size(builder, &value_type)?;
             builder.local_set(*serialize_size);
         }
 
@@ -279,19 +266,11 @@ trait StoreWord: ComplexWord {
             .i32_const(id_offset as i32)
             .i32_const(id_length as i32);
 
-        // Create space on the call stack to write the key
-        let ty = generator
-            .get_expr_type(key)
-            .ok_or_else(|| {
-                GeneratorError::TypeError(match put_type {
-                    StoreType::Set => "map-set value expression must be typed".to_owned(),
-                    StoreType::Insert => "map-insert value expression must be typed".to_owned(),
-                })
-            })?
-            .clone();
-        let (key_offset, key_size) = generator.create_call_stack_local(builder, &ty, true, false);
+        let (key_offset, key_size) =
+            generator.create_call_stack_local(builder, &key_ty, true, false);
 
         // Push the key to the data stack
+        generator.set_expr_type(key, key_ty.clone())?;
         generator.traverse_expr(builder, key)?;
 
         let serialized_key_size = generator.borrow_local(ValType::I32);
@@ -302,27 +281,20 @@ trait StoreWord: ComplexWord {
         }
 
         // Write the key to the memory (it's already on the data stack)
-        generator.write_to_memory(builder, key_offset, 0, &ty)?;
+        generator.write_to_memory(builder, key_offset, 0, &key_ty)?;
 
         // Push the key offset and size to the data stack
         builder.local_get(key_offset).i32_const(key_size);
 
         // Create space on the call stack to write the value
-        let ty = generator
-            .get_expr_type(value)
-            .ok_or_else(|| {
-                GeneratorError::TypeError(match put_type {
-                    StoreType::Set => "map-set value expression must be typed".to_owned(),
-                    StoreType::Insert => "map-insert value expression must be typed".to_owned(),
-                })
-            })?
-            .clone();
-        let (val_offset, size) = generator.create_call_stack_local(builder, &ty, true, false);
+        let (val_offset, size) =
+            generator.create_call_stack_local(builder, &value_type, true, false);
 
         let val_size = generator.borrow_local(ValType::I32);
         builder.i32_const(size).local_set(*val_size);
 
         // Push the value to the data stack
+        generator.set_expr_type(value, value_type.clone())?;
         generator.traverse_expr(builder, value)?;
         let value_serialized_size = generator.borrow_local(ValType::I32);
         if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
@@ -331,7 +303,7 @@ trait StoreWord: ComplexWord {
         }
 
         // Write the value to the memory (it's already on the data stack)
-        generator.write_to_memory(builder, val_offset, 0, &ty)?;
+        generator.write_to_memory(builder, val_offset, 0, &value_type)?;
 
         // Push the value offset and size to the data stack
         builder.local_get(val_offset).local_get(*val_size);
@@ -514,6 +486,7 @@ impl ComplexWord for MapDelete {
         builder.i32_const(size).local_set(*key_size);
 
         // Push the key to the data stack
+        generator.set_expr_type(key, key_ty.clone())?;
         generator.traverse_expr(builder, key)?;
         let serialize_size = generator.borrow_local(ValType::I32);
         if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
