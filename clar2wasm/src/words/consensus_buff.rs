@@ -28,6 +28,7 @@ impl ComplexWord for ToConsensusBuff {
         args: &[clarity::vm::SymbolicExpression],
     ) -> Result<(), crate::wasm_generator::GeneratorError> {
         check_args!(generator, builder, 1, args.len(), ArgumentCountCheck::Exact);
+        let length = generator.borrow_local(walrus::ValType::I32);
 
         generator.traverse_args(builder, args)?;
 
@@ -40,6 +41,13 @@ impl ComplexWord for ToConsensusBuff {
             })?
             .clone();
 
+        generator.serialization_size(builder, &ty)?;
+        builder.local_set(*length);
+
+        // to-consensus-buff has been aded in Clarity2 which has epoch > 2.05 by default.
+        // Therefore we do not need to do difference charge for different epochs.
+        self.charge(generator, builder, *length)?;
+
         let expr_ty = generator
             .get_expr_type(expr)
             .ok_or_else(|| {
@@ -50,18 +58,13 @@ impl ComplexWord for ToConsensusBuff {
             .clone();
         let (offset, _) = generator.create_call_stack_local(builder, &expr_ty, false, true);
 
-        let length = generator.module.locals.add(walrus::ValType::I32);
-
         // Write the serialized value to the top of the call stack
         generator.serialize_to_memory(builder, offset, 0, &ty)?;
-
-        builder.local_set(length);
-
-        self.charge(generator, builder, length)?;
+        builder.drop();
 
         // Check if the serialized value size < MAX_VALUE_SIZE
         builder
-            .local_get(length)
+            .local_get(*length)
             .i32_const(MAX_VALUE_SIZE as i32)
             .binop(walrus::ir::BinaryOp::I32LeU)
             .if_else(
@@ -76,11 +79,11 @@ impl ComplexWord for ToConsensusBuff {
                 ),
                 |then| {
                     then.local_get(offset)
-                        .local_get(length)
+                        .local_get(*length)
                         .binop(walrus::ir::BinaryOp::I32Add)
                         .global_set(generator.stack_pointer);
 
-                    then.i32_const(1).local_get(offset).local_get(length);
+                    then.i32_const(1).local_get(offset).local_get(*length);
                 },
                 |else_| {
                     else_.i32_const(0).i32_const(0).i32_const(0);

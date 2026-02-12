@@ -1,3 +1,4 @@
+use clarity::types::StacksEpochId;
 use clarity::vm::types::{BufferLength, SequenceSubtype, TypeSignature};
 use clarity::vm::ClarityName;
 use walrus::ValType;
@@ -6,6 +7,36 @@ use super::{SimpleWord, Word};
 use crate::cost::WordCharge;
 use crate::wasm_generator::{GeneratorError, WasmGenerator};
 
+pub fn compute_cost(
+    word: &impl SimpleWord,
+    generator: &mut WasmGenerator,
+    builder: &mut walrus::InstrSeqBuilder,
+    arg_types: &[TypeSignature],
+) -> Result<(), GeneratorError> {
+    if generator.contract_analysis.epoch < StacksEpochId::Epoch2_05 {
+        word.charge(generator, builder, arg_types.len() as u32)?
+    } else {
+        match &arg_types[0] {
+            TypeSignature::IntType | TypeSignature::UIntType => {
+                // 17 is the serialized size of an Int | Uint
+                word.charge(generator, builder, 17)?
+            }
+            TypeSignature::SequenceType(SequenceSubtype::BufferType(_)) => {
+                let serialization_size = generator.borrow_local(ValType::I32);
+                generator.serialization_size(builder, &arg_types[0])?;
+                builder.local_set(*serialization_size);
+                word.charge(generator, builder, *serialization_size)?;
+            }
+            _ => {
+                return Err(GeneratorError::TypeError(
+                    format!("invalid type for {}", word.name()).to_string(),
+                ));
+            }
+        };
+    }
+    Ok(())
+}
+
 pub fn traverse_hash(
     word: &impl SimpleWord,
     generator: &mut WasmGenerator,
@@ -13,6 +44,7 @@ pub fn traverse_hash(
     arg_types: &[TypeSignature],
     work_space: u32, // constant upper bound
 ) -> Result<(), GeneratorError> {
+    compute_cost(word, generator, builder, arg_types)?;
     let name = word.name();
 
     // Buffer type for the result based on the hash function
@@ -31,20 +63,11 @@ pub fn traverse_hash(
 
     let hash_type = match &arg_types[0] {
         TypeSignature::IntType | TypeSignature::UIntType => {
-            // an integer is 16 bytes
-            word.charge(generator, builder, 16)?;
-
             generator.ensure_work_space(work_space);
             "int"
         }
         TypeSignature::SequenceType(SequenceSubtype::BufferType(len)) => {
-            // for cost tracking we need the length of the input to the hash,
-            // so we load it onto a new local
-            let buf_len = generator.module.locals.add(ValType::I32);
-            builder.local_tee(buf_len);
-            word.charge(generator, builder, buf_len)?;
-
-            // Input buff is also copied
+            // Input buff is copied
             generator.ensure_work_space(u32::from(len) + work_space);
             "buf"
         }
@@ -127,6 +150,7 @@ impl SimpleWord for Keccak256 {
         arg_types: &[TypeSignature],
         _return_type: &TypeSignature,
     ) -> Result<(), GeneratorError> {
+        compute_cost(self, generator, builder, arg_types)?;
         let ty = &arg_types[0];
         match ty {
             TypeSignature::IntType | TypeSignature::UIntType => {
@@ -145,12 +169,6 @@ impl SimpleWord for Keccak256 {
                 ))
             }
         }
-
-        // for cost tracking we need the length of the input to the hash,
-        // so we load it onto a new local
-        let buf_len = generator.module.locals.add(ValType::I32);
-        builder.local_tee(buf_len);
-        self.charge(generator, builder, buf_len)?;
 
         // Reserve stack space for the host-function to write the result
         let ret_ty = TypeSignature::BUFFER_32.clone();
@@ -212,6 +230,7 @@ impl SimpleWord for Sha512_256 {
         arg_types: &[TypeSignature],
         _return_type: &TypeSignature,
     ) -> Result<(), GeneratorError> {
+        compute_cost(self, generator, builder, arg_types)?;
         let ty = &arg_types[0];
         match ty {
             TypeSignature::IntType | TypeSignature::UIntType => {
@@ -230,12 +249,6 @@ impl SimpleWord for Sha512_256 {
                 ))
             }
         }
-
-        // for cost tracking we need the length of the input to the hash,
-        // so we load it onto a new local
-        let buf_len = generator.module.locals.add(ValType::I32);
-        builder.local_tee(buf_len);
-        self.charge(generator, builder, buf_len)?;
 
         // Reserve stack space for the host-function to write the result
         let ret_ty = TypeSignature::BUFFER_32.clone();

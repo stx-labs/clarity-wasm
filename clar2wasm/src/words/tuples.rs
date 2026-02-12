@@ -1,7 +1,10 @@
 use std::collections::BTreeMap;
 
+use clarity::types::StacksEpochId;
 use clarity::vm::types::TypeSignature;
 use clarity::vm::{ClarityName, SymbolicExpression};
+use walrus::ir::BinaryOp;
+use walrus::ValType;
 
 use super::{ComplexWord, Word};
 use crate::check_args;
@@ -194,7 +197,11 @@ impl ComplexWord for TupleMerge {
         args: &[SymbolicExpression],
     ) -> Result<(), GeneratorError> {
         check_args!(generator, builder, 2, args.len(), ArgumentCountCheck::Exact);
+        let serialization_size = generator.borrow_local(ValType::I32);
 
+        if generator.contract_analysis.epoch < StacksEpochId::Epoch2_05 {
+            self.charge(generator, builder, args.len() as u32)?;
+        }
         let lhs_tuple_ty = generator
             .get_expr_type(&args[0])
             .ok_or_else(|| GeneratorError::TypeError("tuple expression must be typed".to_string()))
@@ -217,8 +224,6 @@ impl ComplexWord for TupleMerge {
             .get_expr_type(expr)
             .ok_or_else(|| GeneratorError::TypeError("merge expression must be typed".to_owned()));
 
-        self.charge(generator, builder, result_ty.iter().len() as u32)?;
-
         // Those locals will contain the resulting tuple after the merge operation
         let result_locals: BTreeMap<_, Vec<_>> = result_ty
             .and_then(|expr_ty| match expr_ty {
@@ -240,6 +245,14 @@ impl ComplexWord for TupleMerge {
 
         // Traverse the LHS tuple argument, leaving it on top of the stack.
         generator.traverse_expr(builder, &args[0])?;
+
+        if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+            generator.serialization_size(builder, &lhs_tuple_ty.clone().into())?;
+            // STACK: [LHS, item_serialization_size]
+
+            builder.local_set(*serialization_size);
+            // STACK: [LHS]
+        }
 
         // We will copy the values from LHS into the result locals iff the key is not
         // present in RHS. Otherwise, we drop the values.
@@ -264,6 +277,20 @@ impl ComplexWord for TupleMerge {
 
         // Traverse the RHS tuple argument, leaving it on top of the stack.
         generator.traverse_expr(builder, &args[1])?;
+
+        if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+            generator.serialization_size(builder, &rhs_tuple_ty.clone().into())?;
+            // STACK: [RHS, item_serialization_size]
+
+            builder
+                .local_get(*serialization_size)
+                .binop(BinaryOp::I32Add)
+                .local_set(*serialization_size);
+
+            // STACK: [RHS]
+            self.charge(generator, builder, *serialization_size)?;
+            // STACK: [RHS]
+        }
 
         // We will copy all values of RHS into the result locals
         for (name, _) in rhs_tuple_ty.get_type_map().iter().rev() {
