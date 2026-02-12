@@ -152,6 +152,15 @@ impl ComplexWord for MapGet {
             builder.local_set(*serialize_size);
         }
 
+        if generator.contract_analysis.epoch < StacksEpochId::Epoch2_05 {
+            let cost = generator.borrow_local(ValType::I32);
+            builder
+                .local_get(return_size)
+                .i32_const(key_size)
+                .binop(BinaryOp::I32Add)
+                .local_set(*cost);
+            self.charge(generator, builder, *cost)?;
+        }
         let block_ty = InstrSeqType::new(&mut generator.module.types, &[], &[]);
 
         let error_block_id = {
@@ -172,15 +181,9 @@ impl ComplexWord for MapGet {
         };
 
         let success_block_id = {
-            let cost = generator.borrow_local(ValType::I32);
             let mut success_block = builder.dangling_instr_seq(block_ty);
-            if generator.contract_analysis.epoch < StacksEpochId::Epoch2_05 {
-                success_block
-                    .local_get(return_size)
-                    .i32_const(key_size)
-                    .binop(BinaryOp::I32Add)
-                    .local_set(*cost);
-            } else {
+            if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+                let cost = generator.borrow_local(ValType::I32);
                 let found_block_id = {
                     let mut found_block = success_block.dangling_instr_seq(block_ty);
                     found_block
@@ -208,8 +211,8 @@ impl ComplexWord for MapGet {
                     consequent: found_block_id,
                     alternative: not_found_block_id,
                 });
+                self.charge(generator, &mut success_block, *cost)?;
             }
-            self.charge(generator, &mut success_block, *cost)?;
             success_block.id()
         };
 
@@ -314,6 +317,16 @@ trait StoreWord: ComplexWord {
             StoreType::Insert => "stdlib.map_insert",
         }));
 
+        if generator.contract_analysis.epoch < StacksEpochId::Epoch2_05 {
+            let cost = generator.borrow_local(ValType::I32);
+            builder
+                .i32_const(size)
+                .i32_const(key_size)
+                .binop(BinaryOp::I32Add)
+                .local_set(*cost);
+            self.charge(generator, builder, *cost)?;
+        }
+
         let entry_status = generator.borrow_local(ValType::I32);
         let block_ty = InstrSeqType::new(&mut generator.module.types, &[], &[]);
 
@@ -339,15 +352,9 @@ trait StoreWord: ComplexWord {
 
         let success_block_id = {
             let mut success_block = builder.dangling_instr_seq(block_ty);
-            let cost = generator.borrow_local(ValType::I32);
+            if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+                let cost = generator.borrow_local(ValType::I32);
 
-            if generator.contract_analysis.epoch < StacksEpochId::Epoch2_05 {
-                success_block
-                    .i32_const(size)
-                    .i32_const(key_size)
-                    .binop(BinaryOp::I32Add)
-                    .local_set(*cost);
-            } else {
                 success_block
                     .local_get(*serialized_key_size)
                     .local_set(*cost);
@@ -371,8 +378,8 @@ trait StoreWord: ComplexWord {
                     consequent: found_block_id,
                     alternative: not_found_block_id,
                 });
+                self.charge(generator, &mut success_block, *cost)?;
             }
-            self.charge(generator, &mut success_block, *cost)?;
             success_block.id()
         };
 
@@ -506,10 +513,14 @@ impl ComplexWord for MapDelete {
         let entry_status = generator.borrow_local(ValType::I32);
         builder.local_set(*entry_status);
 
+        if generator.contract_analysis.epoch < StacksEpochId::Epoch2_05 {
+            self.charge(generator, builder, *key_size)?;
+        }
+
         let block_ty = InstrSeqType::new(&mut generator.module.types, &[], &[]);
         let error_block_id = {
             let mut error_block = builder.dangling_instr_seq(block_ty);
-            if generator.contract_analysis.epoch > StacksEpochId::Epoch2_05 {
+            if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
                 self.charge(generator, &mut error_block, *key_size)?;
             }
 
@@ -523,9 +534,7 @@ impl ComplexWord for MapDelete {
         let success_block_id = {
             let mut success_block = builder.dangling_instr_seq(block_ty);
 
-            if generator.contract_analysis.epoch < StacksEpochId::Epoch2_05 {
-                self.charge(generator, &mut success_block, *key_size)?;
-            } else {
+            if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
                 let entry_existed_block_id = {
                     let mut entry_existed_block = success_block.dangling_instr_seq(block_ty);
                     let cost = generator.borrow_local(ValType::I32);
