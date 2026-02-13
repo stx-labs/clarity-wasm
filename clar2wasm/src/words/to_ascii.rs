@@ -191,39 +191,37 @@ fn to_ascii_int(
     generator.traverse_expr(builder, arg)?;
     builder.local_set(*hi).local_set(*lo);
 
-    // checking if our number is negative. If yes, we convert the int value to its
-    // absolute uint value.
+    // checking if our number is negative.
     builder
         .local_get(*hi)
         .i64_const(0)
         .binop(BinaryOp::I64LtS)
-        .local_tee(*neg)
-        .if_else(
-            None,
-            |then| {
-                then.i64_const(0)
-                    .local_get(*lo)
-                    .binop(BinaryOp::I64Sub)
-                    .local_get(*lo)
-                    .local_get(*neg)
-                    .select(None)
-                    .local_set(*lo);
+        .local_set(*neg);
 
-                then.i64_const(0)
-                    .local_get(*hi)
-                    .local_get(*lo)
-                    .i64_const(0)
-                    .binop(BinaryOp::I64Ne)
-                    .unop(walrus::ir::UnaryOp::I64ExtendUI32)
-                    .binop(BinaryOp::I64Add)
-                    .binop(BinaryOp::I64Sub)
-                    .local_get(*hi)
-                    .local_get(*neg)
-                    .select(None)
-                    .local_set(*hi);
-            },
-            |_else| {},
-        );
+    // taking the absolute value of lo
+    builder
+        .i64_const(0)
+        .local_get(*lo)
+        .binop(BinaryOp::I64Sub)
+        .local_get(*lo)
+        .local_get(*neg)
+        .select(None)
+        .local_set(*lo);
+
+    // taking the absolute value of hi
+    builder
+        .i64_const(0)
+        .local_get(*hi)
+        .local_get(*lo)
+        .i64_const(0)
+        .binop(BinaryOp::I64Ne)
+        .unop(UnaryOp::I64ExtendUI32)
+        .binop(BinaryOp::I64Add)
+        .binop(BinaryOp::I64Sub)
+        .local_get(*hi)
+        .local_get(*neg)
+        .select(None)
+        .local_set(*hi);
 
     builder
         .local_get(offset)
