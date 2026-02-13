@@ -213,6 +213,8 @@ impl ComplexWord for Fold {
         ));
         let else_id = else_.id();
 
+        // we will need to reset the stack-pointer after every run of the loop, otherwise it would
+        // just grow at every run and could cause oom issues.
         let former_stack_pointer = generator.borrow_local(ValType::I32);
         else_
             .global_get(generator.stack_pointer)
