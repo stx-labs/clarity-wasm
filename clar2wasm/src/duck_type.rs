@@ -54,7 +54,7 @@ impl WasmGenerator {
         og_ty: &TypeSignature,
         target_ty: &TypeSignature,
         locals: &[LocalId],
-        preallocated: LocalId,
+        allocated_mem_offset: LocalId,
     ) -> Result<(), GeneratorError> {
         match (og_ty, target_ty) {
             (TypeSignature::NoType, _) | (_, TypeSignature::NoType) => {
@@ -92,7 +92,13 @@ impl WasmGenerator {
                         "Not enough locals for duck-typing an optional".to_owned(),
                     )
                 })?;
-                self.duck_type_stack(builder, og_subty, target_subty, sub_locals, preallocated)?;
+                self.duck_type_stack(
+                    builder,
+                    og_subty,
+                    target_subty,
+                    sub_locals,
+                    allocated_mem_offset,
+                )?;
                 builder.local_set(*variant_local);
             }
             (TypeSignature::ResponseType(og_subty), TypeSignature::ResponseType(target_subty)) => {
@@ -112,8 +118,20 @@ impl WasmGenerator {
                         )
                     })?;
 
-                self.duck_type_stack(builder, og_err_ty, target_err_ty, err_locals, preallocated)?;
-                self.duck_type_stack(builder, og_ok_ty, target_ok_ty, ok_locals, preallocated)?;
+                self.duck_type_stack(
+                    builder,
+                    og_err_ty,
+                    target_err_ty,
+                    err_locals,
+                    allocated_mem_offset,
+                )?;
+                self.duck_type_stack(
+                    builder,
+                    og_ok_ty,
+                    target_ok_ty,
+                    ok_locals,
+                    allocated_mem_offset,
+                )?;
                 builder.local_set(*variant_local);
             }
             (TypeSignature::TupleType(og_tup_ty), TypeSignature::TupleType(target_tup_ty)) => {
@@ -135,7 +153,7 @@ impl WasmGenerator {
                         og_subty,
                         target_subty,
                         current_locals,
-                        preallocated,
+                        allocated_mem_offset,
                     )?;
                 }
             }
@@ -173,7 +191,7 @@ impl WasmGenerator {
                         og_elem_ty,
                         target_elem_ty,
                         &target_locs,
-                        preallocated,
+                        allocated_mem_offset,
                     )?;
                     for l in target_locs.iter() {
                         loop_.local_get(*l);
@@ -212,11 +230,11 @@ impl WasmGenerator {
                     |then| {
                         then.i32_const(0).local_set(length_target);
                         // we set the offset_target to copy at the free space of stack-pointer and we move this on further
-                        then.local_get(preallocated)
+                        then.local_get(allocated_mem_offset)
                             .local_tee(offset_target)
                             .i32_const(get_type_in_memory_size(target_ty, false))
                             .binop(BinaryOp::I32Add)
-                            .local_set(preallocated);
+                            .local_set(allocated_mem_offset);
 
                         // we put the resulting offset/length on the stack
                         then.local_get(offset_target);
