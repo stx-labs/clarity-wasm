@@ -175,7 +175,7 @@ fn to_ascii_int(
 ) -> Result<(), crate::wasm_generator::GeneratorError> {
     let memory = generator.get_memory()?;
 
-    // the biggest uint we could write will have the length of i128::MIN: 40 characters, including the '-'.
+    // the biggest int we could write will have the length of i128::MIN: 40 characters, including the '-'.
     let (offset, _len) = generator.create_call_stack_local(
         builder,
         &TypeSignature::new_ascii_type_checked(40),
