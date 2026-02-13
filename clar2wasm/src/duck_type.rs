@@ -16,8 +16,10 @@ impl WasmGenerator {
     /// The original and target types should be "somewhat compatible" and validated by the typechecker
     /// for this function to succeed.
     ///
-    /// Space should be preallocated for any case where the duck-typed result value will
-    /// not be used with the immediate following instructions.
+    /// We can pass the offset to a preallocated memory where the duck-typed value will be written.
+    /// This can be necessary to avoid an overwriting of this value if any operation is done right after the duck-typing.
+    /// If the duck-typed value is used immediately after, we can ignore this argument and the duck-typed value will be written
+    /// at the current value of $stack-pointer. The initial value of $stack-pointer will not be reset after the usage of this function.
     pub(crate) fn duck_type(
         &mut self,
         builder: &mut InstrSeqBuilder,
