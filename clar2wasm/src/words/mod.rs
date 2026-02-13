@@ -316,6 +316,12 @@ mod tests {
                     if word.name().as_str() == "or" || word.name().as_str() == "and" {
                         continue;
                     }
+                    // TODO: to-ascii became a complex word recently. Our current feat/clarity-wasm-develop
+                    // still considers it to be simple, but it should be complex.
+                    // we need to remove this after our next sync with stacks-core#develop
+                    if word.name().as_str() == "to-ascii?" {
+                        continue;
+                    }
                     panic!("{word:?} should not be complex!")
                 }
             }
