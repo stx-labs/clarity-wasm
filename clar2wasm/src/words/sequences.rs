@@ -910,7 +910,10 @@ impl ComplexWord for Map {
                         .sum();
                     (size > 0).then(|| {
                         (
+                            // the static offset where we can write the duck-typed values
                             generator.reserve_static_memory(size),
+                            // a local that can be used to track the current offset when writing
+                            // the duck-typed values in memory.
                             generator.borrow_local(ValType::I32),
                         )
                     })
