@@ -68,7 +68,7 @@ fn to_ascii_bool(
         true,
     );
 
-    // we traverse and the argument and store the boolean result in a local
+    // we traverse the argument and store the boolean result in a local
     let res = generator.borrow_local(walrus::ValType::I32);
     generator.traverse_expr(builder, arg)?;
     builder.local_set(*res);
