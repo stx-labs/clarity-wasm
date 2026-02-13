@@ -535,6 +535,11 @@ impl ComplexWord for Filter {
                         ))
                     }
                 };
+                // We need a preallocated space for the duck-typed argument, because we don't know if it will be used immediately
+                // in the discriminator call.
+                // Since an element of a sequence will always have the same size as all the other elements, and since
+                // the type of the argument of the discriminator is fixed, we can allocate a static space in memory
+                // where we can store any duck-typed element for all calls to discriminator.
                 let ducktype_offset = generator.reserve_static_memory(dt_needed_workspace(&arg_ty));
                 let l = generator.borrow_local(ValType::I32);
                 loop_.i32_const(ducktype_offset as _).local_set(*l);
