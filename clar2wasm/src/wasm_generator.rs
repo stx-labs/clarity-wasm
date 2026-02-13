@@ -324,20 +324,6 @@ pub(crate) fn drop_value(builder: &mut InstrSeqBuilder, ty: &TypeSignature) {
     });
 }
 
-#[deprecated = "use the From implementation"]
-pub fn type_from_sequence_element(se: &SequenceElementType) -> TypeSignature {
-    match se {
-        SequenceElementType::Other(o) => o.clone(),
-        SequenceElementType::Byte => TypeSignature::BUFFER_1.clone(),
-        SequenceElementType::UnicodeScalar => {
-            TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::UTF8(
-                #[allow(clippy::unwrap_used)]
-                StringUTF8Length::try_from(1u32).unwrap(),
-            )))
-        }
-    }
-}
-
 pub fn get_global(module: &Module, name: &str) -> Result<GlobalId, GeneratorError> {
     module
         .globals
