@@ -3012,7 +3012,7 @@ mod tests {
     }
 
     #[test]
-    fn fold_needs_workaround_args() {
+    fn fold_needs_workaround_and_duck_typed_args() {
         let snippet = "
             (define-private
                 (foo
