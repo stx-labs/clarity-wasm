@@ -267,6 +267,9 @@ pub fn need_ducktyping(og_ty: &TypeSignature, tg_ty: &TypeSignature) -> bool {
                 | TypeSignature::CallableType(_)
                 | TypeSignature::TraitReferenceType(_),
         ),
+        // This is a workaround for SequenceElementType. If I have a string-ascii, its element becomes a Byte,
+        // and getting the TypeSignature from a byte gives us a (buff 1). We loose an information here, but it
+        // makes the code cleaner everywhere else, so this workaround exist.
         &TypeSignature::BUFFER_1 => !matches!(
             tg_ty,
             TypeSignature::SequenceType(SequenceSubtype::BufferType(_))

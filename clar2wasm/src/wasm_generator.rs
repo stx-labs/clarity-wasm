@@ -305,6 +305,8 @@ impl From<&SequenceElementType> for TypeSignature {
     fn from(se: &SequenceElementType) -> Self {
         match se {
             SequenceElementType::Other(o) => o.clone(),
+            // Techically, a Byte could also be a (string-ascii 1), but not having this distinction makes
+            // the code cleaner where this function is used.
             SequenceElementType::Byte => TypeSignature::BUFFER_1.clone(),
             SequenceElementType::UnicodeScalar => {
                 TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::UTF8(
