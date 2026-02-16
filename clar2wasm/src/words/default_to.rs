@@ -8,7 +8,7 @@ use crate::cost::WordCharge;
 use crate::wasm_generator::{
     clar2wasm_ty, drop_value, ArgumentsExt, GeneratorError, WasmGenerator,
 };
-use crate::wasm_utils::{check_argument_count, ArgumentCountCheck};
+use crate::wasm_utils::ArgumentCountCheck;
 
 #[derive(Debug)]
 pub struct DefaultTo;

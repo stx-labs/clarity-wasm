@@ -8,7 +8,7 @@ use crate::wasm_generator::{
     add_placeholder_for_clarity_type, clar2wasm_ty, drop_value, ArgumentsExt, GeneratorError,
     WasmGenerator,
 };
-use crate::wasm_utils::{check_argument_count, ArgumentCountCheck};
+use crate::wasm_utils::ArgumentCountCheck;
 
 #[derive(Debug)]
 pub struct ToConsensusBuff;

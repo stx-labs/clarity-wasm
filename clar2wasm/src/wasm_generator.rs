@@ -24,8 +24,8 @@ use walrus::{
 use crate::cost::{ChargeContext, WordCharge};
 use crate::error_mapping::ErrorMap;
 use crate::wasm_utils::{
-    check_argument_count, get_type_in_memory_size, get_type_size, signature_from_string,
-    trait_identifier_as_bytes, ArgumentCountCheck, PRINCIPAL_BYTES_MAX,
+    get_type_in_memory_size, get_type_size, signature_from_string, trait_identifier_as_bytes,
+    ArgumentCountCheck, PRINCIPAL_BYTES_MAX,
 };
 use crate::{check_args, debug_msg, words};
 

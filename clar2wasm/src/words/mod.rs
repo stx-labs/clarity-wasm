@@ -36,6 +36,7 @@ pub mod responses;
 pub mod secp256k1;
 pub mod sequences;
 pub mod stx;
+pub mod to_ascii;
 pub mod tokens;
 pub mod traits;
 pub mod tuples;
@@ -55,6 +56,7 @@ pub trait ComplexWord: Word {
 }
 
 pub(crate) static COMPLEX_WORDS: &[&'static dyn ComplexWord] = &[
+    &to_ascii::ToAscii,
     &bindings::Let,
     &blockinfo::AtBlock,
     &blockinfo::GetBlockInfo,
@@ -312,6 +314,12 @@ mod tests {
                 {
                     // we make some exeptions
                     if word.name().as_str() == "or" || word.name().as_str() == "and" {
+                        continue;
+                    }
+                    // TODO: to-ascii became a complex word recently. Our current feat/clarity-wasm-develop
+                    // still considers it to be simple, but it should be complex.
+                    // we need to remove this after our next sync with stacks-core#develop
+                    if word.name().as_str() == "to-ascii?" {
                         continue;
                     }
                     panic!("{word:?} should not be complex!")
