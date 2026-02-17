@@ -7,6 +7,29 @@ use clarity::vm::{CallStack, ContractContext, Value};
 use stacks_common::types::chainstate::StacksBlockId;
 use wasmtime::{Linker, Module, Store};
 
+#[derive(Debug, Clone)]
+pub enum AssetContext {
+    AllAssetsUnsafe,
+    Ft {
+        asset_identifier: AssetIdentifier,
+        allowance: u128,
+        used: u128,
+    },
+    Nft {
+        asset_identifier: AssetIdentifier,
+        allowance: u128, // For NFTs, this is the count of NFTs allowed
+        used: u128,
+    },
+    Stacking {
+        allowance: u128,
+        used: u128,
+    },
+    Stx {
+        allowance: u128,
+        used: u128,
+    },
+}
+
 use crate::cost::{CostLinker, CostMeter};
 use crate::linker::link_host_functions;
 use crate::wasm_utils::*;
@@ -27,6 +50,8 @@ pub struct ClarityWasmContext<'a, 'b> {
     caller_stack: Vec<PrincipalData>,
     /// Stack of block hashes, used for `at-block` expressions.
     bhh_stack: Vec<StacksBlockId>,
+    /// Stack of asset contexts, used for `with-*` expressions.
+    pub asset_context_stack: Vec<AssetContext>,
 
     /// Contract analysis data, used for typing information, and only available
     /// when initializing a contract. Should always be `Some` when initializing
@@ -55,6 +80,7 @@ impl<'a, 'b> ClarityWasmContext<'a, 'b> {
             sender_stack: vec![],
             caller_stack: vec![],
             bhh_stack: vec![],
+            asset_context_stack: vec![],
             contract_analysis,
         }
     }
@@ -79,6 +105,7 @@ impl<'a, 'b> ClarityWasmContext<'a, 'b> {
             sender_stack: vec![],
             caller_stack: vec![],
             bhh_stack: vec![],
+            asset_context_stack: vec![],
             contract_analysis,
         }
     }
@@ -125,6 +152,165 @@ impl<'a, 'b> ClarityWasmContext<'a, 'b> {
             .ok_or(VmExecutionError::Wasm(WasmError::WasmGeneratorError(
                 "Could not pop at_block".to_string(),
             )))
+    }
+
+    pub fn push_asset_context_unsafe(&mut self) {
+        self.asset_context_stack.push(AssetContext::AllAssetsUnsafe);
+    }
+
+    pub fn pop_asset_context_unsafe(&mut self) -> Result<(), Error> {
+        match self.asset_context_stack.pop() {
+            Some(AssetContext::AllAssetsUnsafe) => Ok(()),
+            _ => Err(Error::Wasm(WasmError::WasmGeneratorError(
+                "Could not pop asset context: expected AllAssetsUnsafe".to_string(),
+            ))),
+        }
+    }
+
+    pub fn push_asset_context_ft(&mut self, asset_identifier: AssetIdentifier, allowance: u128) {
+        self.asset_context_stack.push(AssetContext::Ft {
+            asset_identifier,
+            allowance,
+            used: 0,
+        });
+    }
+
+    pub fn pop_asset_context_ft(&mut self) -> Result<(), Error> {
+        match self.asset_context_stack.pop() {
+            Some(AssetContext::Ft { .. }) => Ok(()),
+            _ => Err(Error::Wasm(WasmError::WasmGeneratorError(
+                "Could not pop asset context: expected Ft".to_string(),
+            ))),
+        }
+    }
+
+    pub fn push_asset_context_nft(&mut self, asset_identifier: AssetIdentifier, allowance: u128) {
+        self.asset_context_stack.push(AssetContext::Nft {
+            asset_identifier,
+            allowance,
+            used: 0,
+        });
+    }
+
+    pub fn pop_asset_context_nft(&mut self) -> Result<(), Error> {
+        match self.asset_context_stack.pop() {
+            Some(AssetContext::Nft { .. }) => Ok(()),
+            _ => Err(Error::Wasm(WasmError::WasmGeneratorError(
+                "Could not pop asset context: expected Nft".to_string(),
+            ))),
+        }
+    }
+
+    pub fn push_asset_context_stacking(&mut self, allowance: u128) {
+        self.asset_context_stack
+            .push(AssetContext::Stacking { allowance, used: 0 });
+    }
+
+    pub fn pop_asset_context_stacking(&mut self) -> Result<(), Error> {
+        match self.asset_context_stack.pop() {
+            Some(AssetContext::Stacking { .. }) => Ok(()),
+            _ => Err(Error::Wasm(WasmError::WasmGeneratorError(
+                "Could not pop asset context: expected Stacking".to_string(),
+            ))),
+        }
+    }
+
+    pub fn push_asset_context_stx(&mut self, allowance: u128) {
+        self.asset_context_stack
+            .push(AssetContext::Stx { allowance, used: 0 });
+    }
+
+    pub fn pop_asset_context_stx(&mut self) -> Result<(), Error> {
+        match self.asset_context_stack.pop() {
+            Some(AssetContext::Stx { .. }) => Ok(()),
+            _ => Err(Error::Wasm(WasmError::WasmGeneratorError(
+                "Could not pop asset context: expected Stx".to_string(),
+            ))),
+        }
+    }
+
+    /// Check if a transfer would exceed the allowance.
+    /// Returns true if the transfer would exceed the allowance (should return err u0).
+    /// Returns false if the transfer is allowed, and updates the used amount.
+    pub fn check_and_update_ft_allowance(
+        &mut self,
+        asset_identifier: &AssetIdentifier,
+        amount: u128,
+    ) -> Result<bool, Error> {
+        // Find the most recent matching FT context
+        for context in self.asset_context_stack.iter_mut().rev() {
+            if let AssetContext::Ft {
+                asset_identifier: ctx_asset_id,
+                allowance,
+                used,
+            } = context
+            {
+                if ctx_asset_id == asset_identifier {
+                    let new_used = used
+                        .checked_add(amount)
+                        .ok_or(RuntimeErrorType::ArithmeticOverflow)?;
+                    if new_used > *allowance {
+                        // Return true to indicate allowance exceeded (err u0)
+                        return Ok(true);
+                    }
+                    *used = new_used;
+                    return Ok(false);
+                }
+            }
+        }
+        Ok(false)
+    }
+
+    /// Check if an NFT transfer would exceed the allowance.
+    /// Returns true if the transfer would exceed the allowance (should return err u0).
+    /// Returns false if the transfer is allowed, and updates the used count.
+    pub fn check_and_update_nft_allowance(
+        &mut self,
+        asset_identifier: &AssetIdentifier,
+    ) -> Result<bool, Error> {
+        // Find the most recent matching NFT context
+        for context in self.asset_context_stack.iter_mut().rev() {
+            if let AssetContext::Nft {
+                asset_identifier: ctx_asset_id,
+                allowance,
+                used,
+            } = context
+            {
+                if ctx_asset_id == asset_identifier {
+                    let new_used = used
+                        .checked_add(1)
+                        .ok_or(RuntimeErrorType::ArithmeticOverflow)?;
+                    if new_used > *allowance {
+                        // Return true to indicate allowance exceeded (err u0)
+                        return Ok(true);
+                    }
+                    *used = new_used;
+                    return Ok(false);
+                }
+            }
+        }
+        Ok(false)
+    }
+
+    /// Check if an STX transfer would exceed the allowance.
+    /// Returns true if the transfer would exceed the allowance (should return err u0).
+    /// Returns false if the transfer is allowed, and updates the used amount.
+    pub fn check_and_update_stx_allowance(&mut self, amount: u128) -> Result<bool, Error> {
+        // Find the most recent STX context
+        for context in self.asset_context_stack.iter_mut().rev() {
+            if let AssetContext::Stx { allowance, used } = context {
+                let new_used = used
+                    .checked_add(amount)
+                    .ok_or(RuntimeErrorType::ArithmeticOverflow)?;
+                if new_used > *allowance {
+                    // Return true to indicate allowance exceeded (err u0)
+                    return Ok(true);
+                }
+                *used = new_used;
+                return Ok(false);
+            }
+        }
+        Ok(false)
     }
 
     /// Return an immutable reference to the contract_context

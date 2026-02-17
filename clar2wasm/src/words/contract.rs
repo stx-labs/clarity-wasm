@@ -49,6 +49,288 @@ impl ComplexWord for AsContract {
 }
 
 #[derive(Debug)]
+pub struct WithAllAssetsUnsafe;
+
+impl Word for WithAllAssetsUnsafe {
+    fn name(&self) -> ClarityName {
+        "with-all-assets-unsafe".into()
+    }
+}
+
+impl ComplexWord for WithAllAssetsUnsafe {
+    fn traverse(
+        &self,
+        generator: &mut WasmGenerator,
+        builder: &mut walrus::InstrSeqBuilder,
+        _expr: &SymbolicExpression,
+        args: &[SymbolicExpression],
+    ) -> Result<(), GeneratorError> {
+        check_args!(generator, builder, 1, args.len(), ArgumentCountCheck::Exact);
+
+        self.charge(generator, builder, 0)?;
+
+        let inner = args.get_expr(0)?;
+
+        // Call the host interface function, `enter_with_all_assets_unsafe`
+        builder.call(generator.func_by_name("stdlib.enter_with_all_assets_unsafe"));
+
+        // Traverse the inner expression
+        generator.traverse_expr(builder, inner)?;
+
+        // Call the host interface function, `exit_with_all_assets_unsafe`
+        builder.call(generator.func_by_name("stdlib.exit_with_all_assets_unsafe"));
+
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct WithFt;
+
+impl Word for WithFt {
+    fn name(&self) -> ClarityName {
+        "with-ft".into()
+    }
+}
+
+impl ComplexWord for WithFt {
+    fn traverse(
+        &self,
+        generator: &mut WasmGenerator,
+        builder: &mut walrus::InstrSeqBuilder,
+        _expr: &SymbolicExpression,
+        args: &[SymbolicExpression],
+    ) -> Result<(), GeneratorError> {
+        check_args!(generator, builder, 3, args.len(), ArgumentCountCheck::Exact);
+
+        self.charge(generator, builder, 0)?;
+
+        let asset_identifier = args.get_expr(0)?;
+        let allowance = args.get_expr(1)?;
+        let inner = args.get_expr(2)?;
+
+        // Get the type of the asset identifier (should be a tuple or principal)
+        let asset_identifier_ty = generator
+            .get_expr_type(asset_identifier)
+            .ok_or_else(|| {
+                GeneratorError::TypeError(
+                    "with-ft asset identifier expression must be typed".to_owned(),
+                )
+            })?
+            .clone();
+
+        // Traverse the asset identifier (contract principal + token name)
+        generator.traverse_expr(builder, asset_identifier)?;
+
+        // Write the asset identifier to memory so the host function can read it
+        let (asset_id_offset, asset_id_size) =
+            generator.create_call_stack_local(builder, &asset_identifier_ty, true, false);
+        generator.write_to_memory(builder, asset_id_offset, 0, &asset_identifier_ty)?;
+
+        // Traverse the allowance amount (uint)
+        generator.traverse_expr(builder, allowance)?;
+
+        // Write the allowance to memory (it's already on the stack as two i64s)
+        let allowance_ty = TypeSignature::UIntType;
+        let (allowance_offset, allowance_size) =
+            generator.create_call_stack_local(builder, &allowance_ty, true, false);
+        generator.write_to_memory(builder, allowance_offset, 0, &allowance_ty)?;
+
+        // Push the offsets and sizes to the data stack: asset_id_offset, asset_id_size, allowance_offset, allowance_size
+        builder
+            .local_get(asset_id_offset)
+            .i32_const(asset_id_size)
+            .local_get(allowance_offset)
+            .i32_const(allowance_size);
+
+        // Call the host interface function, `enter_with_ft`
+        builder.call(generator.func_by_name("stdlib.enter_with_ft"));
+
+        // Traverse the inner expression
+        generator.traverse_expr(builder, inner)?;
+
+        // Call the host interface function, `exit_with_ft`
+        builder.call(generator.func_by_name("stdlib.exit_with_ft"));
+
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct WithNft;
+
+impl Word for WithNft {
+    fn name(&self) -> ClarityName {
+        "with-nft".into()
+    }
+}
+
+impl ComplexWord for WithNft {
+    fn traverse(
+        &self,
+        generator: &mut WasmGenerator,
+        builder: &mut walrus::InstrSeqBuilder,
+        _expr: &SymbolicExpression,
+        args: &[SymbolicExpression],
+    ) -> Result<(), GeneratorError> {
+        check_args!(generator, builder, 3, args.len(), ArgumentCountCheck::Exact);
+
+        self.charge(generator, builder, 0)?;
+
+        let asset_identifier = args.get_expr(0)?;
+        let allowance = args.get_expr(1)?;
+        let inner = args.get_expr(2)?;
+
+        // Get the type of the asset identifier (should be a tuple or principal)
+        let asset_identifier_ty = generator
+            .get_expr_type(asset_identifier)
+            .ok_or_else(|| {
+                GeneratorError::TypeError(
+                    "with-nft asset identifier expression must be typed".to_owned(),
+                )
+            })?
+            .clone();
+
+        // Traverse the asset identifier (contract principal + token name)
+        generator.traverse_expr(builder, asset_identifier)?;
+
+        // Write the asset identifier to memory so the host function can read it
+        let (asset_id_offset, asset_id_size) =
+            generator.create_call_stack_local(builder, &asset_identifier_ty, true, false);
+        generator.write_to_memory(builder, asset_id_offset, 0, &asset_identifier_ty)?;
+
+        // Traverse the allowance amount (uint)
+        generator.traverse_expr(builder, allowance)?;
+
+        // Write the allowance to memory (it's already on the stack as two i64s)
+        let allowance_ty = TypeSignature::UIntType;
+        let (allowance_offset, allowance_size) =
+            generator.create_call_stack_local(builder, &allowance_ty, true, false);
+        generator.write_to_memory(builder, allowance_offset, 0, &allowance_ty)?;
+
+        // Push the offsets and sizes to the data stack: asset_id_offset, asset_id_size, allowance_offset, allowance_size
+        builder
+            .local_get(asset_id_offset)
+            .i32_const(asset_id_size)
+            .local_get(allowance_offset)
+            .i32_const(allowance_size);
+
+        // Call the host interface function, `enter_with_nft`
+        builder.call(generator.func_by_name("stdlib.enter_with_nft"));
+
+        // Traverse the inner expression
+        generator.traverse_expr(builder, inner)?;
+
+        // Call the host interface function, `exit_with_nft`
+        builder.call(generator.func_by_name("stdlib.exit_with_nft"));
+
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct WithStacking;
+
+impl Word for WithStacking {
+    fn name(&self) -> ClarityName {
+        "with-stacking".into()
+    }
+}
+
+impl ComplexWord for WithStacking {
+    fn traverse(
+        &self,
+        generator: &mut WasmGenerator,
+        builder: &mut walrus::InstrSeqBuilder,
+        _expr: &SymbolicExpression,
+        args: &[SymbolicExpression],
+    ) -> Result<(), GeneratorError> {
+        check_args!(generator, builder, 2, args.len(), ArgumentCountCheck::Exact);
+
+        self.charge(generator, builder, 0)?;
+
+        let allowance = args.get_expr(0)?;
+        let inner = args.get_expr(1)?;
+
+        // Traverse the allowance amount (uint)
+        generator.traverse_expr(builder, allowance)?;
+
+        // Write the allowance to memory (it's already on the stack as two i64s)
+        let allowance_ty = TypeSignature::UIntType;
+        let (allowance_offset, allowance_size) =
+            generator.create_call_stack_local(builder, &allowance_ty, true, false);
+        generator.write_to_memory(builder, allowance_offset, 0, &allowance_ty)?;
+
+        // Push the offset and size to the data stack
+        builder
+            .local_get(allowance_offset)
+            .i32_const(allowance_size);
+
+        // Call the host interface function, `enter_with_stacking`
+        builder.call(generator.func_by_name("stdlib.enter_with_stacking"));
+
+        // Traverse the inner expression
+        generator.traverse_expr(builder, inner)?;
+
+        // Call the host interface function, `exit_with_stacking`
+        builder.call(generator.func_by_name("stdlib.exit_with_stacking"));
+
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct WithStx;
+
+impl Word for WithStx {
+    fn name(&self) -> ClarityName {
+        "with-stx".into()
+    }
+}
+
+impl ComplexWord for WithStx {
+    fn traverse(
+        &self,
+        generator: &mut WasmGenerator,
+        builder: &mut walrus::InstrSeqBuilder,
+        _expr: &SymbolicExpression,
+        args: &[SymbolicExpression],
+    ) -> Result<(), GeneratorError> {
+        check_args!(generator, builder, 2, args.len(), ArgumentCountCheck::Exact);
+
+        self.charge(generator, builder, 0)?;
+
+        let allowance = args.get_expr(0)?;
+        let inner = args.get_expr(1)?;
+
+        // Traverse the allowance amount (uint)
+        generator.traverse_expr(builder, allowance)?;
+
+        // Write the allowance to memory (it's already on the stack as two i64s)
+        let allowance_ty = TypeSignature::UIntType;
+        let (allowance_offset, allowance_size) =
+            generator.create_call_stack_local(builder, &allowance_ty, true, false);
+        generator.write_to_memory(builder, allowance_offset, 0, &allowance_ty)?;
+
+        // Push the offset and size to the data stack
+        builder
+            .local_get(allowance_offset)
+            .i32_const(allowance_size);
+
+        // Call the host interface function, `enter_with_stx`
+        builder.call(generator.func_by_name("stdlib.enter_with_stx"));
+
+        // Traverse the inner expression
+        generator.traverse_expr(builder, inner)?;
+
+        // Call the host interface function, `exit_with_stx`
+        builder.call(generator.func_by_name("stdlib.exit_with_stx"));
+
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
 pub struct ContractCall;
 
 impl Word for ContractCall {
@@ -995,7 +1277,7 @@ mod tests {
         use clarity_types::types::StandardPrincipalData;
 
         use super::*;
-        use crate::tools::crosscheck;
+        use crate::tools::{crosscheck, crosscheck_with_env};
 
         #[test]
         fn contract_hash_ok_returns_buff32() {
@@ -1055,5 +1337,83 @@ mod tests {
                 Ok(Some(Value::error(Value::UInt(2)).unwrap())),
             );
         }
+
+        #[test]
+        fn as_contract_with_all_assets_unsafe(){
+            let mut env = TestEnvironment::default();
+            let contract = r#"
+            (define-non-fungible-token token uint)
+            
+            (define-public (mint-nft (asset uint)) 
+              (begin
+                (try! 
+                  (nft-mint? token asset current-contract)
+                )
+                (ok true)
+              )
+            )
+            
+            (define-public (transfer-token (asset uint))
+              (let (
+                  (recipient tx-sender)
+                )
+                (try!
+                  (as-contract? ((with-all-assets-unsafe))
+                    (try! (nft-transfer? token asset current-contract recipient))
+                  )
+                )
+                (ok true)
+              )
+            )
+            "#;
+            
+            env.init_contract_with_snippet("contract", contract)
+                .expect("failed to init contract");
+            crosscheck_with_env(
+                "(contract-call? .contract mint-nft u1)
+                (contract-call? .contract transfer-token u1)",
+                Ok(Some(Value::okay_true())),
+                env,
+            );
+        }
+
+//         #[test]
+//         fn as_contract_with_nft() {
+//             let mut env = TestEnvironment::default();
+//             let contract = r#"
+// (define-non-fungible-token token uint)
+
+// (define-public (mint-nft (asset uint)) 
+//   (begin
+//     (try! 
+//       (nft-mint? token asset current-contract)
+//     )
+//     (ok true)
+//   )
+// )
+
+// (define-public (transfer-token (asset uint))
+//   (let (
+//       (recipient tx-sender)
+//     )
+//     (try!
+//       (as-contract? ((with-nft .test "token" (list u1)))
+//         (try! (nft-transfer? token asset current-contract recipient))
+//       )
+//     )
+//     (ok true)
+//   )
+// )
+// "#;
+
+//             env.init_contract_with_snippet("contract", contract)
+//                 .expect("failed to init contract");
+//             crosscheck_with_env(
+//                 "(contract-call? .contract mint-nft u1)
+//                 (contract-call? .contract transfer-token u1)",
+//                 Ok(Some(Value::okay_true())),
+//                 env,
+//             );
+//         }
     }
 }

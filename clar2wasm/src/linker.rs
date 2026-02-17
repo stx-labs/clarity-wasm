@@ -55,6 +55,16 @@ pub fn link_host_functions(
     link_chain_id_fn(linker)?;
     link_enter_as_contract_fn(linker)?;
     link_exit_as_contract_fn(linker)?;
+    link_enter_with_all_assets_unsafe_fn(linker)?;
+    link_exit_with_all_assets_unsafe_fn(linker)?;
+    link_enter_with_ft_fn(linker)?;
+    link_exit_with_ft_fn(linker)?;
+    link_enter_with_nft_fn(linker)?;
+    link_exit_with_nft_fn(linker)?;
+    link_enter_with_stacking_fn(linker)?;
+    link_exit_with_stacking_fn(linker)?;
+    link_enter_with_stx_fn(linker)?;
+    link_exit_with_stx_fn(linker)?;
     link_stx_get_balance_fn(linker)?;
     link_stx_account_fn(linker)?;
     link_stx_burn_fn(linker)?;
@@ -1261,6 +1271,356 @@ fn link_exit_as_contract_fn(
         })
 }
 
+/// Link host interface function, `enter_with_all_assets_unsafe`, into the Wasm module.
+/// This function is called before processing the inner-expression of
+/// `with-all-assets-unsafe`.
+fn link_enter_with_all_assets_unsafe_fn(
+    linker: &mut Linker<ClarityWasmContext>,
+) -> Result<(), Error> {
+    linker
+        .func_wrap(
+            "clarity",
+            "enter_with_all_assets_unsafe",
+            |mut caller: Caller<'_, ClarityWasmContext>| {
+                caller.data_mut().push_asset_context_unsafe();
+                Ok(())
+            },
+        )
+        .map(|_| ())
+        .map_err(|e| {
+            Error::Wasm(WasmError::UnableToLinkHostFunction(
+                "enter_with_all_assets_unsafe".to_string(),
+                e,
+            ))
+        })
+}
+
+/// Link host interface function, `exit_with_all_assets_unsafe`, into the Wasm module.
+/// This function is called after processing the inner-expression of
+/// `with-all-assets-unsafe`, and is used to restore the asset context.
+fn link_exit_with_all_assets_unsafe_fn(
+    linker: &mut Linker<ClarityWasmContext>,
+) -> Result<(), Error> {
+    linker
+        .func_wrap(
+            "clarity",
+            "exit_with_all_assets_unsafe",
+            |mut caller: Caller<'_, ClarityWasmContext>| {
+                caller.data_mut().pop_asset_context_unsafe()?;
+                Ok(())
+            },
+        )
+        .map(|_| ())
+        .map_err(|e| {
+            Error::Wasm(WasmError::UnableToLinkHostFunction(
+                "exit_with_all_assets_unsafe".to_string(),
+                e,
+            ))
+        })
+}
+
+/// Link host interface function, `enter_with_ft`, into the Wasm module.
+/// This function is called before processing the inner-expression of
+/// `with-ft`. The asset identifier and allowance should already be written to memory.
+fn link_enter_with_ft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Error> {
+    linker
+        .func_wrap(
+            "clarity",
+            "enter_with_ft",
+            |mut caller: Caller<'_, ClarityWasmContext>,
+             asset_identifier_offset: i32,
+             asset_identifier_length: i32,
+             allowance_offset: i32,
+             allowance_length: i32| {
+                let memory = caller
+                    .get_export("memory")
+                    .and_then(|export| export.into_memory())
+                    .ok_or(Error::Wasm(WasmError::MemoryNotFound))?;
+
+                let epoch = caller.data().global_context.epoch_id;
+
+                // Read the asset identifier from memory (it's a tuple or principal)
+                // For now, we'll read it as a principal and extract the contract + token name
+                // TODO: Handle tuple format if asset identifiers are passed as tuples
+                let _value = read_from_wasm(
+                    memory,
+                    &mut caller,
+                    &TypeSignature::PrincipalType,
+                    asset_identifier_offset,
+                    asset_identifier_length,
+                    epoch,
+                )?;
+
+                // Read the allowance amount
+                let allowance_value = read_from_wasm(
+                    memory,
+                    &mut caller,
+                    &TypeSignature::UIntType,
+                    allowance_offset,
+                    allowance_length,
+                    epoch,
+                )?;
+                let allowance = value_as_u128(&allowance_value)?;
+
+                // Extract contract identifier and token name from the asset identifier
+                // This is a simplified implementation - may need refinement based on actual Clarity 4 spec
+                let contract_id = caller.data().contract_context().contract_identifier.clone();
+                let asset_id = AssetIdentifier {
+                    contract_identifier: contract_id,
+                    asset_name: "token".into(), // TODO: Extract actual token name from value
+                };
+
+                caller.data_mut().push_asset_context_ft(asset_id, allowance);
+                Ok(())
+            },
+        )
+        .map(|_| ())
+        .map_err(|e| {
+            Error::Wasm(WasmError::UnableToLinkHostFunction(
+                "enter_with_ft".to_string(),
+                e,
+            ))
+        })
+}
+
+/// Link host interface function, `exit_with_ft`, into the Wasm module.
+/// This function is called after processing the inner-expression of
+/// `with-ft`, and is used to restore the asset context.
+fn link_exit_with_ft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Error> {
+    linker
+        .func_wrap(
+            "clarity",
+            "exit_with_ft",
+            |mut caller: Caller<'_, ClarityWasmContext>| {
+                caller.data_mut().pop_asset_context_ft()?;
+                Ok(())
+            },
+        )
+        .map(|_| ())
+        .map_err(|e| {
+            Error::Wasm(WasmError::UnableToLinkHostFunction(
+                "exit_with_ft".to_string(),
+                e,
+            ))
+        })
+}
+
+/// Link host interface function, `enter_with_nft`, into the Wasm module.
+/// This function is called before processing the inner-expression of
+/// `with-nft`. The asset identifier and allowance should already be written to memory.
+fn link_enter_with_nft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Error> {
+    linker
+        .func_wrap(
+            "clarity",
+            "enter_with_nft",
+            |mut caller: Caller<'_, ClarityWasmContext>,
+             asset_identifier_offset: i32,
+             asset_identifier_length: i32,
+             allowance_offset: i32,
+             allowance_length: i32| {
+                let memory = caller
+                    .get_export("memory")
+                    .and_then(|export| export.into_memory())
+                    .ok_or(Error::Wasm(WasmError::MemoryNotFound))?;
+
+                let epoch = caller.data().global_context.epoch_id;
+
+                // Read the asset identifier from memory (it's a tuple or principal)
+                // For now, we'll read it as a principal and extract the contract + token name
+                // TODO: Handle tuple format if asset identifiers are passed as tuples
+                let _value = read_from_wasm(
+                    memory,
+                    &mut caller,
+                    &TypeSignature::PrincipalType,
+                    asset_identifier_offset,
+                    asset_identifier_length,
+                    epoch,
+                )?;
+
+                // Read the allowance amount
+                let allowance_value = read_from_wasm(
+                    memory,
+                    &mut caller,
+                    &TypeSignature::UIntType,
+                    allowance_offset,
+                    allowance_length,
+                    epoch,
+                )?;
+                let allowance = value_as_u128(&allowance_value)?;
+
+                // Extract contract identifier and token name from the asset identifier
+                // This is a simplified implementation - may need refinement based on actual Clarity 4 spec
+                let contract_id = caller.data().contract_context().contract_identifier.clone();
+                let asset_id = AssetIdentifier {
+                    contract_identifier: contract_id,
+                    asset_name: "token".into(), // TODO: Extract actual token name from value
+                };
+
+                caller
+                    .data_mut()
+                    .push_asset_context_nft(asset_id, allowance);
+                Ok(())
+            },
+        )
+        .map(|_| ())
+        .map_err(|e| {
+            Error::Wasm(WasmError::UnableToLinkHostFunction(
+                "enter_with_nft".to_string(),
+                e,
+            ))
+        })
+}
+
+/// Link host interface function, `exit_with_nft`, into the Wasm module.
+/// This function is called after processing the inner-expression of
+/// `with-nft`, and is used to restore the asset context.
+fn link_exit_with_nft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Error> {
+    linker
+        .func_wrap(
+            "clarity",
+            "exit_with_nft",
+            |mut caller: Caller<'_, ClarityWasmContext>| {
+                caller.data_mut().pop_asset_context_nft()?;
+                Ok(())
+            },
+        )
+        .map(|_| ())
+        .map_err(|e| {
+            Error::Wasm(WasmError::UnableToLinkHostFunction(
+                "exit_with_nft".to_string(),
+                e,
+            ))
+        })
+}
+
+/// Link host interface function, `enter_with_stacking`, into the Wasm module.
+/// This function is called before processing the inner-expression of
+/// `with-stacking`. The allowance should already be written to memory.
+fn link_enter_with_stacking_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Error> {
+    linker
+        .func_wrap(
+            "clarity",
+            "enter_with_stacking",
+            |mut caller: Caller<'_, ClarityWasmContext>,
+             allowance_offset: i32,
+             allowance_length: i32| {
+                let memory = caller
+                    .get_export("memory")
+                    .and_then(|export| export.into_memory())
+                    .ok_or(Error::Wasm(WasmError::MemoryNotFound))?;
+
+                let epoch = caller.data().global_context.epoch_id;
+
+                // Read the allowance amount
+                let allowance_value = read_from_wasm(
+                    memory,
+                    &mut caller,
+                    &TypeSignature::UIntType,
+                    allowance_offset,
+                    allowance_length,
+                    epoch,
+                )?;
+                let allowance = value_as_u128(&allowance_value)?;
+
+                caller.data_mut().push_asset_context_stacking(allowance);
+                Ok(())
+            },
+        )
+        .map(|_| ())
+        .map_err(|e| {
+            Error::Wasm(WasmError::UnableToLinkHostFunction(
+                "enter_with_stacking".to_string(),
+                e,
+            ))
+        })
+}
+
+/// Link host interface function, `exit_with_stacking`, into the Wasm module.
+/// This function is called after processing the inner-expression of
+/// `with-stacking`, and is used to restore the asset context.
+fn link_exit_with_stacking_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Error> {
+    linker
+        .func_wrap(
+            "clarity",
+            "exit_with_stacking",
+            |mut caller: Caller<'_, ClarityWasmContext>| {
+                caller.data_mut().pop_asset_context_stacking()?;
+                Ok(())
+            },
+        )
+        .map(|_| ())
+        .map_err(|e| {
+            Error::Wasm(WasmError::UnableToLinkHostFunction(
+                "exit_with_stacking".to_string(),
+                e,
+            ))
+        })
+}
+
+/// Link host interface function, `enter_with_stx`, into the Wasm module.
+/// This function is called before processing the inner-expression of
+/// `with-stx`. The allowance should already be written to memory.
+fn link_enter_with_stx_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Error> {
+    linker
+        .func_wrap(
+            "clarity",
+            "enter_with_stx",
+            |mut caller: Caller<'_, ClarityWasmContext>,
+             allowance_offset: i32,
+             allowance_length: i32| {
+                let memory = caller
+                    .get_export("memory")
+                    .and_then(|export| export.into_memory())
+                    .ok_or(Error::Wasm(WasmError::MemoryNotFound))?;
+
+                let epoch = caller.data().global_context.epoch_id;
+
+                // Read the allowance amount
+                let allowance_value = read_from_wasm(
+                    memory,
+                    &mut caller,
+                    &TypeSignature::UIntType,
+                    allowance_offset,
+                    allowance_length,
+                    epoch,
+                )?;
+                let allowance = value_as_u128(&allowance_value)?;
+
+                caller.data_mut().push_asset_context_stx(allowance);
+                Ok(())
+            },
+        )
+        .map(|_| ())
+        .map_err(|e| {
+            Error::Wasm(WasmError::UnableToLinkHostFunction(
+                "enter_with_stx".to_string(),
+                e,
+            ))
+        })
+}
+
+/// Link host interface function, `exit_with_stx`, into the Wasm module.
+/// This function is called after processing the inner-expression of
+/// `with-stx`, and is used to restore the asset context.
+fn link_exit_with_stx_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Error> {
+    linker
+        .func_wrap(
+            "clarity",
+            "exit_with_stx",
+            |mut caller: Caller<'_, ClarityWasmContext>| {
+                caller.data_mut().pop_asset_context_stx()?;
+                Ok(())
+            },
+        )
+        .map(|_| ())
+        .map_err(|e| {
+            Error::Wasm(WasmError::UnableToLinkHostFunction(
+                "exit_with_stx".to_string(),
+                e,
+            ))
+        })
+}
+
 /// Link host interface function, `stx_get_balance`, into the Wasm module.
 /// This function is called for the clarity expression, `stx-get-balance`.
 fn link_stx_get_balance_fn(
@@ -1568,6 +1928,15 @@ fn link_stx_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), V
                         StxErrorCodes::SENDER_IS_NOT_TX_SENDER as i64,
                         0i64,
                     ));
+                }
+
+                // Check if we're in an asset context with STX allowances
+                // If so, check if this transfer would exceed the allowance
+                if !caller.data().asset_context_stack.is_empty()
+                    && caller.data_mut().check_and_update_stx_allowance(amount)?
+                {
+                    // Allowance exceeded - return (err u0) - response format: (0, 0, 0, 0)
+                    return Ok((0i32, 0i32, 0i64, 0i64));
                 }
 
                 // loading sender/recipient principals and balances
@@ -2059,6 +2428,23 @@ fn link_ft_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Vm
                         TransferTokenErrorCodes::SENDER_IS_RECIPIENT as i64,
                         0i64,
                     ));
+                }
+
+                // Check if we're in an asset context with allowances
+                // If so, check if this transfer would exceed the allowance
+                if !caller.data().asset_context_stack.is_empty() {
+                    let asset_id = AssetIdentifier {
+                        contract_identifier: contract_identifier.clone(),
+                        asset_name: token_name.clone(),
+                    };
+
+                    if caller
+                        .data_mut()
+                        .check_and_update_ft_allowance(&asset_id, amount)?
+                    {
+                        // Allowance exceeded - return (err u0) - response format: (0, 0, 0, 0)
+                        return Ok((0i32, 0i32, 0i64, 0i64));
+                    }
                 }
 
                 let ft_info = caller
@@ -2641,6 +3027,23 @@ fn link_nft_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), V
                         TransferAssetErrorCodes::SENDER_IS_RECIPIENT as i64,
                         0i64,
                     ));
+                }
+
+                // Check if we're in an asset context with allowances
+                // If so, check if this transfer would exceed the allowance
+                if !caller.data().asset_context_stack.is_empty() {
+                    let asset_id = AssetIdentifier {
+                        contract_identifier: contract_identifier.clone(),
+                        asset_name: asset_name.clone(),
+                    };
+
+                    if caller
+                        .data_mut()
+                        .check_and_update_nft_allowance(&asset_id)?
+                    {
+                        // Allowance exceeded - return (err u0) - response format: (0, 0, 0, 0)
+                        return Ok((0i32, 0i32, 0i64, 0i64));
+                    }
                 }
 
                 let current_owner = match caller.data_mut().global_context.database.get_nft_owner(
@@ -5793,6 +6196,86 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
 
     linker.func_wrap("clarity", "exit_as_contract", |_: Caller<'_, ()>| {
         println!("as-contract: exit");
+        Ok(())
+    })?;
+
+    linker.func_wrap(
+        "clarity",
+        "enter_with_all_assets_unsafe",
+        |_: Caller<'_, ()>| {
+            println!("with_all_assets_unsafe: enter");
+            Ok(())
+        },
+    )?;
+
+    linker.func_wrap(
+        "clarity",
+        "exit_with_all_assets_unsafe",
+        |_: Caller<'_, ()>| {
+            println!("with_all_assets_unsafe: exit");
+            Ok(())
+        },
+    )?;
+
+    linker.func_wrap(
+        "clarity",
+        "enter_with_ft",
+        |_asset_identifier_offset: i32,
+         _asset_identifier_length: i32,
+         _allowance_offset: i32,
+         _allowance_length: i32| {
+            println!("with_ft: enter");
+            Ok(())
+        },
+    )?;
+
+    linker.func_wrap("clarity", "exit_with_ft", |_: Caller<'_, ()>| {
+        println!("with_ft: exit");
+        Ok(())
+    })?;
+
+    linker.func_wrap(
+        "clarity",
+        "enter_with_nft",
+        |_asset_identifier_offset: i32,
+         _asset_identifier_length: i32,
+         _allowance_offset: i32,
+         _allowance_length: i32| {
+            println!("with_nft: enter");
+            Ok(())
+        },
+    )?;
+
+    linker.func_wrap("clarity", "exit_with_nft", |_: Caller<'_, ()>| {
+        println!("with_nft: exit");
+        Ok(())
+    })?;
+
+    linker.func_wrap(
+        "clarity",
+        "enter_with_stacking",
+        |_allowance_offset: i32, _allowance_length: i32| {
+            println!("with_stacking: enter");
+            Ok(())
+        },
+    )?;
+
+    linker.func_wrap("clarity", "exit_with_stacking", |_: Caller<'_, ()>| {
+        println!("with_stacking: exit");
+        Ok(())
+    })?;
+
+    linker.func_wrap(
+        "clarity",
+        "enter_with_stx",
+        |_allowance_offset: i32, _allowance_length: i32| {
+            println!("with_stx: enter");
+            Ok(())
+        },
+    )?;
+
+    linker.func_wrap("clarity", "exit_with_stx", |_: Caller<'_, ()>| {
+        println!("with_stx: exit");
         Ok(())
     })?;
 
