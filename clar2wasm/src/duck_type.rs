@@ -1,4 +1,5 @@
 use clarity::vm::types::{SequenceSubtype, TypeSignature};
+use clarity_types::types::StringSubtype;
 use walrus::ir::{BinaryOp, Loop};
 use walrus::{InstrSeqBuilder, LocalId, ValType};
 
@@ -14,35 +15,34 @@ impl WasmGenerator {
     ///
     /// The original and target types should be "somewhat compatible" and validated by the typechecker
     /// for this function to succeed.
+    ///
+    /// We can pass the offset to a preallocated memory where the duck-typed value will be written.
+    /// This can be necessary to avoid an overwriting of this value if any operation is done right after the duck-typing.
+    /// If the duck-typed value is used immediately after, we can ignore this argument and the duck-typed value will be written
+    /// at the current value of $stack-pointer. The initial value of $stack-pointer will not be reset after the usage of this function.
     pub(crate) fn duck_type(
         &mut self,
         builder: &mut InstrSeqBuilder,
         og_ty: &TypeSignature,
         target_ty: &TypeSignature,
+        preallocated_memory: Option<LocalId>,
     ) -> Result<(), GeneratorError> {
         // This is a no-op if both types are identical
-        if og_ty == target_ty {
+        if !need_ducktyping(og_ty, target_ty) {
             return Ok(());
         }
 
-        let former_stack_pointer = {
-            let needed_workspace = dt_needed_workspace(target_ty);
-            (needed_workspace > 0).then(|| {
-                self.ensure_work_space(needed_workspace);
-                let pointer = self.borrow_local(ValType::I32);
-                builder.global_get(self.stack_pointer).local_set(*pointer);
-                pointer
-            })
-        };
+        let memory_pointer = preallocated_memory.unwrap_or_else(|| {
+            self.ensure_work_space(dt_needed_workspace(target_ty));
+            let pointer = self.module.locals.add(ValType::I32);
+            builder.global_get(self.stack_pointer).local_set(pointer);
+            pointer
+        });
 
         let locals = self.create_locals_for_ty(target_ty);
-        self.duck_type_stack(builder, og_ty, target_ty, &locals)?;
+        self.duck_type_stack(builder, og_ty, target_ty, &locals, memory_pointer)?;
         for l in locals {
             builder.local_get(l);
-        }
-
-        if let Some(pointer) = former_stack_pointer {
-            builder.local_get(*pointer).global_set(self.stack_pointer);
         }
 
         Ok(())
@@ -54,6 +54,7 @@ impl WasmGenerator {
         og_ty: &TypeSignature,
         target_ty: &TypeSignature,
         locals: &[LocalId],
+        allocated_mem_offset: LocalId,
     ) -> Result<(), GeneratorError> {
         match (og_ty, target_ty) {
             (TypeSignature::NoType, _) | (_, TypeSignature::NoType) => {
@@ -91,7 +92,13 @@ impl WasmGenerator {
                         "Not enough locals for duck-typing an optional".to_owned(),
                     )
                 })?;
-                self.duck_type_stack(builder, og_subty, target_subty, sub_locals)?;
+                self.duck_type_stack(
+                    builder,
+                    og_subty,
+                    target_subty,
+                    sub_locals,
+                    allocated_mem_offset,
+                )?;
                 builder.local_set(*variant_local);
             }
             (TypeSignature::ResponseType(og_subty), TypeSignature::ResponseType(target_subty)) => {
@@ -111,8 +118,20 @@ impl WasmGenerator {
                         )
                     })?;
 
-                self.duck_type_stack(builder, og_err_ty, target_err_ty, err_locals)?;
-                self.duck_type_stack(builder, og_ok_ty, target_ok_ty, ok_locals)?;
+                self.duck_type_stack(
+                    builder,
+                    og_err_ty,
+                    target_err_ty,
+                    err_locals,
+                    allocated_mem_offset,
+                )?;
+                self.duck_type_stack(
+                    builder,
+                    og_ok_ty,
+                    target_ok_ty,
+                    ok_locals,
+                    allocated_mem_offset,
+                )?;
                 builder.local_set(*variant_local);
             }
             (TypeSignature::TupleType(og_tup_ty), TypeSignature::TupleType(target_tup_ty)) => {
@@ -129,7 +148,13 @@ impl WasmGenerator {
                                 "Not enough locals for duck-typing a tuple".to_owned(),
                             )
                         })?;
-                    self.duck_type_stack(builder, og_subty, target_subty, current_locals)?;
+                    self.duck_type_stack(
+                        builder,
+                        og_subty,
+                        target_subty,
+                        current_locals,
+                        allocated_mem_offset,
+                    )?;
                 }
             }
             (
@@ -161,7 +186,13 @@ impl WasmGenerator {
                     let loop_id = loop_.id();
 
                     let og_elem_size = self.read_from_memory(&mut loop_, *offset, 0, og_elem_ty)?;
-                    self.duck_type_stack(&mut loop_, og_elem_ty, target_elem_ty, &target_locs)?;
+                    self.duck_type_stack(
+                        &mut loop_,
+                        og_elem_ty,
+                        target_elem_ty,
+                        &target_locs,
+                        allocated_mem_offset,
+                    )?;
                     for l in target_locs.iter() {
                         loop_.local_get(*l);
                     }
@@ -199,11 +230,11 @@ impl WasmGenerator {
                     |then| {
                         then.i32_const(0).local_set(length_target);
                         // we set the offset_target to copy at the free space of stack-pointer and we move this on further
-                        then.global_get(self.stack_pointer)
+                        then.local_get(allocated_mem_offset)
                             .local_tee(offset_target)
                             .i32_const(get_type_in_memory_size(target_ty, false))
                             .binop(BinaryOp::I32Add)
-                            .global_set(self.stack_pointer);
+                            .local_set(allocated_mem_offset);
 
                         // we put the resulting offset/length on the stack
                         then.local_get(offset_target);
@@ -240,7 +271,84 @@ impl WasmGenerator {
     }
 }
 
-fn dt_needed_workspace(ty: &TypeSignature) -> u32 {
+pub fn need_ducktyping(og_ty: &TypeSignature, tg_ty: &TypeSignature) -> bool {
+    match og_ty {
+        TypeSignature::NoType
+        | TypeSignature::BoolType
+        | TypeSignature::IntType
+        | TypeSignature::UIntType => og_ty != tg_ty,
+        TypeSignature::PrincipalType
+        | TypeSignature::CallableType(_)
+        | TypeSignature::TraitReferenceType(_) => !matches!(
+            tg_ty,
+            TypeSignature::PrincipalType
+                | TypeSignature::CallableType(_)
+                | TypeSignature::TraitReferenceType(_),
+        ),
+        // This is a workaround for SequenceElementType. If I have a string-ascii, its element becomes a Byte,
+        // and getting the TypeSignature from a byte gives us a (buff 1). We loose an information here, but it
+        // makes the code cleaner everywhere else, so this workaround exist.
+        &TypeSignature::BUFFER_1 => !matches!(
+            tg_ty,
+            TypeSignature::SequenceType(SequenceSubtype::BufferType(_))
+                | &TypeSignature::STRING_ASCII_MIN
+        ),
+        TypeSignature::SequenceType(SequenceSubtype::BufferType(_)) => !matches!(
+            tg_ty,
+            TypeSignature::SequenceType(SequenceSubtype::BufferType(_))
+        ),
+        TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::ASCII(_))) => {
+            !matches!(
+                tg_ty,
+                TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::ASCII(_)))
+            )
+        }
+        TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::UTF8(_))) => {
+            !matches!(
+                tg_ty,
+                TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::UTF8(_)))
+            )
+        }
+        TypeSignature::SequenceType(SequenceSubtype::ListType(og_ltd)) => {
+            if let TypeSignature::SequenceType(SequenceSubtype::ListType(tg_ltd)) = tg_ty {
+                need_ducktyping(og_ltd.get_list_item_type(), tg_ltd.get_list_item_type())
+            } else {
+                false
+            }
+        }
+        TypeSignature::TupleType(og_tup_ty) => {
+            if let TypeSignature::TupleType(tg_tup_ty) = tg_ty {
+                og_tup_ty
+                    .get_type_map()
+                    .values()
+                    .zip(tg_tup_ty.get_type_map().values())
+                    .any(|(og_elem_ty, tg_tup_ty)| need_ducktyping(og_elem_ty, tg_tup_ty))
+            } else {
+                false
+            }
+        }
+        TypeSignature::OptionalType(og_opt_ty) => {
+            if let TypeSignature::OptionalType(tg_opt_ty) = tg_ty {
+                need_ducktyping(og_opt_ty, tg_opt_ty)
+            } else {
+                false
+            }
+        }
+        TypeSignature::ResponseType(og_resp_ty) => {
+            if let TypeSignature::ResponseType(tg_resp_ty) = tg_ty {
+                need_ducktyping(&og_resp_ty.as_ref().0, &tg_resp_ty.as_ref().0)
+                    || need_ducktyping(&og_resp_ty.as_ref().1, &tg_resp_ty.as_ref().1)
+            } else {
+                false
+            }
+        }
+        TypeSignature::ListUnionType(_) => {
+            unreachable!("ListUnionType should not exist at this point")
+        }
+    }
+}
+
+pub fn dt_needed_workspace(ty: &TypeSignature) -> u32 {
     match ty {
         TypeSignature::OptionalType(opt) => dt_needed_workspace(opt),
         TypeSignature::ResponseType(resp) => {
@@ -272,7 +380,7 @@ mod tests {
             gen.pass_value(builder, value, original_ty)
                 .expect("failed to write instructions for original value");
 
-            gen.duck_type(builder, original_ty, target_ty)
+            gen.duck_type(builder, original_ty, target_ty, None)
                 .expect("failed to write duck type instructions");
         });
         let res = gen.execute_module(target_ty);

@@ -22,6 +22,7 @@ use walrus::{
 };
 
 use crate::cost::{ChargeContext, WordCharge};
+use crate::duck_type::need_ducktyping;
 use crate::error_mapping::ErrorMap;
 use crate::wasm_utils::{
     get_type_in_memory_size, get_type_size, signature_from_string, trait_identifier_as_bytes,
@@ -248,25 +249,81 @@ pub enum SequenceElementType {
     Other(TypeSignature),
 }
 
+impl SequenceElementType {
+    pub fn type_size(&self) -> i32 {
+        match self {
+            SequenceElementType::Byte => 1,
+            SequenceElementType::UnicodeScalar => 4,
+            SequenceElementType::Other(ty) => get_type_size(ty),
+        }
+    }
+
+    pub fn load(
+        &self,
+        generator: &mut WasmGenerator,
+        builder: &mut InstrSeqBuilder,
+        offset: LocalId,
+    ) -> Result<(), GeneratorError> {
+        match self {
+            SequenceElementType::Byte => {
+                builder.local_get(offset).i32_const(1);
+            }
+            SequenceElementType::UnicodeScalar => {
+                builder.local_get(offset).i32_const(4);
+            }
+            SequenceElementType::Other(type_signature) => {
+                generator.read_from_memory(builder, offset, 0, type_signature)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl TryFrom<&TypeSignature> for SequenceElementType {
+    type Error = GeneratorError;
+
+    fn try_from(ty: &TypeSignature) -> Result<Self, Self::Error> {
+        match ty {
+            TypeSignature::SequenceType(SequenceSubtype::ListType(lt)) => {
+                Ok(SequenceElementType::Other(lt.get_list_item_type().clone()))
+            }
+            TypeSignature::SequenceType(SequenceSubtype::BufferType(_))
+            | TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::ASCII(_))) => {
+                Ok(SequenceElementType::Byte)
+            }
+            TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::UTF8(_))) => {
+                Ok(SequenceElementType::UnicodeScalar)
+            }
+            _ => Err(GeneratorError::TypeError(
+                "expected sequence type".to_string(),
+            )),
+        }
+    }
+}
+
+impl From<&SequenceElementType> for TypeSignature {
+    fn from(se: &SequenceElementType) -> Self {
+        match se {
+            SequenceElementType::Other(o) => o.clone(),
+            // Techically, a Byte could also be a (string-ascii 1), but not having this distinction makes
+            // the code cleaner where this function is used.
+            SequenceElementType::Byte => TypeSignature::BUFFER_1.clone(),
+            SequenceElementType::UnicodeScalar => {
+                TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::UTF8(
+                    #[allow(clippy::unwrap_used)]
+                    StringUTF8Length::try_from(1u32).unwrap(),
+                )))
+            }
+        }
+    }
+}
+
 /// Drop a value of type `ty` from the data stack.
 pub(crate) fn drop_value(builder: &mut InstrSeqBuilder, ty: &TypeSignature) {
     let wasm_types = clar2wasm_ty(ty);
     (0..wasm_types.len()).for_each(|_| {
         builder.drop();
     });
-}
-
-pub fn type_from_sequence_element(se: &SequenceElementType) -> TypeSignature {
-    match se {
-        SequenceElementType::Other(o) => o.clone(),
-        SequenceElementType::Byte => TypeSignature::BUFFER_1.clone(),
-        SequenceElementType::UnicodeScalar => {
-            TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::UTF8(
-                #[allow(clippy::unwrap_used)]
-                StringUTF8Length::try_from(1u32).unwrap(),
-            )))
-        }
-    }
 }
 
 pub fn get_global(module: &Module, name: &str) -> Result<GlobalId, GeneratorError> {
@@ -910,6 +967,12 @@ impl WasmGenerator {
         Ok((offset, len))
     }
 
+    pub(crate) fn reserve_static_memory(&mut self, size: u32) -> u32 {
+        let offset = self.literal_memory_end;
+        self.literal_memory_end += size;
+        offset
+    }
+
     /// Adds a serialized [TraitIdentifier] to the wasm memory.
     /// Returns the offset and length of the bytes written.
     pub(crate) fn add_trait_identifier(
@@ -1003,29 +1066,11 @@ impl WasmGenerator {
         Ok(block.id())
     }
 
-    /// Push a new local onto the call stack, adjusting the stack pointer and
-    /// tracking the current function's frame size accordingly.
-    /// - `include_repr` indicates if space should be reserved for the
-    ///   representation of the value (e.g. the offset, length for an in-memory
-    ///   type)
-    /// - `include_value` indicates if space should be reserved for the value
-    ///
-    /// Returns a local which is a pointer to the beginning of the allocated
-    /// stack space and the size of the allocated space.
-    pub(crate) fn create_call_stack_local(
+    pub(crate) fn create_call_stack_bytes(
         &mut self,
         builder: &mut InstrSeqBuilder,
-        ty: &TypeSignature,
-        include_repr: bool,
-        include_value: bool,
+        size: i32,
     ) -> (LocalId, i32) {
-        let size = match (include_value, include_repr) {
-            (true, true) => get_type_in_memory_size(ty, include_repr) + get_type_size(ty),
-            (true, false) => get_type_in_memory_size(ty, include_repr),
-            (false, true) => get_type_size(ty),
-            (false, false) => unreachable!("must include either repr or value"),
-        };
-
         // Save the offset (current stack pointer) into a local
         let offset = self.module.locals.add(ValType::I32);
         builder
@@ -1050,6 +1095,31 @@ impl WasmGenerator {
         self.frame_size += size;
 
         (offset, size)
+    }
+
+    /// Push a new local onto the call stack, adjusting the stack pointer and
+    /// tracking the current function's frame size accordingly.
+    /// - `include_repr` indicates if space should be reserved for the
+    ///   representation of the value (e.g. the offset, length for an in-memory
+    ///   type)
+    /// - `include_value` indicates if space should be reserved for the value
+    ///
+    /// Returns a local which is a pointer to the beginning of the allocated
+    /// stack space and the size of the allocated space.
+    pub(crate) fn create_call_stack_local(
+        &mut self,
+        builder: &mut InstrSeqBuilder,
+        ty: &TypeSignature,
+        include_repr: bool,
+        include_value: bool,
+    ) -> (LocalId, i32) {
+        let size = match (include_value, include_repr) {
+            (true, true) => get_type_in_memory_size(ty, include_repr) + get_type_size(ty),
+            (true, false) => get_type_in_memory_size(ty, include_repr),
+            (false, true) => get_type_size(ty),
+            (false, false) => unreachable!("must include either repr or value"),
+        };
+        self.create_call_stack_bytes(builder, size)
     }
 
     pub fn borrow_local(&mut self, ty: ValType) -> BorrowedLocal {
@@ -1549,25 +1619,53 @@ impl WasmGenerator {
                 })?
                 .clone();
 
-            // Reserve stack space for the constant copy
-            let (result_local, result_size) =
-                self.create_call_stack_local(builder, &expected_ty, true, true);
+            let name_offset = *self
+                .literal_memory_offset
+                .get(&LiteralMemoryEntry::Ascii(name.to_owned()))
+                .ok_or_else(|| {
+                    GeneratorError::InternalError(format!(
+                        "Trying to access unsaved constant '{name}'"
+                    ))
+                })?;
 
-            let (name_offset, name_length) = self.add_string_literal(name)?;
-
-            // Push constant attributes to the stack.
+            // Pushing the constant name and length on the stack
             builder
                 .i32_const(name_offset as i32)
-                .i32_const(name_length as i32)
-                .local_get(result_local)
-                .i32_const(result_size);
+                .i32_const(name.len() as i32);
 
-            // Call a host interface function to load
-            // constant attributes from a data structure.
-            builder.call(self.func_by_name("stdlib.load_constant"));
+            if !need_ducktyping(&cst_ty, &expected_ty) {
+                // if we don't need ducktyping, we can just load the constant as it is stored in db
+                let (result_local, result_size) =
+                    self.create_call_stack_local(builder, &cst_ty, true, true);
 
-            self.read_from_memory(builder, result_local, 0, &cst_ty)?;
-            self.duck_type(builder, &cst_ty, &expected_ty)?;
+                builder
+                    .local_get(result_local)
+                    .i32_const(result_size)
+                    .call(self.func_by_name("stdlib.load_constant"));
+
+                self.read_from_memory(builder, result_local, 0, &cst_ty)?;
+            } else {
+                // if we need ducktyping, we need some workspace to read the constant from db, and
+                // some allocated space for the duck-typed result.
+                let (result_local, _result_size) =
+                    self.create_call_stack_local(builder, &expected_ty, true, true);
+
+                let read_local = self.borrow_local(ValType::I32);
+                builder
+                    .global_get(self.stack_pointer)
+                    .local_set(*read_local);
+                let read_size = get_type_in_memory_size(&cst_ty, true);
+                self.ensure_work_space(read_size as u32);
+
+                builder
+                    .local_get(*read_local)
+                    .i32_const(read_size)
+                    .call(self.func_by_name("stdlib.load_constant"));
+
+                self.read_from_memory(builder, *read_local, 0, &cst_ty)?;
+
+                self.duck_type(builder, &cst_ty, &expected_ty, Some(result_local))?;
+            }
 
             Ok(true)
         } else {
@@ -1794,16 +1892,19 @@ impl WasmGenerator {
             )));
         }
 
-        let expected_ty = duck_ty.unwrap_or(return_ty);
-
         // if needed, we can convert the argument to another compatible type.
-        self.duck_type(builder, return_ty, expected_ty)?;
+        let expected_ty = if let Some(ducky) = duck_ty {
+            self.duck_type(builder, return_ty, ducky, None)?;
+            ducky.clone()
+        } else {
+            return_ty.clone()
+        };
 
         // If an in-memory value is returned from the function, we need to copy
         // it to our frame, from the callee's frame.
         if let Some(return_offset) = in_memory_offset {
-            let locals = self.save_to_locals(builder, expected_ty, true);
-            self.copy_value(builder, expected_ty, &locals, return_offset)?;
+            let locals = self.save_to_locals(builder, &expected_ty, true);
+            self.copy_value(builder, &expected_ty, &locals, return_offset)?;
 
             for l in locals {
                 builder.local_get(l);
