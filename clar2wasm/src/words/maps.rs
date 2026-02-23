@@ -228,166 +228,163 @@ enum StoreType {
     Insert,
     Set,
 }
-/// Trait that unify the traverse code of set and insert
-trait StoreWord: ComplexWord {
-    fn traverse_store(
-        &self,
-        generator: &mut WasmGenerator,
-        builder: &mut walrus::InstrSeqBuilder,
-        _expr: &SymbolicExpression,
-        args: &[SymbolicExpression],
-        put_type: StoreType,
-    ) -> Result<(), GeneratorError> {
-        check_args!(generator, builder, 3, args.len(), ArgumentCountCheck::Exact);
 
-        let name = args.get_name(0)?;
-        let key = args.get_expr(1)?;
-        let value = args.get_expr(2)?;
+// Function that unify the traverse code of set and insert
+fn traverse_storage_operation(
+    word: & dyn ComplexWord,
+    generator: &mut WasmGenerator,
+    builder: &mut walrus::InstrSeqBuilder,
+    _expr: &SymbolicExpression,
+    args: &[SymbolicExpression],
+    put_type: StoreType,
+) -> Result<(), GeneratorError> {
+    check_args!(generator, builder, 3, args.len(), ArgumentCountCheck::Exact);
 
-        let (key_ty, value_type) = generator
-            .maps_types
-            .get(name)
-            .ok_or_else(|| {
-                GeneratorError::TypeError("Types should have been set in map creation".to_owned())
-            })?
-            .clone();
+    let name = args.get_name(0)?;
+    let key = args.get_expr(1)?;
+    let value = args.get_expr(2)?;
 
-        // Get the offset and length for this identifier in the literal memory
-        let id_offset = *generator
-            .literal_memory_offset
-            .get(&LiteralMemoryEntry::Ascii(name.as_str().into()))
-            .ok_or_else(|| GeneratorError::InternalError(format!("map not found: {name}")))?;
-        let id_length = name.len();
+    let (key_ty, value_type) = generator
+        .maps_types
+        .get(name)
+        .ok_or_else(|| {
+            GeneratorError::TypeError("Types should have been set in map creation".to_owned())
+        })?
+        .clone();
 
-        // Push the identifier offset and length onto the data stack
+    // Get the offset and length for this identifier in the literal memory
+    let id_offset = *generator
+        .literal_memory_offset
+        .get(&LiteralMemoryEntry::Ascii(name.as_str().into()))
+        .ok_or_else(|| GeneratorError::InternalError(format!("map not found: {name}")))?;
+    let id_length = name.len();
+
+    // Push the identifier offset and length onto the data stack
+    builder
+        .i32_const(id_offset as i32)
+        .i32_const(id_length as i32);
+
+    let (key_offset, key_size) = generator.create_call_stack_local(builder, &key_ty, true, false);
+
+    // Push the key to the data stack
+    generator.set_expr_type(key, key_ty.clone())?;
+    generator.traverse_expr(builder, key)?;
+
+    let serialized_key_size = generator.borrow_local(ValType::I32);
+    if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+        // in this case we need to compute the serialized key size
+        generator.serialization_size(builder, &key_ty)?;
+        builder.local_set(*serialized_key_size);
+    }
+
+    // Write the key to the memory (it's already on the data stack)
+    generator.write_to_memory(builder, key_offset, 0, &key_ty)?;
+
+    // Push the key offset and size to the data stack
+    builder.local_get(key_offset).i32_const(key_size);
+
+    // Create space on the call stack to write the value
+    let (val_offset, size) = generator.create_call_stack_local(builder, &value_type, true, false);
+
+    let val_size = generator.borrow_local(ValType::I32);
+    builder.i32_const(size).local_set(*val_size);
+
+    // Push the value to the data stack
+    generator.set_expr_type(value, value_type.clone())?;
+    generator.traverse_expr(builder, value)?;
+    let value_serialized_size = generator.borrow_local(ValType::I32);
+    if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+        generator.serialization_size(builder, &value_type)?;
+        builder.local_set(*value_serialized_size);
+    }
+
+    // Write the value to the memory (it's already on the data stack)
+    generator.write_to_memory(builder, val_offset, 0, &value_type)?;
+
+    // Push the value offset and size to the data stack
+    builder.local_get(val_offset).local_get(*val_size);
+
+    // Call the host interface function, `map_set`
+    builder.call(generator.func_by_name(match put_type {
+        StoreType::Set => "stdlib.map_set",
+        StoreType::Insert => "stdlib.map_insert",
+    }));
+
+    if generator.contract_analysis.epoch < StacksEpochId::Epoch2_05 {
+        let cost = generator.borrow_local(ValType::I32);
         builder
-            .i32_const(id_offset as i32)
-            .i32_const(id_length as i32);
+            .i32_const(size)
+            .i32_const(key_size)
+            .binop(BinaryOp::I32Add)
+            .local_set(*cost);
+        word.charge(generator, builder, *cost)?;
+    }
 
-        let (key_offset, key_size) =
-            generator.create_call_stack_local(builder, &key_ty, true, false);
+    let entry_status = generator.borrow_local(ValType::I32);
+    builder.local_set(*entry_status);
 
-        // Push the key to the data stack
-        generator.set_expr_type(key, key_ty.clone())?;
-        generator.traverse_expr(builder, key)?;
+    let block_ty = InstrSeqType::new(&mut generator.module.types, &[], &[]);
 
-        let serialized_key_size = generator.borrow_local(ValType::I32);
+    // When the linked operation does not fail due to an interpreter error
+    let success_block_id = {
+        let mut success_block = builder.dangling_instr_seq(block_ty);
         if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
-            // in this case we need to compute the serialized key size
-            generator.serialization_size(builder, &key_ty)?;
-            builder.local_set(*serialized_key_size);
-        }
-
-        // Write the key to the memory (it's already on the data stack)
-        generator.write_to_memory(builder, key_offset, 0, &key_ty)?;
-
-        // Push the key offset and size to the data stack
-        builder.local_get(key_offset).i32_const(key_size);
-
-        // Create space on the call stack to write the value
-        let (val_offset, size) =
-            generator.create_call_stack_local(builder, &value_type, true, false);
-
-        let val_size = generator.borrow_local(ValType::I32);
-        builder.i32_const(size).local_set(*val_size);
-
-        // Push the value to the data stack
-        generator.set_expr_type(value, value_type.clone())?;
-        generator.traverse_expr(builder, value)?;
-        let value_serialized_size = generator.borrow_local(ValType::I32);
-        if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
-            generator.serialization_size(builder, &value_type)?;
-            builder.local_set(*value_serialized_size);
-        }
-
-        // Write the value to the memory (it's already on the data stack)
-        generator.write_to_memory(builder, val_offset, 0, &value_type)?;
-
-        // Push the value offset and size to the data stack
-        builder.local_get(val_offset).local_get(*val_size);
-
-        // Call the host interface function, `map_set`
-        builder.call(generator.func_by_name(match put_type {
-            StoreType::Set => "stdlib.map_set",
-            StoreType::Insert => "stdlib.map_insert",
-        }));
-
-        if generator.contract_analysis.epoch < StacksEpochId::Epoch2_05 {
             let cost = generator.borrow_local(ValType::I32);
-            builder
-                .i32_const(size)
+
+            success_block
+                .local_get(*serialized_key_size)
+                .local_set(*cost)
+                .local_get(*entry_status)
+                .if_else(
+                    None,
+                    |success_block| {
+                        // When the element the operation is performed on was found in the map
+                        success_block
+                            .local_get(*value_serialized_size)
+                            .local_get(*cost)
+                            .binop(BinaryOp::I32Add)
+                            .local_set(*cost);
+                    },
+                    |_| {
+                        // When the element the operation is performed on was not found in the map
+                    },
+                );
+            word.charge(generator, &mut success_block, *cost)?;
+        }
+        success_block.id()
+    };
+
+    // When the linked operation fails due to an interpreter error
+    let error_block_id = {
+        let mut error_block = builder.dangling_instr_seq(block_ty);
+
+        if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+            let cost = generator.borrow_local(ValType::I32);
+            error_block
+                .local_get(*val_size)
                 .i32_const(key_size)
                 .binop(BinaryOp::I32Add)
                 .local_set(*cost);
-            self.charge(generator, builder, *cost)?;
+            word.charge(generator, &mut error_block, *cost)?;
         }
 
-        let entry_status = generator.borrow_local(ValType::I32);
-        builder.local_set(*entry_status);
+        error_block
+            .i32_const(ErrorMap::ExternError as i32)
+            .call(generator.func_by_name("stdlib.runtime-error"));
 
-        let block_ty = InstrSeqType::new(&mut generator.module.types, &[], &[]);
+        error_block.id()
+    };
 
-        // When the linked operation does not fail due to an interpreter error
-        let success_block_id = {
-            let mut success_block = builder.dangling_instr_seq(block_ty);
-            if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
-                let cost = generator.borrow_local(ValType::I32);
+    builder
+        .global_get(generator.linked_error)
+        .ref_is_null()
+        .instr(IfElse {
+            consequent: success_block_id,
+            alternative: error_block_id,
+        });
 
-                success_block
-                    .local_get(*serialized_key_size)
-                    .local_set(*cost)
-                    .local_get(*entry_status)
-                    .if_else(
-                        None,
-                        |success_block| {
-                            // When the element the operation is performed on was found in the map
-                            success_block
-                                .local_get(*value_serialized_size)
-                                .local_get(*cost)
-                                .binop(BinaryOp::I32Add)
-                                .local_set(*cost);
-                        },
-                        |_| {
-                            // When the element the operation is performed on was not found in the map
-                        },
-                    );
-                self.charge(generator, &mut success_block, *cost)?;
-            }
-            success_block.id()
-        };
-
-        // When the linked operation fails due to an interpreter error
-        let error_block_id = {
-            let mut error_block = builder.dangling_instr_seq(block_ty);
-
-            if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
-                let cost = generator.borrow_local(ValType::I32);
-                error_block
-                    .local_get(*val_size)
-                    .i32_const(key_size)
-                    .binop(BinaryOp::I32Add)
-                    .local_set(*cost);
-                self.charge(generator, &mut error_block, *cost)?;
-            }
-
-            error_block
-                .i32_const(ErrorMap::ExternError as i32)
-                .call(generator.func_by_name("stdlib.runtime-error"));
-
-            error_block.id()
-        };
-
-        builder
-            .global_get(generator.linked_error)
-            .ref_is_null()
-            .instr(IfElse {
-                consequent: success_block_id,
-                alternative: error_block_id,
-            });
-
-        builder.local_get(*entry_status);
-        Ok(())
-    }
+    builder.local_get(*entry_status);
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -399,8 +396,6 @@ impl Word for MapSet {
     }
 }
 
-impl StoreWord for MapSet {}
-
 impl ComplexWord for MapSet {
     fn traverse(
         &self,
@@ -409,14 +404,12 @@ impl ComplexWord for MapSet {
         _expr: &SymbolicExpression,
         args: &[SymbolicExpression],
     ) -> Result<(), GeneratorError> {
-        self.traverse_store(generator, builder, _expr, args, StoreType::Set)
+        traverse_storage_operation(self, generator, builder, _expr, args, StoreType::Set)
     }
 }
 
 #[derive(Debug)]
 pub struct MapInsert;
-
-impl StoreWord for MapInsert {}
 
 impl Word for MapInsert {
     fn name(&self) -> ClarityName {
@@ -432,7 +425,7 @@ impl ComplexWord for MapInsert {
         _expr: &SymbolicExpression,
         args: &[SymbolicExpression],
     ) -> Result<(), GeneratorError> {
-        self.traverse_store(generator, builder, _expr, args, StoreType::Insert)
+        traverse_storage_operation(self, generator, builder, _expr, args, StoreType::Insert)
     }
 }
 
