@@ -496,8 +496,8 @@ impl ComplexWord for MapDelete {
         // Call the host interface function, `map_delete`
         builder.call(generator.func_by_name("stdlib.map_delete"));
 
-        let entry_status = generator.borrow_local(ValType::I32);
-        builder.local_set(*entry_status);
+        let result = generator.borrow_local(ValType::I32);
+        builder.local_set(*result);
 
         if generator.contract_analysis.epoch < StacksEpochId::Epoch2_05 {
             self.charge(generator, builder, *key_size)?;
@@ -527,7 +527,7 @@ impl ComplexWord for MapDelete {
                 success_block
                     .local_get(*serialize_size)
                     .local_set(*cost)
-                    .local_get(*entry_status)
+                    .local_get(*result)
                     .if_else(
                         None,
                         |success_block| {
@@ -556,7 +556,7 @@ impl ComplexWord for MapDelete {
                 alternative: error_block_id,
             });
 
-        builder.local_get(*entry_status);
+        builder.local_get(*result);
 
         Ok(())
     }
