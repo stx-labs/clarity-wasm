@@ -231,7 +231,7 @@ enum StoreType {
 
 // Function that unify the traverse code of set and insert
 fn traverse_storage_operation(
-    word: & dyn ComplexWord,
+    word: &dyn ComplexWord,
     generator: &mut WasmGenerator,
     builder: &mut walrus::InstrSeqBuilder,
     _expr: &SymbolicExpression,
