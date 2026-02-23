@@ -161,6 +161,40 @@ impl ComplexWord for MapGet {
         }
         let block_ty = InstrSeqType::new(&mut generator.module.types, &[], &[]);
 
+        // When the linked operation does not fail due to an interpreter error
+        let success_block_id = {
+            let mut success_block = builder.dangling_instr_seq(block_ty);
+            if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+                let cost = generator.borrow_local(ValType::I32);
+
+                success_block
+                    .local_get(*serialize_size)
+                    // Size of none
+                    .i32_const(1)
+                    .binop(BinaryOp::I32Ne);
+                success_block.if_else(
+                    None,
+                    |success_block| {
+                        // When the element the operation is performed on was found in the map
+                        success_block
+                            .local_get(*serialize_size)
+                            .local_get(*serialized_key_size)
+                            .binop(BinaryOp::I32Add)
+                            .local_set(*cost);
+                    },
+                    |success_block| {
+                        // When the element the operation is performed on was not found in the map
+                        success_block
+                            .local_get(*serialized_key_size)
+                            .local_set(*cost);
+                    },
+                );
+                self.charge(generator, &mut success_block, *cost)?;
+            }
+            success_block.id()
+        };
+
+        // When the linked operation fails due to an interpreter error
         let error_block_id = {
             let mut error_block = builder.dangling_instr_seq(block_ty);
             if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
@@ -176,42 +210,6 @@ impl ComplexWord for MapGet {
                 .i32_const(ErrorMap::ExternError as i32)
                 .call(generator.func_by_name("stdlib.runtime-error"));
             error_block.id()
-        };
-
-        let success_block_id = {
-            let mut success_block = builder.dangling_instr_seq(block_ty);
-            if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
-                let cost = generator.borrow_local(ValType::I32);
-                let found_block_id = {
-                    let mut found_block = success_block.dangling_instr_seq(block_ty);
-                    found_block
-                        .local_get(*serialize_size)
-                        .local_get(*serialized_key_size)
-                        .binop(BinaryOp::I32Add)
-                        .local_set(*cost);
-                    found_block.id()
-                };
-
-                let not_found_block_id = {
-                    let mut not_found_block = success_block.dangling_instr_seq(block_ty);
-                    not_found_block
-                        .local_get(*serialized_key_size)
-                        .local_set(*cost);
-                    not_found_block.id()
-                };
-
-                success_block
-                    .local_get(*serialize_size)
-                    // Size of none
-                    .i32_const(1)
-                    .binop(BinaryOp::I32Ne);
-                success_block.instr(IfElse {
-                    consequent: found_block_id,
-                    alternative: not_found_block_id,
-                });
-                self.charge(generator, &mut success_block, *cost)?;
-            }
-            success_block.id()
         };
 
         builder
@@ -325,8 +323,40 @@ trait StoreWord: ComplexWord {
         }
 
         let entry_status = generator.borrow_local(ValType::I32);
+        builder.local_set(*entry_status);
+
         let block_ty = InstrSeqType::new(&mut generator.module.types, &[], &[]);
 
+        // When the linked operation does not fail due to an interpreter error
+        let success_block_id = {
+            let mut success_block = builder.dangling_instr_seq(block_ty);
+            if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+                let cost = generator.borrow_local(ValType::I32);
+
+                success_block
+                    .local_get(*serialized_key_size)
+                    .local_set(*cost)
+                    .local_get(*entry_status)
+                    .if_else(
+                        None,
+                        |success_block| {
+                            // When the element the operation is performed on was found in the map
+                            success_block
+                                .local_get(*value_serialized_size)
+                                .local_get(*cost)
+                                .binop(BinaryOp::I32Add)
+                                .local_set(*cost);
+                        },
+                        |_| {
+                            // When the element the operation is performed on was not found in the map
+                        },
+                    );
+                self.charge(generator, &mut success_block, *cost)?;
+            }
+            success_block.id()
+        };
+
+        // When the linked operation fails due to an interpreter error
         let error_block_id = {
             let mut error_block = builder.dangling_instr_seq(block_ty);
 
@@ -347,40 +377,6 @@ trait StoreWord: ComplexWord {
             error_block.id()
         };
 
-        let success_block_id = {
-            let mut success_block = builder.dangling_instr_seq(block_ty);
-            if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
-                let cost = generator.borrow_local(ValType::I32);
-
-                success_block
-                    .local_get(*serialized_key_size)
-                    .local_set(*cost);
-
-                let found_block_id = {
-                    let mut found_block = success_block.dangling_instr_seq(block_ty);
-                    found_block
-                        .local_get(*value_serialized_size)
-                        .local_get(*cost)
-                        .binop(BinaryOp::I32Add)
-                        .local_set(*cost);
-
-                    found_block.id()
-                };
-                let not_found_block_id = {
-                    let not_found_block = success_block.dangling_instr_seq(block_ty);
-                    not_found_block.id()
-                };
-
-                success_block.local_get(*entry_status).instr(IfElse {
-                    consequent: found_block_id,
-                    alternative: not_found_block_id,
-                });
-                self.charge(generator, &mut success_block, *cost)?;
-            }
-            success_block.id()
-        };
-
-        builder.local_set(*entry_status);
         builder
             .global_get(generator.linked_error)
             .ref_is_null()
@@ -388,8 +384,8 @@ trait StoreWord: ComplexWord {
                 consequent: success_block_id,
                 alternative: error_block_id,
             });
-        builder.local_get(*entry_status);
 
+        builder.local_get(*entry_status);
         Ok(())
     }
 }
@@ -515,6 +511,7 @@ impl ComplexWord for MapDelete {
         }
 
         let block_ty = InstrSeqType::new(&mut generator.module.types, &[], &[]);
+        // When the linked operation fails due to an interpreter error
         let error_block_id = {
             let mut error_block = builder.dangling_instr_seq(block_ty);
             if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
@@ -528,33 +525,32 @@ impl ComplexWord for MapDelete {
             error_block.id()
         };
 
+        // When the linked operation does not fail due to an interpreter error
         let success_block_id = {
             let mut success_block = builder.dangling_instr_seq(block_ty);
 
             if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
-                let entry_existed_block_id = {
-                    let mut entry_existed_block = success_block.dangling_instr_seq(block_ty);
-                    let cost = generator.borrow_local(ValType::I32);
-                    //Size of None is 1
-                    entry_existed_block
-                        .local_get(*serialize_size)
-                        .i32_const(1)
-                        .binop(BinaryOp::I32Add)
-                        .local_set(*cost);
-                    self.charge(generator, &mut entry_existed_block, *cost)?;
-                    entry_existed_block.id()
-                };
-
-                let entry_did_not_exist_block_id = {
-                    let mut entry_did_not_exist_block = success_block.dangling_instr_seq(block_ty);
-                    self.charge(generator, &mut entry_did_not_exist_block, *serialize_size)?;
-                    entry_did_not_exist_block.id()
-                };
-
-                success_block.local_get(*entry_status).instr(IfElse {
-                    consequent: entry_existed_block_id,
-                    alternative: entry_did_not_exist_block_id,
-                });
+                let cost = generator.borrow_local(ValType::I32);
+                success_block
+                    .local_get(*serialize_size)
+                    .local_set(*cost)
+                    .local_get(*entry_status)
+                    .if_else(
+                        None,
+                        |success_block| {
+                            // When the element the operation is performed on was found in the map
+                            success_block
+                                .local_get(*cost)
+                                //Size of None is 1
+                                .i32_const(1)
+                                .binop(BinaryOp::I32Add)
+                                .local_set(*cost);
+                        },
+                        |_| {
+                            // When the element the operation is performed on was not found in the map
+                        },
+                    );
+                self.charge(generator, &mut success_block, *cost)?;
             }
             success_block.id()
         };
