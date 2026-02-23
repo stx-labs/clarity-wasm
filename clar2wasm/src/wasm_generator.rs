@@ -70,6 +70,9 @@ pub struct WasmGenerator {
     /// Emits cost tracking code if set.
     pub(crate) cost_context: Option<ChargeContext>,
 
+    // Global ID of the linked error
+    pub(crate) linked_error: GlobalId,
+
     /// Size of the current function's stack frame.
     frame_size: i32,
     /// Size of the maximum extra work space required by the stdlib functions
@@ -382,11 +385,14 @@ impl WasmGenerator {
         // Get the stack-pointer global ID
         let global_id = get_global(&module, "stack-pointer")?;
 
+        let linked_error_id = get_global(&module, "runtime-error-linked")?;
+
         Ok(WasmGenerator {
             contract_analysis,
             module,
             literal_memory_end: END_OF_STANDARD_DATA,
             stack_pointer: global_id,
+            linked_error: linked_error_id,
             literal_memory_offset: HashMap::new(),
             constants: HashMap::new(),
             bindings: Bindings::new(),

@@ -132,23 +132,23 @@ impl From<i32> for ErrorMap {
     }
 }
 
-fn ref_error_to_error<T>(ref_error: &T, placeholder_error: T) -> T {
+fn referror_to_error<T>(referror: &T, placeholder_error: T) -> T {
     // SAFETY:
     //
     // This unsafe operation returns the value of a location pointed by `*mut T`.
     //
-    // The purpose of this code is to take the ownership of the `ref_error` value
+    // The purpose of this code is to take the ownership of the `referror` value
     // since clarity::vm::errors::Error is not a Clonable type.
     //
-    // Converting a `&T` (ref_error) to a `*mut T` doesn't cause any issues here
+    // Converting a `&T` (referror) to a `*mut T` doesn't cause any issues here
     // because the reference is not borrowed elsewhere.
     //
     // The replaced `T` value is deallocated after the operation. Therefore, the chosen `T`
     // is a placeholder value, which avoids having two copies of the same pointer.
     //
     // Otherwise we would encounter a double free. For example if we had used core::ptr::read to extract the error
-    // held in the ref_error.
-    unsafe { core::ptr::replace((ref_error as *const T) as *mut T, placeholder_error) }
+    // held in the referror.
+    unsafe { core::ptr::replace((referror as *const T) as *mut T, placeholder_error) }
 }
 pub(crate) fn resolve_error(
     e: wasmtime::Error,
@@ -158,11 +158,11 @@ pub(crate) fn resolve_error(
     clarity_version: &ClarityVersion,
 ) -> Error {
     if let Some(vm_error) = e.root_cause().downcast_ref::<Error>() {
-        return ref_error_to_error(vm_error, Error::Wasm(WasmError::ModuleNotFound));
+        return referror_to_error(vm_error, Error::Wasm(WasmError::ModuleNotFound));
     };
 
     if let Some(vm_error) = e.root_cause().downcast_ref::<CheckErrors>() {
-        return <CheckErrors as std::convert::Into<Error>>::into(ref_error_to_error(
+        return <CheckErrors as std::convert::Into<Error>>::into(referror_to_error(
             vm_error,
             CheckErrors::ExpectedName,
         ));
@@ -291,16 +291,22 @@ fn from_runtime_error_code(
         ErrorMap::CostOverrunWriteCount => Error::from(CostErrors::CostOverflow),
         ErrorMap::CostOverrunWriteLength => Error::from(CostErrors::CostOverflow),
         ErrorMap::ExternError => {
-            let linked_error_extern = instance
-                .get_global(store.as_context_mut(), "linked-error")
-                .unwrap()
-                .get(store.as_context_mut())
-                .unwrap_externref()
-                .unwrap();
-            ref_error_to_error(
-                linked_error_extern.data().downcast_ref::<Error>().unwrap(),
-                Error::Wasm(WasmError::ModuleNotFound),
-            )
+            match instance.get_global(store.as_context_mut(), "linked-error") {
+                None => Error::Wasm(WasmError::GlobalNotFound("runtime-error-linked".to_owned())),
+                Some(global) => match global.get(store.as_context_mut()).unwrap_externref() {
+                    None => Error::Wasm(WasmError::Expect("".to_owned())),
+                    Some(linked_error_extern) => {
+                        match linked_error_extern.data().downcast_ref::<Error>() {
+                            None => Error::Wasm(WasmError::Expect(
+                                "runtime-error-linked should hold an error type".to_owned(),
+                            )),
+                            Some(ref_error) => {
+                                referror_to_error(ref_error, Error::Wasm(WasmError::ModuleNotFound))
+                            }
+                        }
+                    }
+                },
+            }
         }
         _ => panic!("Runtime error code {runtime_error_code} not supported"),
     }

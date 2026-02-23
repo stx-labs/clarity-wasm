@@ -139,8 +139,6 @@ impl ComplexWord for MapGet {
 
         // Call the host-interface function, `map_get`
         builder.call(generator.func_by_name("stdlib.map_get"));
-        let entry_status = generator.borrow_local(ValType::I32);
-        builder.local_set(*entry_status);
 
         // Host interface fills the result into the specified memory. Read it
         // back out, and place the value on the data stack.
@@ -216,10 +214,9 @@ impl ComplexWord for MapGet {
             success_block.id()
         };
 
-        builder.local_get(*entry_status);
         builder
-            .i32_const(-1i32)
-            .binop(BinaryOp::I32Ne)
+            .global_get(generator.linked_error)
+            .ref_is_null()
             .instr(IfElse {
                 consequent: success_block_id,
                 alternative: error_block_id,
@@ -233,7 +230,7 @@ enum StoreType {
     Insert,
     Set,
 }
-/// Trait that rassemble the traverse code of set and insert
+/// Trait that unify the traverse code of set and insert
 trait StoreWord: ComplexWord {
     fn traverse_store(
         &self,
@@ -383,10 +380,10 @@ trait StoreWord: ComplexWord {
             success_block.id()
         };
 
+        builder.local_set(*entry_status);
         builder
-            .local_tee(*entry_status)
-            .i32_const(-1i32)
-            .binop(BinaryOp::I32Ne)
+            .global_get(generator.linked_error)
+            .ref_is_null()
             .instr(IfElse {
                 consequent: success_block_id,
                 alternative: error_block_id,
@@ -562,10 +559,9 @@ impl ComplexWord for MapDelete {
             success_block.id()
         };
 
-        builder.local_get(*entry_status);
         builder
-            .i32_const(-1i32)
-            .binop(BinaryOp::I32Ne)
+            .global_get(generator.linked_error)
+            .ref_is_null()
             .instr(IfElse {
                 consequent: success_block_id,
                 alternative: error_block_id,

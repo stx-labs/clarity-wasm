@@ -12,8 +12,8 @@ use clarity::vm::types::{
     TupleTypeSignature, TypeSignature,
 };
 use clarity::vm::{ClarityName, ClarityVersion, Environment, SymbolicExpression, Value};
-use clarity_types::types::ResponseData;
 use clarity_types::errors::InterpreterError;
+use clarity_types::types::ResponseData;
 use stacks_common::types::chainstate::StacksBlockId;
 use stacks_common::util::hash::{Keccak256Hash, Sha512Sum, Sha512Trunc256Sum};
 use stacks_common::util::secp256k1::{secp256k1_recover, secp256k1_verify, Secp256k1PublicKey};
@@ -2692,7 +2692,10 @@ fn link_map_get_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Error>
                 );
 
                 match result {
-                    Err(error) => Ok(handle_vm_execution_errors(&mut caller, error)),
+                    Err(error) => {
+                        handle_vm_execution_errors(&mut caller, error)?;
+                        Ok(())
+                    }
 
                     Ok(data) => {
                         let memory = caller
@@ -2711,7 +2714,7 @@ fn link_map_get_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Error>
                             true,
                         )?;
 
-                        Ok(1i32)
+                        Ok(())
                     }
                 }
             },
@@ -2806,7 +2809,10 @@ fn link_map_set_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Error>
                 );
 
                 match result {
-                    Err(error) => Ok(handle_vm_execution_errors(&mut caller, error)),
+                    Err(error) => {
+                        handle_vm_execution_errors(&mut caller, error)?;
+                        Ok(1i32)
+                    }
 
                     Ok(data) => {
                         caller
@@ -2815,13 +2821,11 @@ fn link_map_set_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Error>
                             .add_memory(data.serialized_byte_len)
                             .map_err(Error::from)?;
 
-                        if let Value::Bool(true) = data.value {
-                            Ok(1i32)
+                        if let Value::Bool(value) = data.value {
+                            Ok(value as i32)
                         } else {
-                            // we want to return an error here. It's not supposed to happen
                             Err(Error::Interpreter(InterpreterError::InterpreterError(
-                                "Unexpected case, set should always be valid if ran to completion"
-                                    .to_owned(),
+                                "Unexpected case, a boolean is expected".to_owned(),
                             ))
                             .into())
                         }
@@ -2919,7 +2923,10 @@ fn link_map_insert_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Err
                 );
 
                 match result {
-                    Err(error) => Ok(handle_vm_execution_errors(&mut caller, error)),
+                    Err(error) => {
+                        handle_vm_execution_errors(&mut caller, error)?;
+                        Ok(1i32)
+                    }
                     Ok(data) => {
                         caller
                             .data_mut()
@@ -2927,10 +2934,13 @@ fn link_map_insert_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Err
                             .add_memory(data.serialized_byte_len)
                             .map_err(Error::from)?;
 
-                        if let Value::Bool(true) = data.value {
-                            Ok(1i32)
+                        if let Value::Bool(value) = data.value {
+                            Ok(value as i32)
                         } else {
-                            Ok(0i32)
+                            Err(Error::Interpreter(InterpreterError::InterpreterError(
+                                "Unexpected case, a boolean is expected".to_owned(),
+                            ))
+                            .into())
                         }
                     }
                 }
@@ -3008,7 +3018,10 @@ fn link_map_delete_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Err
                 );
 
                 match result {
-                    Err(error) => Ok(handle_vm_execution_errors(&mut caller, error)),
+                    Err(error) => {
+                        handle_vm_execution_errors(&mut caller, error)?;
+                        Ok(true as i32)
+                    }
                     Ok(data) => {
                         caller
                             .data_mut()
@@ -3016,10 +3029,13 @@ fn link_map_delete_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Err
                             .add_memory(data.serialized_byte_len)
                             .map_err(Error::from)?;
 
-                        if let Value::Bool(true) = data.value {
-                            Ok(1i32)
+                        if let Value::Bool(value) = data.value {
+                            Ok(value as i32)
                         } else {
-                            Ok(0i32)
+                            Err(Error::Interpreter(InterpreterError::InterpreterError(
+                                "Unexpected case, a boolean is expected".to_owned(),
+                            ))
+                            .into())
                         }
                     }
                 }
@@ -3034,17 +3050,27 @@ fn link_map_delete_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Err
         })
 }
 
-/// Returns -1 and set the linked error with the error returned
-fn handle_vm_execution_errors(caller: &mut Caller<'_, ClarityWasmContext>, error: Error) -> i32 {
-    let linked_error = caller.get_export("linked-error").unwrap();
-    let linked_error = linked_error.into_global().unwrap();
-    linked_error
-        .set(
-            caller.as_context_mut(),
-            Val::ExternRef(Some(ExternRef::new(error))),
-        )
-        .unwrap();
-    -1i32
+/// Set the linked error with the error returned
+fn handle_vm_execution_errors(
+    caller: &mut Caller<'_, ClarityWasmContext>,
+    error: Error,
+) -> Result<(), Error> {
+    let linked_error = caller
+        .get_export("linked-error")
+        .ok_or(Error::Wasm(WasmError::GlobalNotFound(
+            "runtime-error-linked".to_owned(),
+        )))?
+        .into_global()
+        .ok_or(Error::Wasm(WasmError::GlobalNotFound(
+            "runtime-error-linked".to_owned(),
+        )))?;
+    match linked_error.set(
+        caller.as_context_mut(),
+        Val::ExternRef(Some(ExternRef::new(error))),
+    ) {
+        Err(error) => Err(Error::Wasm(WasmError::UnableToWriteMemory(error))),
+        Ok(_) => Ok(()),
+    }
 }
 
 fn check_height_valid(
@@ -5776,7 +5802,7 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
          _key_offset: i32,
          _key_length: i32,
          _return_offset: i32,
-         _return_length: i32| { Ok(0i32) },
+         _return_length: i32| { Ok(()) },
     )?;
 
     linker.func_wrap(
