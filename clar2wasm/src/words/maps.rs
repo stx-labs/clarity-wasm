@@ -2,7 +2,7 @@ use clarity::types::StacksEpochId;
 use clarity::vm::types::{TypeSignature, TypeSignatureExt};
 use clarity::vm::{ClarityName, SymbolicExpression};
 use walrus::ir::{BinaryOp, IfElse, InstrSeqType};
-use walrus::ValType;
+use walrus::{FunctionId, ValType};
 
 use super::{ComplexWord, Word};
 use crate::check_args;
@@ -116,7 +116,8 @@ impl ComplexWord for MapGet {
         generator.traverse_expr(builder, key)?;
         let serialized_key_size = generator.borrow_local(ValType::I32);
         if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
-            // in this case we need to compute the serialized key size
+            // In this case we need to compute the serialized key size
+            // It is ok to not have it set for < 2.05 as it's not used in that case
             generator.serialization_size(builder, &key_ty)?;
             builder.local_set(*serialized_key_size);
         }
@@ -144,13 +145,13 @@ impl ComplexWord for MapGet {
         // back out, and place the value on the data stack.
         generator.read_from_memory(builder, return_offset, 0, &value_type)?;
 
-        let serialize_size = generator.borrow_local(ValType::I32);
+        let serialized_size = generator.borrow_local(ValType::I32);
         if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+            // It is ok to not have it set for < 2.05 as it's not used in that case
             generator.serialization_size(builder, &value_type)?;
-            builder.local_set(*serialize_size);
-        }
-
-        if generator.contract_analysis.epoch < StacksEpochId::Epoch2_05 {
+            builder.local_set(*serialized_size);
+        } else {
+            // The cost is the same no matter what in < 2.05 : size of the value + size of the key
             let cost = generator.borrow_local(ValType::I32);
             builder
                 .local_get(return_size)
@@ -161,14 +162,20 @@ impl ComplexWord for MapGet {
         }
         let block_ty = InstrSeqType::new(&mut generator.module.types, &[], &[]);
 
-        // When the linked operation does not fail due to an interpreter error
+        // In > 2.05 we have three different costs depending if
+        //      - an error occurred in the interpreter
+        //      - no error occurred
+        //          - and the value the operation is performed on is found
+        //          - and the value the operation is performed on is not found
         let success_block_id = {
+            // When the linked operation does not fail due to an interpreter error
             let mut success_block = builder.dangling_instr_seq(block_ty);
             if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+                // The cost in < 2.05 has already been handled before
                 let cost = generator.borrow_local(ValType::I32);
 
                 success_block
-                    .local_get(*serialize_size)
+                    .local_get(*serialized_size)
                     // Size of none
                     .i32_const(1)
                     .binop(BinaryOp::I32Ne);
@@ -176,14 +183,16 @@ impl ComplexWord for MapGet {
                     None,
                     |success_block| {
                         // When the element the operation is performed on was found in the map
+                        // Then we charge the serialized size of the entry we retrieved + serialized size of the key
                         success_block
-                            .local_get(*serialize_size)
+                            .local_get(*serialized_size)
                             .local_get(*serialized_key_size)
                             .binop(BinaryOp::I32Add)
                             .local_set(*cost);
                     },
                     |success_block| {
                         // When the element the operation is performed on was not found in the map
+                        // Then we only charge the serialized size of the key
                         success_block
                             .local_get(*serialized_key_size)
                             .local_set(*cost);
@@ -194,10 +203,12 @@ impl ComplexWord for MapGet {
             success_block.id()
         };
 
-        // When the linked operation fails due to an interpreter error
         let error_block_id = {
+            // When the linked operation fails due to an interpreter error
             let mut error_block = builder.dangling_instr_seq(block_ty);
             if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+                // In case of an Interpreter error, we charge the return_size + the key size (non serialized)
+                // The cost in < 2.05 has already been handled before
                 let cost = generator.borrow_local(ValType::I32);
                 error_block
                     .local_get(return_size)
@@ -206,6 +217,8 @@ impl ComplexWord for MapGet {
                     .local_set(*cost);
                 self.charge(generator, &mut error_block, *cost)?;
             }
+
+            // Throws back the runtime error that occurred in the interpreter after charging he cost
             error_block
                 .i32_const(ErrorMap::ExternError as i32)
                 .call(generator.func_by_name("stdlib.runtime-error"));
@@ -224,11 +237,6 @@ impl ComplexWord for MapGet {
     }
 }
 
-enum StoreType {
-    Insert,
-    Set,
-}
-
 // Function that unify the traverse code of set and insert
 fn traverse_storage_operation(
     word: &dyn ComplexWord,
@@ -236,7 +244,7 @@ fn traverse_storage_operation(
     builder: &mut walrus::InstrSeqBuilder,
     _expr: &SymbolicExpression,
     args: &[SymbolicExpression],
-    put_type: StoreType,
+    function_id: &FunctionId,
 ) -> Result<(), GeneratorError> {
     check_args!(generator, builder, 3, args.len(), ArgumentCountCheck::Exact);
 
@@ -272,7 +280,7 @@ fn traverse_storage_operation(
 
     let serialized_key_size = generator.borrow_local(ValType::I32);
     if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
-        // in this case we need to compute the serialized key size
+        // It is ok to not have it set for < 2.05 as it's not used in that case
         generator.serialization_size(builder, &key_ty)?;
         builder.local_set(*serialized_key_size);
     }
@@ -294,6 +302,7 @@ fn traverse_storage_operation(
     generator.traverse_expr(builder, value)?;
     let value_serialized_size = generator.borrow_local(ValType::I32);
     if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+        // It is ok to not have it set for < 2.05 as it's not used in that case
         generator.serialization_size(builder, &value_type)?;
         builder.local_set(*value_serialized_size);
     }
@@ -305,12 +314,10 @@ fn traverse_storage_operation(
     builder.local_get(val_offset).local_get(*val_size);
 
     // Call the host interface function, `map_set`
-    builder.call(generator.func_by_name(match put_type {
-        StoreType::Set => "stdlib.map_set",
-        StoreType::Insert => "stdlib.map_insert",
-    }));
+    builder.call(*function_id);
 
     if generator.contract_analysis.epoch < StacksEpochId::Epoch2_05 {
+        // The cost is the same no matter what in < 2.05 : size of the value + size of the key
         let cost = generator.borrow_local(ValType::I32);
         builder
             .i32_const(size)
@@ -325,10 +332,16 @@ fn traverse_storage_operation(
 
     let block_ty = InstrSeqType::new(&mut generator.module.types, &[], &[]);
 
-    // When the linked operation does not fail due to an interpreter error
+    // In > 2.05 we have three different costs depending if
+    //      - an error occurred in the interpreter
+    //      - no error occurred
+    //          - and the value the operation is performed on is found
+    //          - and the value the operation is performed on is not found
     let success_block_id = {
+        // When the linked operation does not fail due to an interpreter error
         let mut success_block = builder.dangling_instr_seq(block_ty);
         if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+            // The cost in < 2.05 has already been handled before
             let cost = generator.borrow_local(ValType::I32);
 
             success_block
@@ -339,6 +352,7 @@ fn traverse_storage_operation(
                     None,
                     |success_block| {
                         // When the element the operation is performed on was found in the map
+                        // Then we charge the serialized size of the entry we want to store + serialized size of the key
                         success_block
                             .local_get(*value_serialized_size)
                             .local_get(*cost)
@@ -347,6 +361,8 @@ fn traverse_storage_operation(
                     },
                     |_| {
                         // When the element the operation is performed on was not found in the map
+                        // Then we only charge the serialized size of the key
+                        // MapSet never enters this branch as we always insert
                     },
                 );
             word.charge(generator, &mut success_block, *cost)?;
@@ -354,11 +370,13 @@ fn traverse_storage_operation(
         success_block.id()
     };
 
-    // When the linked operation fails due to an interpreter error
     let error_block_id = {
+        // When the linked operation fails due to an interpreter error
         let mut error_block = builder.dangling_instr_seq(block_ty);
 
         if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+            // In case of an Interpreter error, we charge the return_size + the key size (non serialized)
+            // The cost in < 2.05 has already been handled before
             let cost = generator.borrow_local(ValType::I32);
             error_block
                 .local_get(*val_size)
@@ -368,6 +386,7 @@ fn traverse_storage_operation(
             word.charge(generator, &mut error_block, *cost)?;
         }
 
+        // Throws back the runtime error that occurred in the interpreter after charging he cost
         error_block
             .i32_const(ErrorMap::ExternError as i32)
             .call(generator.func_by_name("stdlib.runtime-error"));
@@ -404,7 +423,14 @@ impl ComplexWord for MapSet {
         _expr: &SymbolicExpression,
         args: &[SymbolicExpression],
     ) -> Result<(), GeneratorError> {
-        traverse_storage_operation(self, generator, builder, _expr, args, StoreType::Set)
+        traverse_storage_operation(
+            self,
+            generator,
+            builder,
+            _expr,
+            args,
+            &generator.func_by_name("stdlib.map_set"),
+        )
     }
 }
 
@@ -425,7 +451,14 @@ impl ComplexWord for MapInsert {
         _expr: &SymbolicExpression,
         args: &[SymbolicExpression],
     ) -> Result<(), GeneratorError> {
-        traverse_storage_operation(self, generator, builder, _expr, args, StoreType::Insert)
+        traverse_storage_operation(
+            self,
+            generator,
+            builder,
+            _expr,
+            args,
+            &generator.func_by_name("stdlib.map_insert"),
+        )
     }
 }
 
@@ -482,7 +515,9 @@ impl ComplexWord for MapDelete {
         generator.set_expr_type(key, key_ty.clone())?;
         generator.traverse_expr(builder, key)?;
         let serialize_size = generator.borrow_local(ValType::I32);
+        // Note that we have different costs for < 2.05 and >= 2.05.
         if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+            // It is ok to not have it set for < 2.05 as it's not used in that case
             generator.serialization_size(builder, &key_ty)?;
             builder.local_set(*serialize_size);
         }
@@ -504,25 +539,18 @@ impl ComplexWord for MapDelete {
         }
 
         let block_ty = InstrSeqType::new(&mut generator.module.types, &[], &[]);
-        // When the linked operation fails due to an interpreter error
-        let error_block_id = {
-            let mut error_block = builder.dangling_instr_seq(block_ty);
-            if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
-                self.charge(generator, &mut error_block, *key_size)?;
-            }
 
-            error_block
-                .i32_const(ErrorMap::ExternError as i32)
-                .call(generator.func_by_name("stdlib.runtime-error"));
-
-            error_block.id()
-        };
-
-        // When the linked operation does not fail due to an interpreter error
+        // In > 2.05 we have three different costs depending if
+        //      - an error occurred in the interpreter
+        //      - no error occurred
+        //          - and the value the operation is performed on is found
+        //          - and the value the operation is performed on is not found
         let success_block_id = {
+            // When the linked operation does not fail due to an interpreter error
             let mut success_block = builder.dangling_instr_seq(block_ty);
 
             if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+                // The cost in < 2.05 has already been handled before
                 let cost = generator.borrow_local(ValType::I32);
                 success_block
                     .local_get(*serialize_size)
@@ -532,6 +560,7 @@ impl ComplexWord for MapDelete {
                         None,
                         |success_block| {
                             // When the element the operation is performed on was found in the map
+                            // Then we charge the serialized size of serialized size of the key + serialized size of a none (1)
                             success_block
                                 .local_get(*cost)
                                 //Size of None is 1
@@ -541,11 +570,29 @@ impl ComplexWord for MapDelete {
                         },
                         |_| {
                             // When the element the operation is performed on was not found in the map
+                            // Then we only charge the serialized size of the key
                         },
                     );
                 self.charge(generator, &mut success_block, *cost)?;
             }
             success_block.id()
+        };
+
+        let error_block_id = {
+            // When the linked operation fails due to an interpreter error
+            let mut error_block = builder.dangling_instr_seq(block_ty);
+            if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+                // In case of an Interpreter error, the key size (non serialized)
+                // The cost in < 2.05 has already been handled before
+                self.charge(generator, &mut error_block, *key_size)?;
+            }
+
+            // Throws back the runtime error that occurred in the interpreter after charging he cost
+            error_block
+                .i32_const(ErrorMap::ExternError as i32)
+                .call(generator.func_by_name("stdlib.runtime-error"));
+
+            error_block.id()
         };
 
         builder
