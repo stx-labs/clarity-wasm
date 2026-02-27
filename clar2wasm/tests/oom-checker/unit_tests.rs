@@ -1,8 +1,10 @@
 use clar2wasm::tools::{
-    crosscheck_oom, crosscheck_oom_with_env, crosscheck_oom_with_non_literal_args, TestEnvironment,
+    as_oom_check_snippet, crosscheck_multi_contract, crosscheck_oom, crosscheck_oom_with_env,
+    crosscheck_oom_with_non_literal_args, TestConfig, TestEnvironment,
 };
 use clarity::vm::types::{PrincipalData, TypeSignature};
 use clarity::vm::Value;
+use clarity_types::types::SequenceSubtype;
 
 use crate::list_of;
 
@@ -279,6 +281,44 @@ fn map_sha256_oom() {
     crosscheck_oom_with_non_literal_args(
         snippet,
         &[TypeSignature::list_of(TypeSignature::UIntType, 3).unwrap()],
+        Ok(Some(expected)),
+    );
+}
+
+#[test]
+fn contract_call_with_workspace_oom() {
+    let callee = as_oom_check_snippet(
+        r#"
+        (define-public (sha256sum (a uint))
+            (ok (sha256 a))
+        )
+    "#,
+        // To check if we consider the size of the workspace in our contract-call, we need enough space for
+        //   - the workspace
+        //   - the result
+        &[
+            // Space for the workspace = 64 + 8 + 289 (which is equal to the space for a buff of the same size)
+            TypeSignature::SequenceType(SequenceSubtype::BufferType(361u32.try_into().unwrap())),
+            // Space for the result
+            TypeSignature::BUFFER_32,
+        ],
+        TestConfig::latest_epoch(),
+        TestConfig::clarity_version(),
+    );
+
+    let caller = "(contract-call? .callee sha256sum u1)";
+
+    let expected = Value::okay(
+        Value::buff_from(
+            hex::decode("4cbbd8ca5215b8d161aec181a74b694f4e24b001d5b081dc0030ed797a8973e0")
+                .unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    crosscheck_multi_contract(
+        &[("callee".into(), &callee), ("caller".into(), caller)],
         Ok(Some(expected)),
     );
 }

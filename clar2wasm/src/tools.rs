@@ -1030,7 +1030,7 @@ const IGNORE_BUFFER_MIN_SIZE_NEEDED: usize = IGNORE_BUFFER_SIZE + IGNORE_BUFFER_
 const WASM_PAGE_SIZE: usize = 65536;
 
 #[allow(clippy::expect_used)]
-fn as_oom_check_snippet(
+pub fn as_oom_check_snippet(
     snippet: &str,
     args_types: &[TypeSignature],
     epoch: StacksEpochId,
