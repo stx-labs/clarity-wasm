@@ -247,6 +247,42 @@ fn secp256k1_recover_oom() {
     );
 }
 
+#[test]
+fn sha256sum_oom() {
+    crosscheck_oom(
+        "(sha256 u1)",
+        Ok(Some(
+            Value::buff_from(
+                hex::decode("4cbbd8ca5215b8d161aec181a74b694f4e24b001d5b081dc0030ed797a8973e0")
+                    .unwrap(),
+            )
+            .unwrap(),
+        )),
+    );
+}
+
+#[test]
+fn map_sha256_oom() {
+    let snippet = "(map sha256 (list u1 u2 u3))";
+    let expected = Value::cons_list_unsanitized(
+        [
+            "4cbbd8ca5215b8d161aec181a74b694f4e24b001d5b081dc0030ed797a8973e0",
+            "b1535c7783ea8829b6b0cf67704539798b4d16c39bf0bfe09494c5d9f12eee30",
+            "59d5966c96af7ecad5c9d2918d6582d102b2c67f6b765ea28ac24371ab4f93be",
+        ]
+        .into_iter()
+        .map(|h| Value::buff_from(hex::decode(h).unwrap()).unwrap())
+        .collect(),
+    )
+    .unwrap();
+
+    crosscheck_oom_with_non_literal_args(
+        snippet,
+        &[TypeSignature::list_of(TypeSignature::UIntType, 3).unwrap()],
+        Ok(Some(expected)),
+    );
+}
+
 #[cfg(not(feature = "test-clarity-v1"))]
 #[cfg(test)]
 mod clarity_v2_v3 {
