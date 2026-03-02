@@ -653,7 +653,7 @@ lazy_static! {
             },
         );
         map.insert(
-            AsContract.name(),
+            AsContract::Original.name(),
             WordCost {
                 runtime: Constant(138),
                 read_count: None,

@@ -13,11 +13,17 @@ use crate::wasm_utils::ArgumentCountCheck;
 use crate::words::SimpleWord;
 
 #[derive(Debug)]
-pub struct AsContract;
+pub enum AsContract {
+    Original,
+    New,
+}
 
 impl Word for AsContract {
     fn name(&self) -> ClarityName {
-        ClarityName::from_literal("as-contract")
+        match self {
+            AsContract::Original => ClarityName::from_literal("as-contract"),
+            AsContract::New => ClarityName::from_literal("as-contract?"),
+        }
     }
 }
 
@@ -29,14 +35,32 @@ impl ComplexWord for AsContract {
         _expr: &SymbolicExpression,
         args: &[SymbolicExpression],
     ) -> Result<(), GeneratorError> {
-        check_args!(generator, builder, 1, args.len(), ArgumentCountCheck::Exact);
+        let inner;
+        match self {
+            Self::Original => {
+                check_args!(generator, builder, 1, args.len(), ArgumentCountCheck::Exact);
 
-        self.charge(generator, builder, 0)?;
+                self.charge(generator, builder, 0)?;
 
-        let inner = args.get_expr(0)?;
+                inner = args.get_expr(0)?;
 
-        // Call the host interface function, `enter_as_contract`
-        builder.call(generator.func_by_name("stdlib.enter_as_contract"));
+                // Call the host interface function, `enter_as_contract`
+                builder.call(generator.func_by_name("stdlib.enter_as_contract"));
+            }
+            Self::New => {
+                check_args!(generator, builder, 2, args.len(), ArgumentCountCheck::Exact);
+
+                // TODO: add cost tracking #783
+                let allowance = args.get_expr(0)?;
+
+                inner = args.get_expr(1)?;
+
+                // Call the host interface function, `enter_as_contract`
+                builder.call(generator.func_by_name("stdlib.enter_as_contract"));
+
+                generator.traverse_expr(builder, allowance)?;
+            }
+        }
 
         // Traverse the inner expression
         generator.traverse_expr(builder, inner)?;
@@ -53,7 +77,7 @@ pub struct WithAllAssetsUnsafe;
 
 impl Word for WithAllAssetsUnsafe {
     fn name(&self) -> ClarityName {
-        "with-all-assets-unsafe".into()
+        ClarityName::from_literal("with-all-assets-unsafe")
     }
 }
 
@@ -69,16 +93,8 @@ impl ComplexWord for WithAllAssetsUnsafe {
 
         self.charge(generator, builder, 0)?;
 
-        let inner = args.get_expr(0)?;
-
-        // Call the host interface function, `enter_with_all_assets_unsafe`
-        builder.call(generator.func_by_name("stdlib.enter_with_all_assets_unsafe"));
-
-        // Traverse the inner expression
-        generator.traverse_expr(builder, inner)?;
-
-        // Call the host interface function, `exit_with_all_assets_unsafe`
-        builder.call(generator.func_by_name("stdlib.exit_with_all_assets_unsafe"));
+        // Call the host interface function, `with_all_assets_unsafe`
+        builder.call(generator.func_by_name("stdlib.with_all_assets_unsafe"));
 
         Ok(())
     }
@@ -89,7 +105,7 @@ pub struct WithFt;
 
 impl Word for WithFt {
     fn name(&self) -> ClarityName {
-        "with-ft".into()
+        ClarityName::from_literal("with-ft")
     }
 }
 
@@ -105,52 +121,21 @@ impl ComplexWord for WithFt {
 
         self.charge(generator, builder, 0)?;
 
-        let asset_identifier = args.get_expr(0)?;
-        let allowance = args.get_expr(1)?;
-        let inner = args.get_expr(2)?;
+        let token_contract = args.get_expr(0)?;
+        let token_name = args.get_expr(1)?;
+        let allowance = args.get_expr(2)?;
 
-        // Get the type of the asset identifier (should be a tuple or principal)
-        let asset_identifier_ty = generator
-            .get_expr_type(asset_identifier)
-            .ok_or_else(|| {
-                GeneratorError::TypeError(
-                    "with-ft asset identifier expression must be typed".to_owned(),
-                )
-            })?
-            .clone();
+        // Traverse the contract principal
+        generator.traverse_expr(builder, token_contract)?;
 
-        // Traverse the asset identifier (contract principal + token name)
-        generator.traverse_expr(builder, asset_identifier)?;
-
-        // Write the asset identifier to memory so the host function can read it
-        let (asset_id_offset, asset_id_size) =
-            generator.create_call_stack_local(builder, &asset_identifier_ty, true, false);
-        generator.write_to_memory(builder, asset_id_offset, 0, &asset_identifier_ty)?;
+        // // Traverse the token name
+        generator.traverse_expr(builder, token_name)?; // "*"
 
         // Traverse the allowance amount (uint)
         generator.traverse_expr(builder, allowance)?;
 
-        // Write the allowance to memory (it's already on the stack as two i64s)
-        let allowance_ty = TypeSignature::UIntType;
-        let (allowance_offset, allowance_size) =
-            generator.create_call_stack_local(builder, &allowance_ty, true, false);
-        generator.write_to_memory(builder, allowance_offset, 0, &allowance_ty)?;
-
-        // Push the offsets and sizes to the data stack: asset_id_offset, asset_id_size, allowance_offset, allowance_size
-        builder
-            .local_get(asset_id_offset)
-            .i32_const(asset_id_size)
-            .local_get(allowance_offset)
-            .i32_const(allowance_size);
-
-        // Call the host interface function, `enter_with_ft`
-        builder.call(generator.func_by_name("stdlib.enter_with_ft"));
-
-        // Traverse the inner expression
-        generator.traverse_expr(builder, inner)?;
-
-        // Call the host interface function, `exit_with_ft`
-        builder.call(generator.func_by_name("stdlib.exit_with_ft"));
+        // Call the host interface function, `with_ft`
+        builder.call(generator.func_by_name("stdlib.with_ft"));
 
         Ok(())
     }
@@ -161,7 +146,7 @@ pub struct WithNft;
 
 impl Word for WithNft {
     fn name(&self) -> ClarityName {
-        "with-nft".into()
+        ClarityName::from_literal("with-nft")
     }
 }
 
@@ -177,52 +162,21 @@ impl ComplexWord for WithNft {
 
         self.charge(generator, builder, 0)?;
 
-        let asset_identifier = args.get_expr(0)?;
-        let allowance = args.get_expr(1)?;
-        let inner = args.get_expr(2)?;
+        let token_contract = args.get_expr(0)?;
+        let token_name = args.get_expr(1)?;
+        let allowance = args.get_expr(2)?;
 
-        // Get the type of the asset identifier (should be a tuple or principal)
-        let asset_identifier_ty = generator
-            .get_expr_type(asset_identifier)
-            .ok_or_else(|| {
-                GeneratorError::TypeError(
-                    "with-nft asset identifier expression must be typed".to_owned(),
-                )
-            })?
-            .clone();
+        // Traverse the contract principal
+        generator.traverse_expr(builder, token_contract)?;
 
-        // Traverse the asset identifier (contract principal + token name)
-        generator.traverse_expr(builder, asset_identifier)?;
+        // // Traverse the token name
+        generator.traverse_expr(builder, token_name)?; // "*"
 
-        // Write the asset identifier to memory so the host function can read it
-        let (asset_id_offset, asset_id_size) =
-            generator.create_call_stack_local(builder, &asset_identifier_ty, true, false);
-        generator.write_to_memory(builder, asset_id_offset, 0, &asset_identifier_ty)?;
-
-        // Traverse the allowance amount (uint)
+        // Traverse the allowances list
         generator.traverse_expr(builder, allowance)?;
 
-        // Write the allowance to memory (it's already on the stack as two i64s)
-        let allowance_ty = TypeSignature::UIntType;
-        let (allowance_offset, allowance_size) =
-            generator.create_call_stack_local(builder, &allowance_ty, true, false);
-        generator.write_to_memory(builder, allowance_offset, 0, &allowance_ty)?;
-
-        // Push the offsets and sizes to the data stack: asset_id_offset, asset_id_size, allowance_offset, allowance_size
-        builder
-            .local_get(asset_id_offset)
-            .i32_const(asset_id_size)
-            .local_get(allowance_offset)
-            .i32_const(allowance_size);
-
-        // Call the host interface function, `enter_with_nft`
-        builder.call(generator.func_by_name("stdlib.enter_with_nft"));
-
-        // Traverse the inner expression
-        generator.traverse_expr(builder, inner)?;
-
-        // Call the host interface function, `exit_with_nft`
-        builder.call(generator.func_by_name("stdlib.exit_with_nft"));
+        // Call the host interface function, `with_nft`
+        builder.call(generator.func_by_name("stdlib.with_nft"));
 
         Ok(())
     }
@@ -233,7 +187,7 @@ pub struct WithStacking;
 
 impl Word for WithStacking {
     fn name(&self) -> ClarityName {
-        "with-stacking".into()
+        ClarityName::from_literal("with-stacking")
     }
 }
 
@@ -250,7 +204,6 @@ impl ComplexWord for WithStacking {
         self.charge(generator, builder, 0)?;
 
         let allowance = args.get_expr(0)?;
-        let inner = args.get_expr(1)?;
 
         // Traverse the allowance amount (uint)
         generator.traverse_expr(builder, allowance)?;
@@ -266,14 +219,8 @@ impl ComplexWord for WithStacking {
             .local_get(allowance_offset)
             .i32_const(allowance_size);
 
-        // Call the host interface function, `enter_with_stacking`
-        builder.call(generator.func_by_name("stdlib.enter_with_stacking"));
-
-        // Traverse the inner expression
-        generator.traverse_expr(builder, inner)?;
-
-        // Call the host interface function, `exit_with_stacking`
-        builder.call(generator.func_by_name("stdlib.exit_with_stacking"));
+        // Call the host interface function, `with_stacking`
+        builder.call(generator.func_by_name("stdlib.with_stacking"));
 
         Ok(())
     }
@@ -284,7 +231,7 @@ pub struct WithStx;
 
 impl Word for WithStx {
     fn name(&self) -> ClarityName {
-        "with-stx".into()
+        ClarityName::from_literal("with-stx")
     }
 }
 
@@ -301,7 +248,6 @@ impl ComplexWord for WithStx {
         self.charge(generator, builder, 0)?;
 
         let allowance = args.get_expr(0)?;
-        let inner = args.get_expr(1)?;
 
         // Traverse the allowance amount (uint)
         generator.traverse_expr(builder, allowance)?;
@@ -317,14 +263,8 @@ impl ComplexWord for WithStx {
             .local_get(allowance_offset)
             .i32_const(allowance_size);
 
-        // Call the host interface function, `enter_with_stx`
-        builder.call(generator.func_by_name("stdlib.enter_with_stx"));
-
-        // Traverse the inner expression
-        generator.traverse_expr(builder, inner)?;
-
-        // Call the host interface function, `exit_with_stx`
-        builder.call(generator.func_by_name("stdlib.exit_with_stx"));
+        // Call the host interface function, `with_stx`
+        builder.call(generator.func_by_name("stdlib.with_stx"));
 
         Ok(())
     }
@@ -1339,7 +1279,7 @@ mod tests {
         }
 
         #[test]
-        fn as_contract_with_all_assets_unsafe(){
+        fn as_contract_with_all_assets_unsafe() {
             let mut env = TestEnvironment::default();
             let contract = r#"
             (define-non-fungible-token token uint)
@@ -1366,7 +1306,7 @@ mod tests {
               )
             )
             "#;
-            
+
             env.init_contract_with_snippet("contract", contract)
                 .expect("failed to init contract");
             crosscheck_with_env(
@@ -1377,43 +1317,43 @@ mod tests {
             );
         }
 
-//         #[test]
-//         fn as_contract_with_nft() {
-//             let mut env = TestEnvironment::default();
-//             let contract = r#"
-// (define-non-fungible-token token uint)
+        //         #[test]
+        //         fn as_contract_with_nft() {
+        //             let mut env = TestEnvironment::default();
+        //             let contract = r#"
+        // (define-non-fungible-token token uint)
 
-// (define-public (mint-nft (asset uint)) 
-//   (begin
-//     (try! 
-//       (nft-mint? token asset current-contract)
-//     )
-//     (ok true)
-//   )
-// )
+        // (define-public (mint-nft (asset uint))
+        //   (begin
+        //     (try!
+        //       (nft-mint? token asset current-contract)
+        //     )
+        //     (ok true)
+        //   )
+        // )
 
-// (define-public (transfer-token (asset uint))
-//   (let (
-//       (recipient tx-sender)
-//     )
-//     (try!
-//       (as-contract? ((with-nft .test "token" (list u1)))
-//         (try! (nft-transfer? token asset current-contract recipient))
-//       )
-//     )
-//     (ok true)
-//   )
-// )
-// "#;
+        // (define-public (transfer-token (asset uint))
+        //   (let (
+        //       (recipient tx-sender)
+        //     )
+        //     (try!
+        //       (as-contract? ((with-nft .test "token" (list u1)))
+        //         (try! (nft-transfer? token asset current-contract recipient))
+        //       )
+        //     )
+        //     (ok true)
+        //   )
+        // )
+        // "#;
 
-//             env.init_contract_with_snippet("contract", contract)
-//                 .expect("failed to init contract");
-//             crosscheck_with_env(
-//                 "(contract-call? .contract mint-nft u1)
-//                 (contract-call? .contract transfer-token u1)",
-//                 Ok(Some(Value::okay_true())),
-//                 env,
-//             );
-//         }
+        //             env.init_contract_with_snippet("contract", contract)
+        //                 .expect("failed to init contract");
+        //             crosscheck_with_env(
+        //                 "(contract-call? .contract mint-nft u1)
+        //                 (contract-call? .contract transfer-token u1)",
+        //                 Ok(Some(Value::okay_true())),
+        //                 env,
+        //             );
+        //         }
     }
 }
