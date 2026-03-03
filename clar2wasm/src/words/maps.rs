@@ -115,15 +115,17 @@ impl ComplexWord for MapGet {
         // Push the key to the data stack
         generator.set_expr_type(key, key_ty.clone())?;
         generator.traverse_expr(builder, key)?;
-        let mut serialized_key_size_opt: Option<BorrowedLocal> = None;
-        if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
-            let serialized_key_size = generator.borrow_local(ValType::I32);
-            // In this case we need to compute the serialized key size
-            // It is ok to not have it set for < 2.05 as it's not used in that case
-            generator.serialization_size(builder, &key_ty)?;
-            builder.local_set(*serialized_key_size);
-            serialized_key_size_opt = Some(serialized_key_size);
-        }
+        let serialized_key_size_opt =
+            if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+                let serialized_key_size = generator.borrow_local(ValType::I32);
+                // In this case we need to compute the serialized key size
+                // It is ok to not have it set for < 2.05 as it's not used in that case
+                generator.serialization_size(builder, &key_ty)?;
+                builder.local_set(*serialized_key_size);
+                Some(serialized_key_size)
+            } else {
+                None
+            };
 
         // Write the key to the memory (it's already on the data stack)
         let key_size = generator.write_to_memory(builder, key_offset, 0, &key_ty)?;
@@ -148,16 +150,17 @@ impl ComplexWord for MapGet {
         // back out, and place the value on the data stack.
         generator.read_from_memory(builder, return_offset, 0, &value_type)?;
 
-        let mut serialized_size_opt: Option<BorrowedLocal> = None;
-        if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+        let serialized_size_opt = if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
             let serialized_size = generator.borrow_local(ValType::I32);
             // It is ok to not have it set for < 2.05 as it's not used in that case
             generator.serialization_size(builder, &value_type)?;
             builder.local_set(*serialized_size);
-            serialized_size_opt = Some(serialized_size);
+            Some(serialized_size)
         } else {
             default_cost_value_and_key_size(&value_type, &key_ty, generator, builder, self)?;
-        }
+            None
+        };
+
         let block_ty = InstrSeqType::new(&mut generator.module.types, &[], &[]);
 
         // In > 2.05 we have three different costs depending if
@@ -172,19 +175,11 @@ impl ComplexWord for MapGet {
                 // The cost in < 2.05 has already been handled before
                 let cost = generator.borrow_local(ValType::I32);
 
-                let serialized_size = serialized_size_opt.ok_or_else(|| {
-                    GeneratorError::InternalError(
-                        "serialized_size_opt local should have been set".to_owned(),
-                    )
-                })?;
+                let serialized_size = ResolvedLocal::new(serialized_size_opt)?;
+                let serialized_key_size = ResolvedLocal::new(serialized_key_size_opt)?;
 
-                let serialized_key_size = serialized_key_size_opt.ok_or_else(|| {
-                    GeneratorError::InternalError(
-                        "serialized_key_size_opt local should have been set".to_owned(),
-                    )
-                })?;
                 success_block
-                    .local_get(*serialized_size)
+                    .local_get(*serialized_size.local)
                     // Size of none
                     .i32_const(1)
                     .binop(BinaryOp::I32Ne);
@@ -193,15 +188,15 @@ impl ComplexWord for MapGet {
                     |then| {
                         // When the element the operation is performed on was found in the map
                         // Then we charge the serialized size of the entry we retrieved + serialized size of the key
-                        then.local_get(*serialized_size)
-                            .local_get(*serialized_key_size)
+                        then.local_get(*serialized_size.local)
+                            .local_get(*serialized_key_size.local)
                             .binop(BinaryOp::I32Add)
                             .local_set(*cost);
                     },
                     |else_| {
                         // When the element the operation is performed on was not found in the map
                         // Then we only charge the serialized size of the key
-                        else_.local_get(*serialized_key_size).local_set(*cost);
+                        else_.local_get(*serialized_key_size.local).local_set(*cost);
                     },
                 );
                 self.charge(generator, &mut success_block, *cost)?;
@@ -249,7 +244,7 @@ fn traverse_storage_operation(
     builder: &mut walrus::InstrSeqBuilder,
     _expr: &SymbolicExpression,
     args: &[SymbolicExpression],
-    function_id: &FunctionId,
+    function_id: FunctionId,
 ) -> Result<(), GeneratorError> {
     check_args!(generator, builder, 3, args.len(), ArgumentCountCheck::Exact);
 
@@ -283,14 +278,15 @@ fn traverse_storage_operation(
     generator.set_expr_type(key, key_ty.clone())?;
     generator.traverse_expr(builder, key)?;
 
-    let mut serialized_key_size_opt: Option<BorrowedLocal> = None;
-    if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+    let serialized_key_size_opt = if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
         let serialized_key_size = generator.borrow_local(ValType::I32);
         // It is ok to not have it set for < 2.05 as it's not used in that case
         generator.serialization_size(builder, &key_ty)?;
         builder.local_set(*serialized_key_size);
-        serialized_key_size_opt = Some(serialized_key_size);
-    }
+        Some(serialized_key_size)
+    } else {
+        None
+    };
 
     // Write the key to the memory (it's already on the data stack)
     let key_size = generator.write_to_memory(builder, key_offset, 0, &key_ty)?;
@@ -304,14 +300,16 @@ fn traverse_storage_operation(
     // Push the value to the data stack
     generator.set_expr_type(value, value_type.clone())?;
     generator.traverse_expr(builder, value)?;
-    let mut value_serialized_size_opt: Option<BorrowedLocal> = None;
-    if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+    let value_serialized_size_opt = if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05
+    {
         // It is ok to not have it set for < 2.05 as it's not used in that case
         let value_serialized_size = generator.borrow_local(ValType::I32);
         generator.serialization_size(builder, &value_type)?;
         builder.local_set(*value_serialized_size);
-        value_serialized_size_opt = Some(value_serialized_size);
-    }
+        Some(value_serialized_size)
+    } else {
+        None
+    };
 
     // Write the value to the memory (it's already on the data stack)
     let val_size = generator.write_to_memory(builder, val_offset, 0, &value_type)?;
@@ -320,7 +318,7 @@ fn traverse_storage_operation(
     builder.local_get(val_offset).i32_const(val_size as i32);
 
     // Call the host interface function, `map_set`
-    builder.call(*function_id);
+    builder.call(function_id);
 
     if generator.contract_analysis.epoch < StacksEpochId::Epoch2_05 {
         default_cost_value_and_key_size(&value_type, &key_ty, generator, builder, word)?;
@@ -343,18 +341,10 @@ fn traverse_storage_operation(
             // The cost in < 2.05 has already been handled before
             let cost = generator.borrow_local(ValType::I32);
 
-            let value_serialized_size = value_serialized_size_opt.ok_or_else(|| {
-                GeneratorError::InternalError(
-                    "value_serialized_size_opt local should have been set".to_owned(),
-                )
-            })?;
-            let serialized_key_size = serialized_key_size_opt.ok_or_else(|| {
-                GeneratorError::InternalError(
-                    "serialized_key_size_opt local should have been set".to_owned(),
-                )
-            })?;
+            let value_serialized_size = ResolvedLocal::new(value_serialized_size_opt)?;
+            let serialized_key_size = ResolvedLocal::new(serialized_key_size_opt)?;
             success_block
-                .local_get(*serialized_key_size)
+                .local_get(*serialized_key_size.local)
                 .local_set(*cost)
                 .local_get(*entry_status)
                 .if_else(
@@ -362,7 +352,7 @@ fn traverse_storage_operation(
                     |then| {
                         // When the element the operation is performed on was found in the map
                         // Then we charge the serialized size of the entry we want to store + serialized size of the key
-                        then.local_get(*value_serialized_size)
+                        then.local_get(*value_serialized_size.local)
                             .local_get(*cost)
                             .binop(BinaryOp::I32Add)
                             .local_set(*cost);
@@ -436,7 +426,7 @@ impl ComplexWord for MapSet {
             builder,
             _expr,
             args,
-            &generator.func_by_name("stdlib.map_set"),
+            generator.func_by_name("stdlib.map_set"),
         )
     }
 }
@@ -464,7 +454,7 @@ impl ComplexWord for MapInsert {
             builder,
             _expr,
             args,
-            &generator.func_by_name("stdlib.map_insert"),
+            generator.func_by_name("stdlib.map_insert"),
         )
     }
 }
@@ -518,15 +508,17 @@ impl ComplexWord for MapDelete {
         // Push the key to the data stack
         generator.set_expr_type(key, key_ty.clone())?;
         generator.traverse_expr(builder, key)?;
-        let mut serialized_size_opt: Option<BorrowedLocal> = None;
+        let serialized_size_opt=
         // Note that we have different costs for < 2.05 and >= 2.05.
         if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
             // It is ok to not have it set for < 2.05 as it's not used in that case
             let serialize_size = generator.borrow_local(ValType::I32);
             generator.serialization_size(builder, &key_ty)?;
             builder.local_set(*serialize_size);
-            serialized_size_opt = Some(serialize_size);
-        }
+             Some(serialize_size)
+        }else{
+            None
+        };
 
         // Write the key to the memory (it's already on the data stack)
         let key_size = generator.write_to_memory(builder, key_offset, 0, &key_ty)?;
@@ -550,11 +542,13 @@ impl ComplexWord for MapDelete {
             // 2) for cost computation in case of an interpreter error in epoch >= 2.05
             match key_type.size() {
                 Ok(key_size) => {
-                    let cost = generator.borrow_local(ValType::I32);
-                    builder.i32_const(key_size as i32).local_set(*cost);
-                    word.charge(generator, builder, *cost)?;
+                    word.charge(generator, builder, key_size)?;
                 }
-                Err(_) => todo!(),
+                Err(_) => {
+                    builder
+                        .i32_const(ErrorMap::SignatureTypeSizeCheckError as i32)
+                        .call(generator.func_by_name("stdlib.runtime-error"));
+                }
             }
             Ok(())
         };
@@ -575,15 +569,11 @@ impl ComplexWord for MapDelete {
             let mut success_block = builder.dangling_instr_seq(block_ty);
 
             if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
-                let serialized_size = serialized_size_opt.ok_or_else(|| {
-                    GeneratorError::InternalError(
-                        "serialized_size_opt local should have been set".to_owned(),
-                    )
-                })?;
+                let serialized_size = ResolvedLocal::new(serialized_size_opt)?;
                 // The cost in < 2.05 has already been handled before
                 let cost = generator.borrow_local(ValType::I32);
                 success_block
-                    .local_get(*serialized_size)
+                    .local_get(*serialized_size.local)
                     .local_set(*cost)
                     .local_get(*result)
                     .if_else(
@@ -652,13 +642,7 @@ fn default_cost_value_and_key_size(
 ) -> Result<(), GeneratorError> {
     match (value_type.size(), key_type.size()) {
         (Ok(value_size), Ok(key_size)) => {
-            let cost = generator.borrow_local(ValType::I32);
-            builder
-                .i32_const(value_size as i32)
-                .i32_const(key_size as i32)
-                .binop(BinaryOp::I32Add)
-                .local_set(*cost);
-            word.charge(generator, builder, *cost)?;
+            word.charge(generator, builder, value_size + key_size)?;
         }
         (_, Err(_)) | (Err(_), _) => {
             builder
@@ -667,6 +651,21 @@ fn default_cost_value_and_key_size(
         }
     }
     Ok(())
+}
+
+struct ResolvedLocal {
+    local: BorrowedLocal,
+}
+
+impl ResolvedLocal {
+    pub fn new(opt: Option<BorrowedLocal>) -> Result<Self, GeneratorError> {
+        let borrowed_local = opt.ok_or_else(|| {
+            GeneratorError::InternalError("optional local should have been set".to_owned())
+        })?;
+        Ok(ResolvedLocal {
+            local: borrowed_local,
+        })
+    }
 }
 #[cfg(test)]
 mod tests {
