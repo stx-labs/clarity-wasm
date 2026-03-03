@@ -157,7 +157,7 @@ impl ComplexWord for MapGet {
             builder.local_set(*serialized_size);
             Some(serialized_size)
         } else {
-            default_cost_value_and_key_size(&value_type, &key_ty, generator, builder, self)?;
+            charge_default_cost_value_and_key_size(&value_type, &key_ty, generator, builder, self)?;
             None
         };
 
@@ -209,7 +209,7 @@ impl ComplexWord for MapGet {
             let mut error_block = builder.dangling_instr_seq(block_ty);
             if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
                 // The cost in < 2.05 has already been handled before
-                default_cost_value_and_key_size(
+                charge_default_cost_value_and_key_size(
                     &value_type,
                     &key_ty,
                     generator,
@@ -321,7 +321,7 @@ fn traverse_storage_operation(
     builder.call(function_id);
 
     if generator.contract_analysis.epoch < StacksEpochId::Epoch2_05 {
-        default_cost_value_and_key_size(&value_type, &key_ty, generator, builder, word)?;
+        charge_default_cost_value_and_key_size(&value_type, &key_ty, generator, builder, word)?;
     }
 
     let entry_status = generator.borrow_local(ValType::I32);
@@ -374,7 +374,7 @@ fn traverse_storage_operation(
 
         if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
             // The cost in < 2.05 has already been handled before
-            default_cost_value_and_key_size(
+            charge_default_cost_value_and_key_size(
                 &value_type,
                 &key_ty,
                 generator,
@@ -491,7 +491,7 @@ impl ComplexWord for MapDelete {
 
         // This will compute the key type size and charge on it. If this operation fails,
         // we still need to be able to compile the contract, so we generate a runtime error.
-        let cost_function_key_type_size = |generator: &mut WasmGenerator,
+        let charge_default_cost_key_size = |generator: &mut WasmGenerator,
                                            builder: &mut walrus::InstrSeqBuilder,
                                            key_type: &TypeSignature,
                                            word: &dyn ComplexWord|
@@ -512,14 +512,14 @@ impl ComplexWord for MapDelete {
             Ok(())
         };
 
-        // In epoche >= 2.05, we generate a local to compute intermediary results used in the
+        // In epoch >= 2.05, we generate a local to compute intermediary results used in the
         // cost tracking. In this case, the cost tracking charge is applied after the delete operation.
-        // In epoche < 2.05, the charge is immediately computed like it is in the interpreter.
+        // In epoch < 2.05, the charge is immediately computed like it is in the interpreter.
         let post205_cost_local = if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
             let l = generator.borrow_local(ValType::I32);
             Some(l)
         } else {
-            cost_function_key_type_size(generator, builder, &key_ty, self)?;
+            charge_default_cost_key_size(generator, builder, &key_ty, self)?;
             None
         };
 
@@ -592,7 +592,7 @@ impl ComplexWord for MapDelete {
 
             // in epoch >= 2.05, we charge depending on the size of the key.
             if post205_cost_local.is_some() {
-                cost_function_key_type_size(generator, &mut error_block, &key_ty, self)?;
+                charge_default_cost_key_size(generator, &mut error_block, &key_ty, self)?;
             }
 
             // Throws back the runtime error that occurred in the interpreter after charging the cost
@@ -623,7 +623,7 @@ impl ComplexWord for MapDelete {
 /// The two cases it is used in are:
 /// 1) for cost computation in epoch < 2.05
 /// 2) for cost computation in case of an interpreter error in epoch >= 2.05
-fn default_cost_value_and_key_size(
+fn charge_default_cost_value_and_key_size(
     value_type: &TypeSignature,
     key_type: &TypeSignature,
     generator: &mut WasmGenerator,
