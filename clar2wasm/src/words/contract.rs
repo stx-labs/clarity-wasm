@@ -35,17 +35,23 @@ impl ComplexWord for AsContract {
         _expr: &SymbolicExpression,
         args: &[SymbolicExpression],
     ) -> Result<(), GeneratorError> {
-        let inner;
+        // The two implementations need to be seperated as the linker functions return return different results
         match self {
             Self::Original => {
                 check_args!(generator, builder, 1, args.len(), ArgumentCountCheck::Exact);
 
                 self.charge(generator, builder, 0)?;
 
-                inner = args.get_expr(0)?;
+                let inner = args.get_expr(0)?;
 
-                // Call the host interface function, `enter_as_contract`
-                builder.call(generator.func_by_name("stdlib.enter_as_contract"));
+                // Call the host interface function, `enter_as_contract_original`
+                builder.call(generator.func_by_name("stdlib.enter_as_contract_original"));
+
+                // Traverse the inner expression
+                generator.traverse_expr(builder, inner)?;
+
+                // Call the host interface function, `exit_as_contract_original`
+                builder.call(generator.func_by_name("stdlib.exit_as_contract_original"));
             }
             Self::New => {
                 check_args!(generator, builder, 2, args.len(), ArgumentCountCheck::Exact);
@@ -53,21 +59,20 @@ impl ComplexWord for AsContract {
                 // TODO: add cost tracking #783
                 let allowance = args.get_expr(0)?;
 
-                inner = args.get_expr(1)?;
+                let inner = args.get_expr(1)?;
 
-                // Call the host interface function, `enter_as_contract`
-                builder.call(generator.func_by_name("stdlib.enter_as_contract"));
+                // Call the host interface function, `enter_as_contract_new`
+                builder.call(generator.func_by_name("stdlib.enter_as_contract_new"));
 
                 generator.traverse_expr(builder, allowance)?;
+
+                // Traverse the inner expression
+                generator.traverse_expr(builder, inner)?;
+
+                // Call the host interface function, `exit_as_contract_new`
+                builder.call(generator.func_by_name("stdlib.exit_as_contract_new"));
             }
         }
-
-        // Traverse the inner expression
-        generator.traverse_expr(builder, inner)?;
-
-        // Call the host interface function, `exit_as_contract`
-        builder.call(generator.func_by_name("stdlib.exit_as_contract"));
-
         Ok(())
     }
 }
@@ -128,8 +133,8 @@ impl ComplexWord for WithFt {
         // Traverse the contract principal
         generator.traverse_expr(builder, token_contract)?;
 
-        // // Traverse the token name
-        generator.traverse_expr(builder, token_name)?; // "*"
+        // Traverse the token name
+        generator.traverse_expr(builder, token_name)?;
 
         // Traverse the allowance amount (uint)
         generator.traverse_expr(builder, allowance)?;
@@ -169,8 +174,8 @@ impl ComplexWord for WithNft {
         // Traverse the contract principal
         generator.traverse_expr(builder, token_contract)?;
 
-        // // Traverse the token name
-        generator.traverse_expr(builder, token_name)?; // "*"
+        // Traverse the token name
+        generator.traverse_expr(builder, token_name)?;
 
         // Traverse the allowances list
         generator.traverse_expr(builder, allowance)?;
@@ -199,7 +204,7 @@ impl ComplexWord for WithStacking {
         _expr: &SymbolicExpression,
         args: &[SymbolicExpression],
     ) -> Result<(), GeneratorError> {
-        check_args!(generator, builder, 2, args.len(), ArgumentCountCheck::Exact);
+        check_args!(generator, builder, 1, args.len(), ArgumentCountCheck::Exact);
 
         self.charge(generator, builder, 0)?;
 
@@ -207,17 +212,6 @@ impl ComplexWord for WithStacking {
 
         // Traverse the allowance amount (uint)
         generator.traverse_expr(builder, allowance)?;
-
-        // Write the allowance to memory (it's already on the stack as two i64s)
-        let allowance_ty = TypeSignature::UIntType;
-        let (allowance_offset, allowance_size) =
-            generator.create_call_stack_local(builder, &allowance_ty, true, false);
-        generator.write_to_memory(builder, allowance_offset, 0, &allowance_ty)?;
-
-        // Push the offset and size to the data stack
-        builder
-            .local_get(allowance_offset)
-            .i32_const(allowance_size);
 
         // Call the host interface function, `with_stacking`
         builder.call(generator.func_by_name("stdlib.with_stacking"));
@@ -243,7 +237,7 @@ impl ComplexWord for WithStx {
         _expr: &SymbolicExpression,
         args: &[SymbolicExpression],
     ) -> Result<(), GeneratorError> {
-        check_args!(generator, builder, 2, args.len(), ArgumentCountCheck::Exact);
+        check_args!(generator, builder, 1, args.len(), ArgumentCountCheck::Exact);
 
         self.charge(generator, builder, 0)?;
 
@@ -251,17 +245,6 @@ impl ComplexWord for WithStx {
 
         // Traverse the allowance amount (uint)
         generator.traverse_expr(builder, allowance)?;
-
-        // Write the allowance to memory (it's already on the stack as two i64s)
-        let allowance_ty = TypeSignature::UIntType;
-        let (allowance_offset, allowance_size) =
-            generator.create_call_stack_local(builder, &allowance_ty, true, false);
-        generator.write_to_memory(builder, allowance_offset, 0, &allowance_ty)?;
-
-        // Push the offset and size to the data stack
-        builder
-            .local_get(allowance_offset)
-            .i32_const(allowance_size);
 
         // Call the host interface function, `with_stx`
         builder.call(generator.func_by_name("stdlib.with_stx"));

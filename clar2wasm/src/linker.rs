@@ -1,7 +1,8 @@
+use std::collections::HashMap;
 use std::io::{Cursor, Write as _};
 
 use clarity::vm::callables::{DefineType, DefinedFunction};
-use clarity::vm::contexts::{ExecutionState, InvocationContext};
+use clarity::vm::contexts::{AssetMap, ExecutionState, InvocationContext};
 use clarity::vm::costs::{constants as cost_constants, CostTracker};
 use clarity::vm::database::{ClarityDatabase, STXBalance, StoreType};
 use clarity::vm::errors::{
@@ -9,6 +10,7 @@ use clarity::vm::errors::{
     WasmError,
 };
 use clarity::vm::functions::crypto::{pubkey_to_address_v1, pubkey_to_address_v2};
+use clarity::vm::functions::post_conditions::Allowance;
 use clarity::vm::types::{
     AssetIdentifier, BuffData, BufferLength, FunctionType, ListTypeData, PrincipalData,
     SequenceData, SequenceSubtype, StacksAddressExtensions, TraitIdentifier, TupleData,
@@ -54,8 +56,10 @@ pub fn link_host_functions(
     link_is_in_regtest_fn(linker)?;
     link_is_in_mainnet_fn(linker)?;
     link_chain_id_fn(linker)?;
-    link_enter_as_contract_fn(linker)?;
-    link_exit_as_contract_fn(linker)?;
+    link_enter_as_contract_original_fn(linker)?;
+    link_exit_as_contract_original_fn(linker)?;
+    link_enter_as_contract_new_fn(linker)?;
+    link_exit_as_contract_new_fn(linker)?;
     link_with_all_assets_unsafe_fn(linker)?;
     link_with_ft_fn(linker)?;
     link_with_nft_fn(linker)?;
@@ -1212,16 +1216,16 @@ fn link_chain_id_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
         })
 }
 
-/// Link host interface function, `enter_as_contract`, into the Wasm module.
+/// Link host interface function, `enter_as_contract_original`, into the Wasm module.
 /// This function is called before processing the inner-expression of
 /// `as-contract`.
-fn link_enter_as_contract_fn(
+fn link_enter_as_contract_original_fn(
     linker: &mut Linker<ClarityWasmContext>,
 ) -> Result<(), VmExecutionError> {
     linker
         .func_wrap(
             "clarity",
-            "enter_as_contract",
+            "enter_as_contract_original",
             |mut caller: Caller<'_, ClarityWasmContext>| {
                 let contract_principal: PrincipalData = caller
                     .data()
@@ -1229,6 +1233,62 @@ fn link_enter_as_contract_fn(
                     .contract_identifier
                     .clone()
                     .into();
+                caller.data_mut().push_sender(contract_principal.clone());
+                caller.data_mut().push_caller(contract_principal);
+            },
+        )
+        .map(|_| ())
+        .map_err(|e| {
+            VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
+                "enter_as_contract_original".to_string(),
+                e,
+            ))
+        })
+}
+
+/// Link host interface function, `exit_as_contract_original`, into the Wasm module.
+/// This function is after before processing the inner-expression of
+/// `as-contract`, and is used to restore the caller and sender.
+fn link_exit_as_contract_original_fn(
+    linker: &mut Linker<ClarityWasmContext>,
+) -> Result<(), VmExecutionError> {
+    linker
+        .func_wrap(
+            "clarity",
+            "exit_as_contract_original",
+            |mut caller: Caller<'_, ClarityWasmContext>| {
+                caller.data_mut().pop_sender()?;
+                caller.data_mut().pop_caller()?;
+                Ok(())
+            },
+        )
+        .map(|_| ())
+        .map_err(|e| {
+            VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
+                "exit_as_contract_original".to_string(),
+                e,
+            ))
+        })
+}
+
+/// Link host interface function, `enter_as_contract_new`, into the Wasm module.
+/// This function is called before processing the allowances and inner-expression of
+/// `as-contract?`.
+fn link_enter_as_contract_new_fn(
+    linker: &mut Linker<ClarityWasmContext>,
+) -> Result<(), VmExecutionError> {
+    linker
+        .func_wrap(
+            "clarity",
+            "enter_as_contract_new",
+            |mut caller: Caller<'_, ClarityWasmContext>| {
+                let contract_principal: PrincipalData = caller
+                    .data()
+                    .contract_context()
+                    .contract_identifier
+                    .clone()
+                    .into();
+                caller.data_mut().global_context.begin();
                 caller.data_mut().push_as_contract();
                 caller.data_mut().push_sender(contract_principal.clone());
                 caller.data_mut().push_caller(contract_principal);
@@ -1237,27 +1297,56 @@ fn link_enter_as_contract_fn(
         .map(|_| ())
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
-                "enter_as_contract".to_string(),
+                "enter_as_contract_new".to_string(),
                 e,
             ))
         })
 }
 
-/// Link host interface function, `exit_as_contract`, into the Wasm module.
+/// Link host interface function, `exit_as_contract_new`, into the Wasm module.
 /// This function is after before processing the inner-expression of
-/// `as-contract`, and is used to restore the caller and sender.
-fn link_exit_as_contract_fn(
+/// `as-contract?`, and is used to restore the caller, sender and check allowances.
+fn link_exit_as_contract_new_fn(
     linker: &mut Linker<ClarityWasmContext>,
 ) -> Result<(), VmExecutionError> {
     linker
         .func_wrap(
             "clarity",
-            "exit_as_contract",
+            "exit_as_contract_new",
             |mut caller: Caller<'_, ClarityWasmContext>| {
-                caller.data_mut().pop_as_contract();
-                caller.data_mut().pop_sender()?;
-                caller.data_mut().pop_caller()?;
-                Ok(())
+                // we need to restore the current caller and sender. We pop both and check if we did set
+                // them correctly before. We keep the sender (current-contract) as owner for checking the
+                // allowances.
+                let owner = {
+                    let owner = caller.data_mut().pop_sender();
+                    let _ = caller.data_mut().pop_caller()?;
+                    owner?
+                };
+
+                let allowances = caller.data_mut().pop_as_contract().unwrap_or_default();
+                if allowances.is_empty() {
+                    caller
+                        .data_mut()
+                        .global_context
+                        .commit()
+                        .map_err(wasmtime::Error::new)?;
+                    return Ok((1i32, 0i32, 0i64, 0i64)); // no violation
+                }
+
+                let asset_map = caller.data_mut().global_context.get_readonly_asset_map()?;
+
+                match check_allowances(&owner, allowances, asset_map)? {
+                    None => {
+                        caller.data_mut().global_context.commit()?;
+                        Ok((1i32, 0i32, 0i64, 0i64)) // no violation
+                    }
+                    Some(violation_index) => {
+                        caller.data_mut().global_context.roll_back()?;
+                        let lo = violation_index as i64;
+                        let hi = (violation_index >> 64) as i64;
+                        Ok((0i32, 0i32, lo, hi)) // violation — Wasm returns (err index)
+                    }
+                }
             },
         )
         .map(|_| ())
@@ -1267,6 +1356,128 @@ fn link_exit_as_contract_fn(
                 e,
             ))
         })
+}
+
+// Checker function for the asset allowances
+fn check_allowances(
+    owner: &PrincipalData,
+    allowances: Vec<Allowance>,
+    assets: &AssetMap,
+) -> Result<Option<u128>, VmExecutionError> {
+    const MAX_ALLOWANCES: usize = 128;
+    let mut stx_allowances: Vec<(usize, u128)> = Vec::new();
+    let mut ft_allowances: HashMap<AssetIdentifier, Vec<(usize, u128)>> = HashMap::new();
+    let mut nft_allowances: HashMap<AssetIdentifier, (usize, Vec<Value>)> = HashMap::new();
+    let mut stacking_allowances: Vec<(usize, u128)> = Vec::new();
+
+    for (i, allowance) in allowances.into_iter().enumerate() {
+        match allowance {
+            Allowance::All => return Ok(None),
+            Allowance::Stx(stx) => {
+                stx_allowances.push((i, stx.amount));
+            }
+            Allowance::Ft(ft) => {
+                ft_allowances
+                    .entry(ft.asset)
+                    .or_default()
+                    .push((i, ft.amount));
+            }
+            Allowance::Nft(nft) => {
+                let (_, vec) = nft_allowances
+                    .entry(nft.asset)
+                    .or_insert_with(|| (i, Vec::new()));
+                vec.extend(nft.asset_ids);
+            }
+            Allowance::Stacking(stacking) => {
+                stacking_allowances.push((i, stacking.amount));
+            }
+        }
+    }
+
+    let idx_to_u128 = |idx: usize| {
+        u128::try_from(idx).map_err(|_| VmExecutionError::Wasm(WasmError::AllowanceIndexOverflow))
+    };
+
+    // Check STX movements
+    if let Some(stx_moved) = assets.get_stx(owner) {
+        if stx_allowances.is_empty() {
+            return Ok(Some(MAX_ALLOWANCES as u128));
+        }
+        for (index, allowance) in &stx_allowances {
+            if stx_moved > *allowance {
+                return Ok(Some(idx_to_u128(*index)?));
+            }
+        }
+    }
+
+    // Check STX burns
+    if let Some(stx_burned) = assets.get_stx_burned(owner) {
+        if stx_allowances.is_empty() {
+            return Ok(Some(MAX_ALLOWANCES as u128));
+        }
+        for (index, allowance) in &stx_allowances {
+            if stx_burned > *allowance {
+                return Ok(Some(idx_to_u128(*index)?));
+            }
+        }
+    }
+
+    // Check FT movements
+    if let Some(ft_moved) = assets.get_all_fungible_tokens(owner) {
+        for (asset, amount_moved) in ft_moved {
+            let mut merged: Vec<(usize, u128)> = Vec::new();
+
+            if let Some(v) = ft_allowances.get(asset) {
+                merged.extend(v.iter().cloned());
+            }
+            if let Some(wildcard_vec) = ft_allowances.get(&AssetIdentifier {
+                contract_identifier: asset.contract_identifier.clone(),
+                asset_name: ClarityName::from_literal("*"),
+            }) {
+                merged.extend(wildcard_vec.iter().cloned());
+            }
+
+            if merged.is_empty() {
+                return Ok(Some(MAX_ALLOWANCES as u128));
+            }
+
+            merged.sort_by_key(|(idx, _)| *idx);
+
+            for (index, allowance) in merged {
+                if *amount_moved > allowance {
+                    return Ok(Some(idx_to_u128(index)?));
+                }
+            }
+        }
+    }
+
+    // Check NFT movements
+    if let Some(nft_moved) = assets.get_all_nonfungible_tokens(owner) {
+        for (asset, ids_moved) in nft_moved {
+            let Some((index, allowed_ids)) = nft_allowances.get(asset) else {
+                return Ok(Some(MAX_ALLOWANCES as u128));
+            };
+            for id in ids_moved {
+                if !allowed_ids.contains(id) {
+                    return Ok(Some(idx_to_u128(*index)?));
+                }
+            }
+        }
+    }
+
+    // Check stacking
+    if let Some(stacking_amount) = assets.get_stacking(owner) {
+        if stacking_allowances.is_empty() {
+            return Ok(Some(MAX_ALLOWANCES as u128));
+        }
+        for (index, allowance) in &stacking_allowances {
+            if stacking_amount > *allowance {
+                return Ok(Some(idx_to_u128(*index)?));
+            }
+        }
+    }
+
+    Ok(None)
 }
 
 /// Link host interface function, `with_all_assets_unsafe`, into the Wasm module.
@@ -1877,15 +2088,6 @@ fn link_stx_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), V
                     ));
                 }
 
-                let allowance = caller.data_mut().check_stx_allowance(amount)?;
-                // Check if we're in an asset context with STX allowances
-                // If so, check if this transfer would exceed the allowance
-                if !caller.data().asset_context_stack.is_empty() && allowance.0 {
-                    // Allowance exceeded - return (err allwance-index) - response format: (0, 0, index, 0)
-                    // index will less likely be a big number high will always be 0.
-                    return Ok((0i32, 0i32, allowance.1 as i64, 0i64));
-                }
-
                 // loading sender/recipient principals and balances
                 caller
                     .data_mut()
@@ -2375,19 +2577,6 @@ fn link_ft_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Vm
                         TransferTokenErrorCodes::SENDER_IS_RECIPIENT as i64,
                         0i64,
                     ));
-                }
-
-                // Check if we're in an asset context with allowances
-                // If so, check if this transfer would exceed the allowance
-                if !caller.data().asset_context_stack.is_empty() {
-                    let allowance =
-                        caller
-                            .data_mut()
-                            .check_ft_allowance(&contract_identifier, name, amount)?;
-                    if allowance.0 {
-                        // Allowance exceeded - return (err u0) - response format: (0, 0, 0, 0)
-                        return Ok((0i32, 0i32, allowance.1 as i64, 0i64));
-                    }
                 }
 
                 let ft_info = caller
@@ -2970,20 +3159,6 @@ fn link_nft_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), V
                         TransferAssetErrorCodes::SENDER_IS_RECIPIENT as i64,
                         0i64,
                     ));
-                }
-
-                // Check if we're in an asset context with allowances
-                // If so, check if this transfer would exceed the allowance
-                if !caller.data().asset_context_stack.is_empty() {
-                    let asset_id = AssetIdentifier {
-                        contract_identifier: contract_identifier.clone(),
-                        asset_name: asset_name.clone(),
-                    };
-                    let allowance = caller.data_mut().check_nft_allowance(&asset_id, &asset)?;
-                    if allowance.0 {
-                        // Allowance exceeded - return (err u0) - response format: (0, 0, 0, 0)
-                        return Ok((0i32, 0i32, allowance.1 as i64, 0i64));
-                    }
                 }
 
                 let current_owner = match caller.data_mut().global_context.database.get_nft_owner(
@@ -6129,14 +6304,32 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
         Ok((0i64, 0i64))
     })?;
 
-    linker.func_wrap("clarity", "enter_as_contract", |_: Caller<'_, ()>| {
+    linker.func_wrap(
+        "clarity",
+        "enter_as_contract_original",
+        |_: Caller<'_, ()>| {
+            println!("as-contract: enter");
+            Ok(())
+        },
+    )?;
+
+    linker.func_wrap(
+        "clarity",
+        "exit_as_contract_original",
+        |_: Caller<'_, ()>| {
+            println!("as-contract: exit");
+            Ok(())
+        },
+    )?;
+
+    linker.func_wrap("clarity", "enter_as_contract_new", |_: Caller<'_, ()>| {
         println!("as-contract: enter");
         Ok(())
     })?;
 
-    linker.func_wrap("clarity", "exit_as_contract", |_: Caller<'_, ()>| {
+    linker.func_wrap("clarity", "exit_as_contract_new", |_: Caller<'_, ()>| {
         println!("as-contract: exit");
-        Ok(())
+        Ok((0i32, 0i32, 0i64, 0i64))
     })?;
 
     linker.func_wrap("clarity", "with_all_assets_unsafe", |_: Caller<'_, ()>| {

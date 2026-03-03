@@ -2,30 +2,14 @@ use clarity::vm::analysis::ContractAnalysis;
 use clarity::vm::contexts::GlobalContext;
 use clarity::vm::errors::{RuntimeError, VmExecutionError, WasmError};
 use clarity::vm::events::*;
+use clarity::vm::functions::post_conditions::{
+    Allowance, FtAllowance, NftAllowance, StackingAllowance, StxAllowance,
+};
 use clarity::vm::types::{AssetIdentifier, BuffData, PrincipalData, QualifiedContractIdentifier};
 use clarity::vm::{CallStack, ContractContext, Value};
+use clarity_types::ClarityName;
 use stacks_common::types::chainstate::StacksBlockId;
 use wasmtime::{Linker, Module, Store};
-
-#[derive(Debug, Clone)]
-pub enum AssetContext {
-    AllAssetsUnsafe,
-    Ft {
-        contract: QualifiedContractIdentifier,
-        token: String,
-        allowed_amount: u128,
-    },
-    Nft {
-        asset_identifier: AssetIdentifier,
-        allowed_identifiers: Vec<clarity_types::Value>,
-    },
-    Stacking {
-        allowed_amount: u128,
-    },
-    Stx {
-        allowed_amount: u128,
-    },
-}
 
 use crate::cost::{CostLinker, CostMeter};
 use crate::linker::link_host_functions;
@@ -48,7 +32,7 @@ pub struct ClarityWasmContext<'a, 'b> {
     /// Stack of block hashes, used for `at-block` expressions.
     bhh_stack: Vec<StacksBlockId>,
     /// Stack of asset contexts, used for `with-*` expressions.
-    pub asset_context_stack: Vec<Vec<AssetContext>>,
+    pub asset_context_stack: Vec<Vec<Allowance>>,
 
     /// Contract analysis data, used for typing information, and only available
     /// when initializing a contract. Should always be `Some` when initializing
@@ -155,16 +139,15 @@ impl<'a, 'b> ClarityWasmContext<'a, 'b> {
         self.asset_context_stack.push(Vec::new());
     }
 
-    pub fn pop_as_contract(&mut self) {
-        self.asset_context_stack.pop();
+    pub fn pop_as_contract(&mut self) -> Option<Vec<Allowance>> {
+        self.asset_context_stack.pop()
     }
 
     pub fn push_asset_context_unsafe(&mut self) {
         self.asset_context_stack
-            .last()
+            .last_mut()
             .unwrap()
-            .to_owned()
-            .push(AssetContext::AllAssetsUnsafe);
+            .push(Allowance::All);
     }
 
     pub fn push_asset_context_ft(
@@ -173,15 +156,19 @@ impl<'a, 'b> ClarityWasmContext<'a, 'b> {
         token: String,
         allowed_amount: u128,
     ) {
+        if self.asset_context_stack.is_empty() {
+            self.asset_context_stack.push(vec![]);
+        }
         self.asset_context_stack
-            .last()
+            .last_mut()
             .unwrap()
-            .to_owned()
-            .push(AssetContext::Ft {
-                contract,
-                token,
-                allowed_amount,
-            });
+            .push(Allowance::Ft(FtAllowance {
+                asset: AssetIdentifier {
+                    contract_identifier: contract,
+                    asset_name: ClarityName::try_from(token).unwrap(),
+                },
+                amount: allowed_amount,
+            }));
     }
 
     pub fn push_asset_context_nft(
@@ -189,107 +176,40 @@ impl<'a, 'b> ClarityWasmContext<'a, 'b> {
         asset_identifier: AssetIdentifier,
         allowed_identifiers: Vec<clarity_types::Value>,
     ) {
+        if self.asset_context_stack.is_empty() {
+            self.asset_context_stack.push(vec![]);
+        }
         self.asset_context_stack
-            .last()
+            .last_mut()
             .unwrap()
-            .to_owned()
-            .push(AssetContext::Nft {
-                asset_identifier,
-                allowed_identifiers,
-            });
+            .push(Allowance::Nft(NftAllowance {
+                asset: asset_identifier,
+                asset_ids: allowed_identifiers,
+            }));
     }
 
     pub fn push_asset_context_stacking(&mut self, allowed_amount: u128) {
+        if self.asset_context_stack.is_empty() {
+            self.asset_context_stack.push(vec![]);
+        }
         self.asset_context_stack
-            .last()
+            .last_mut()
             .unwrap()
-            .to_owned()
-            .push(AssetContext::Stacking { allowed_amount });
+            .push(Allowance::Stacking(StackingAllowance {
+                amount: allowed_amount,
+            }));
     }
 
     pub fn push_asset_context_stx(&mut self, allowed_amount: u128) {
+        if self.asset_context_stack.is_empty() {
+            self.asset_context_stack.push(vec![]);
+        }
         self.asset_context_stack
-            .last()
+            .last_mut()
             .unwrap()
-            .to_owned()
-            .push(AssetContext::Stx { allowed_amount });
-    }
-
-    /// Check if a transfer would exceed the allowance.
-    /// Returns true if the transfer would exceed the allowance (should return err uindex).
-    /// Returns false if the transfer is allowed.
-    pub fn check_ft_allowance(
-        &mut self,
-        contract_id: &QualifiedContractIdentifier,
-        token_name: String,
-        amount: u128,
-    ) -> Result<(bool, usize), VmExecutionError> {
-        for contract_asset_contexts in self.asset_context_stack.iter() {
-            for (index, context) in contract_asset_contexts.iter().enumerate() {
-                if let AssetContext::Ft {
-                    allowed_amount,
-                    contract: allowed_contract,
-                    token: allowed_token,
-                } = context
-                {
-                    let matches_asset = *allowed_token == "*" || *allowed_token == token_name;
-
-                    if matches_asset
-                        && *allowed_contract == *contract_id
-                        && amount > *allowed_amount
-                    {
-                        return Ok((true, index));
-                    }
-                }
-            }
-        }
-        Ok((false, 0))
-    }
-
-    /// Check if an NFT transfer would exceed the allowance.
-    /// Returns true if the transfer would exceed the allowance (should return err uindex).
-    /// Returns false if the transfer is allowed, and updates the used count.
-    pub fn check_nft_allowance(
-        &mut self,
-        asset_identifier: &AssetIdentifier,
-        identifier_value: &clarity_types::Value,
-    ) -> Result<(bool, usize), VmExecutionError> {
-        for contract_asset_contexts in self.asset_context_stack.iter() {
-            for (index, context) in contract_asset_contexts.iter().enumerate() {
-                if let AssetContext::Nft {
-                    asset_identifier: allowed_asset,
-                    allowed_identifiers,
-                } = context
-                {
-                    let matches_asset = allowed_asset.asset_name.as_str() == "*"
-                        || allowed_asset.asset_name == asset_identifier.asset_name;
-
-                    if matches_asset
-                        && asset_identifier.contract_identifier == allowed_asset.contract_identifier
-                        && !allowed_identifiers.iter().any(|id| id == identifier_value)
-                    {
-                        return Ok((true, index));
-                    }
-                }
-            }
-        }
-        Ok((false, 0))
-    }
-
-    /// Check if an STX transfer would exceed the allowance.
-    // Return true to indicate allowance exceeded (err index).
-    /// Returns false if the transfer is allowed.
-    pub fn check_stx_allowance(&mut self, amount: u128) -> Result<(bool, usize), VmExecutionError> {
-        for contract_asset_contexts in self.asset_context_stack.iter() {
-            for (index, context) in contract_asset_contexts.iter().enumerate() {
-                if let AssetContext::Stx { allowed_amount } = context {
-                    if amount > *allowed_amount {
-                        return Ok((true, index));
-                    }
-                }
-            }
-        }
-        Ok((false, 0))
+            .push(Allowance::Stx(StxAllowance {
+                amount: allowed_amount,
+            }));
     }
 
     /// Return an immutable reference to the contract_context
