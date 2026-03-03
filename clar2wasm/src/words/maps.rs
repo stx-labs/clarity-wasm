@@ -489,6 +489,40 @@ impl ComplexWord for MapDelete {
             })?
             .clone();
 
+        // This will compute the key type size and charge on it. If this operation fails,
+        // we still need to be able to compile the contract, so we generate a runtime error.
+        let cost_function_key_type_size = |generator: &mut WasmGenerator,
+                                           builder: &mut walrus::InstrSeqBuilder,
+                                           key_type: &TypeSignature,
+                                           word: &dyn ComplexWord|
+         -> Result<(), GeneratorError> {
+            // The two cases it is used in are:
+            // 1) for cost computation in epoch < 2.05
+            // 2) for cost computation in case of an interpreter error in epoch >= 2.05
+            match key_type.size() {
+                Ok(key_size) => {
+                    word.charge(generator, builder, key_size)?;
+                }
+                Err(_) => {
+                    builder
+                        .i32_const(ErrorMap::SignatureTypeSizeCheckError as i32)
+                        .call(generator.func_by_name("stdlib.runtime-error"));
+                }
+            }
+            Ok(())
+        };
+
+        // In epoche >= 2.05, we generate a local to compute intermediary results used in the
+        // cost tracking. In this case, the cost tracking charge is applied after the delete operation.
+        // In epoche < 2.05, the charge is immediately computed like it is in the interpreter.
+        let post205_cost_local = if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+            let l = generator.borrow_local(ValType::I32);
+            Some(l)
+        } else {
+            cost_function_key_type_size(generator, builder, &key_ty, self)?;
+            None
+        };
+
         // Get the offset and length for this identifier in the literal memory
         let id_offset = *generator
             .literal_memory_offset
@@ -508,17 +542,12 @@ impl ComplexWord for MapDelete {
         // Push the key to the data stack
         generator.set_expr_type(key, key_ty.clone())?;
         generator.traverse_expr(builder, key)?;
-        let serialized_size_opt=
-        // Note that we have different costs for < 2.05 and >= 2.05.
-        if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
-            // It is ok to not have it set for < 2.05 as it's not used in that case
-            let serialize_size = generator.borrow_local(ValType::I32);
+
+        // for epoch >= 2.05, we compute the serialization size of the key.
+        if let Some(cost_local) = &post205_cost_local {
             generator.serialization_size(builder, &key_ty)?;
-            builder.local_set(*serialize_size);
-             Some(serialize_size)
-        }else{
-            None
-        };
+            builder.local_set(**cost_local);
+        }
 
         // Write the key to the memory (it's already on the data stack)
         let key_size = generator.write_to_memory(builder, key_offset, 0, &key_ty)?;
@@ -532,33 +561,6 @@ impl ComplexWord for MapDelete {
         let result = generator.borrow_local(ValType::I32);
         builder.local_set(*result);
 
-        let cost_function_key_type_size = |key_type: &TypeSignature,
-                                           generator: &mut WasmGenerator,
-                                           builder: &mut walrus::InstrSeqBuilder,
-                                           word: &dyn ComplexWord|
-         -> Result<(), GeneratorError> {
-            // The two cases it is used in are:
-            // 1) for cost computation in epoch < 2.05
-            // 2) for cost computation in case of an interpreter error in epoch >= 2.05
-            match key_type.size() {
-                Ok(key_size) => {
-                    word.charge(generator, builder, key_size)?;
-                }
-                Err(_) => {
-                    builder
-                        .i32_const(ErrorMap::SignatureTypeSizeCheckError as i32)
-                        .call(generator.func_by_name("stdlib.runtime-error"));
-                }
-            }
-            Ok(())
-        };
-
-        if generator.contract_analysis.epoch < StacksEpochId::Epoch2_05 {
-            cost_function_key_type_size(&key_ty, generator, builder, self)?;
-        }
-
-        let block_ty = InstrSeqType::new(&mut generator.module.types, &[], &[]);
-
         // In > 2.05 we have three different costs depending if
         //      - an error occurred in the interpreter
         //      - no error occurred
@@ -566,43 +568,31 @@ impl ComplexWord for MapDelete {
         //          - and the value the operation is performed on is not found
         let success_block_id = {
             // When the linked operation does not fail due to an interpreter error
-            let mut success_block = builder.dangling_instr_seq(block_ty);
+            let mut success_block = builder.dangling_instr_seq(None);
 
-            if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
-                let serialized_size = ResolvedLocal::new(serialized_size_opt)?;
-                // The cost in < 2.05 has already been handled before
-                let cost = generator.borrow_local(ValType::I32);
+            if let Some(cost_local) = &post205_cost_local {
+                // the cost here will be the serialization size of the key (already in cost_local)
+                //  + the size of a None if the operation succeeds. Fortunately, this size is 1 when
+                // a value is found, which is the same as the value inside result. If no value was
+                // deleted, we add 0, which is the value of result.
                 success_block
-                    .local_get(*serialized_size.local)
-                    .local_set(*cost)
+                    .local_get(**cost_local)
                     .local_get(*result)
-                    .if_else(
-                        None,
-                        |then| {
-                            // When the element the operation is performed on was found in the map
-                            // Then we charge the serialized size of serialized size of the key + serialized size of a none (1)
-                            then.local_get(*cost)
-                                //Size of None is 1
-                                .i32_const(1)
-                                .binop(BinaryOp::I32Add)
-                                .local_set(*cost);
-                        },
-                        |_| {
-                            // When the element the operation is performed on was not found in the map
-                            // Then we only charge the serialized size of the key
-                        },
-                    );
-                self.charge(generator, &mut success_block, *cost)?;
+                    .binop(BinaryOp::I32Add)
+                    .local_set(**cost_local);
+                self.charge(generator, &mut success_block, **cost_local)?;
             }
+
             success_block.id()
         };
 
         let error_block_id = {
             // When the linked operation fails due to an interpreter error
-            let mut error_block = builder.dangling_instr_seq(block_ty);
-            if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
-                // The cost in < 2.05 has already been handled before
-                cost_function_key_type_size(&key_ty, generator, &mut error_block, self)?;
+            let mut error_block = builder.dangling_instr_seq(None);
+
+            // in epoch >= 2.05, we charge depending on the size of the key.
+            if post205_cost_local.is_some() {
+                cost_function_key_type_size(generator, &mut error_block, &key_ty, self)?;
             }
 
             // Throws back the runtime error that occurred in the interpreter after charging the cost
