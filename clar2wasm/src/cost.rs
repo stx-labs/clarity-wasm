@@ -1503,56 +1503,56 @@ mod word {
     decl_tests!("map_delete_existing", "(define-map squares { x: int } { y: int }) \
                                         (map-set squares {x: 1} {y : 0})
                                         (map-delete squares { x: 1 })", {
-        1 => CostMeter { runtime: 53000, read_count: 2, read_length: 0, write_count: 2, write_length: 50 },
+        1 => CostMeter { runtime: 74000, read_count: 2, read_length: 0, write_count: 2, write_length: 71 },
         2 => CostMeter { runtime: 8003,  read_count: 2, read_length: 0, write_count: 2, write_length: 75 },
         3 => CostMeter { runtime: 9718,  read_count: 2, read_length: 0, write_count: 2, write_length: 75 },
     });
     decl_tests!("map_delete_non_existing", "(define-map squares { x: int } { y: int }) \
                                             (map-set squares {x: 1} {y : 0})
                                             (map-delete squares { x: 0 })", {
-        1 => CostMeter { runtime: 53000, read_count: 2, read_length: 0, write_count: 2, write_length: 50 },
+        1 => CostMeter { runtime: 74000, read_count: 2, read_length: 0, write_count: 2, write_length: 71 },
         2 => CostMeter { runtime: 7999,  read_count: 2, read_length: 0, write_count: 2, write_length: 74 },
         3 => CostMeter { runtime: 9714,  read_count: 2, read_length: 0, write_count: 2, write_length: 74 },
     });
     decl_tests!("map_get_non_existing", "(define-map squares { x: int } { y: int }) \
                                          (map-set squares {x: 1} {y : 0})
                                          (map-get? squares { x: 0 })", {
-        1 => CostMeter { runtime: 93000, read_count: 2, read_length: 57, write_count: 1, write_length: 33},
+        1 => CostMeter { runtime: 98000, read_count: 2, read_length: 48, write_count: 1, write_length: 47},
         2 => CostMeter { runtime: 7262,  read_count: 2, read_length: 25, write_count: 1, write_length: 49 },
         3 => CostMeter { runtime: 8768,  read_count: 2, read_length: 25, write_count: 1, write_length: 49 },
     });
     decl_tests!("map_get_existing", "(define-map squares { x: int } { y: int }) \
                                      (map-set squares {x: 1} {y : 0})
                                      (map-get? squares { x : 1 } )", {
-        1 => CostMeter { runtime: 93000, read_count: 2, read_length: 57, write_count: 1, write_length: 33 },
+        1 => CostMeter { runtime: 98000, read_count: 2, read_length: 48, write_count: 1, write_length: 47},
         2 => CostMeter { runtime: 7287,  read_count: 2, read_length: 50, write_count: 1, write_length: 49 },
         3 => CostMeter { runtime: 8793,  read_count: 2, read_length: 50, write_count: 1, write_length: 49 },
     });
     decl_tests!("map_insert_existing", "(define-map squares { x: int } { y: int }) \
                                         (map-set squares {x: 1} {y : 0})
                                         (map-insert squares { x: 1 } { y: 1 })", {
-        1 => CostMeter { runtime: 70000, read_count: 2, read_length: 0, write_count: 2, write_length: 66 },
+        1 => CostMeter { runtime: 98000, read_count: 2, read_length: 0, write_count: 2, write_length: 94 },
         2 => CostMeter { runtime: 9100,  read_count: 2, read_length: 0, write_count: 2, write_length: 74 },
         3 => CostMeter { runtime: 11590,  read_count: 2, read_length: 0, write_count: 2, write_length: 74 },
     });
     decl_tests!("map_insert_non_existing", "(define-map squares { x: int } { y: int }) \
                                             (map-set squares {x: 1} {y : 0})
                                             (map-insert squares { x: 0 } { y: 1 })", {
-        1 => CostMeter { runtime: 70000, read_count: 2, read_length: 0, write_count: 2, write_length: 66 },
+        1 => CostMeter { runtime: 98000, read_count: 2, read_length: 0, write_count: 2, write_length: 94 },
         2 => CostMeter { runtime: 9196,  read_count: 2, read_length: 0, write_count: 2, write_length: 98 },
         3 => CostMeter { runtime: 11686,  read_count: 2, read_length: 0, write_count: 2, write_length: 98 },
     });
     decl_tests!("map_set_existing", "(define-map squares { x: int } { y: int }) \
                                      (map-set squares {x: 1} {y : 0})
                                      (map-set squares { x: 1 } { y: 1 })", {
-        1 => CostMeter { runtime: 70000, read_count: 2, read_length: 0, write_count: 2, write_length: 66 },
+        1 => CostMeter { runtime: 98000, read_count: 2, read_length: 0, write_count: 2, write_length: 94 },
         2 => CostMeter { runtime: 9196,  read_count: 2, read_length: 0, write_count: 2, write_length: 98 },
         3 => CostMeter { runtime: 11686,  read_count: 2, read_length: 0, write_count: 2, write_length: 98 },
     });
     decl_tests!("map_set_non_existing", "(define-map squares { x: int } { y: int }) \
                                          (map-set squares {x: 1} {y : 0})
                                          (map-set squares { x: 0 } { y: 1 })", {
-        1 => CostMeter { runtime: 70000, read_count: 2, read_length: 0, write_count: 2, write_length: 66 },
+        1 => CostMeter { runtime: 98000, read_count: 2, read_length: 0, write_count: 2, write_length: 94 },
         2 => CostMeter { runtime: 9196,  read_count: 2, read_length: 0, write_count: 2, write_length: 98 },
         3 => CostMeter { runtime: 11686,  read_count: 2, read_length: 0, write_count: 2, write_length: 98 },
     });

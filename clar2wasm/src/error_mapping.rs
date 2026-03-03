@@ -96,6 +96,9 @@ pub enum ErrorMap {
 
     ExternError = 105,
 
+    // Indicate that a call to TypeSignature.size() failed
+    SignatureTypeSizeCheckError = 106,
+
     /// A catch-all for errors that are not mapped to specific error codes.
     /// This might be used for unexpected or unclassified errors.
     NotMapped = 99,
@@ -127,6 +130,7 @@ impl From<i32> for ErrorMap {
             103 => ErrorMap::CostOverrunWriteCount,
             104 => ErrorMap::CostOverrunWriteLength,
             105 => ErrorMap::ExternError,
+            106 => ErrorMap::SignatureTypeSizeCheckError,
             _ => ErrorMap::NotMapped,
         }
     }
@@ -308,6 +312,10 @@ fn from_runtime_error_code(
                 },
             }
         }
+        ErrorMap::SignatureTypeSizeCheckError => Error::from(CheckErrors::Expects(
+            "FAIL: .size() overflowed on too large of a type. construction should have failed!"
+                .into(),
+        )),
         _ => panic!("Runtime error code {runtime_error_code} not supported"),
     }
 }
