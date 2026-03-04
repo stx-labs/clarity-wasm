@@ -9,7 +9,7 @@ use crate::check_args;
 use crate::cost::WordCharge;
 use crate::error_mapping::ErrorMap;
 use crate::wasm_generator::{
-    clar2wasm_ty, ArgumentsExt, BorrowedLocal, GeneratorError, LiteralMemoryEntry, WasmGenerator,
+    clar2wasm_ty, ArgumentsExt, GeneratorError, LiteralMemoryEntry, WasmGenerator,
 };
 use crate::wasm_utils::ArgumentCountCheck;
 
@@ -276,20 +276,25 @@ impl ComplexWord for MapSet {
 
         let (key_offset, _) = generator.create_call_stack_local(builder, &key_ty, true, false);
 
+        // In epoch >= 2.05, we generate a local to compute intermediary results used in the
+        // cost tracking. In this case, the cost tracking charge is applied after the delete operation.
+        // In epoch < 2.05, the charge is immediately computed like it is in the interpreter.
+        let post205_cost_local = if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+            let l = generator.borrow_local(ValType::I32);
+            Some(l)
+        } else {
+            charge_default_cost_value_and_key_size(&value_type, &key_ty, generator, builder, self)?;
+            None
+        };
+
         // Push the key to the data stack
         generator.set_expr_type(key, key_ty.clone())?;
         generator.traverse_expr(builder, key)?;
 
-        let serialized_key_size_opt =
-            if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
-                let serialized_key_size = generator.borrow_local(ValType::I32);
-                // It is ok to not have it set for < 2.05 as it's not used in that case
-                generator.serialization_size(builder, &key_ty)?;
-                builder.local_set(*serialized_key_size);
-                Some(serialized_key_size)
-            } else {
-                None
-            };
+        if let Some(cost_local) = &post205_cost_local {
+            generator.serialization_size(builder, &key_ty)?;
+            builder.local_set(**cost_local);
+        }
 
         // Write the key to the memory (it's already on the data stack)
         let key_size = generator.write_to_memory(builder, key_offset, 0, &key_ty)?;
@@ -303,16 +308,13 @@ impl ComplexWord for MapSet {
         // Push the value to the data stack
         generator.set_expr_type(value, value_type.clone())?;
         generator.traverse_expr(builder, value)?;
-        let value_serialized_size_opt =
-            if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
-                // It is ok to not have it set for < 2.05 as it's not used in that case
-                let value_serialized_size = generator.borrow_local(ValType::I32);
-                generator.serialization_size(builder, &value_type)?;
-                builder.local_set(*value_serialized_size);
-                Some(value_serialized_size)
-            } else {
-                None
-            };
+        if let Some(cost_local) = &post205_cost_local {
+            generator.serialization_size(builder, &value_type)?;
+            builder
+                .local_get(**cost_local)
+                .binop(BinaryOp::I32Add)
+                .local_set(**cost_local);
+        }
 
         // Write the value to the memory (it's already on the data stack)
         let val_size = generator.write_to_memory(builder, val_offset, 0, &value_type)?;
@@ -323,59 +325,23 @@ impl ComplexWord for MapSet {
         // Call the host interface function, `map_set`
         builder.call(generator.func_by_name("stdlib.map_set"));
 
-        if generator.contract_analysis.epoch < StacksEpochId::Epoch2_05 {
-            charge_default_cost_value_and_key_size(&value_type, &key_ty, generator, builder, self)?;
-        }
-
-        let entry_status = generator.borrow_local(ValType::I32);
-        builder.local_set(*entry_status);
-
-        let block_ty = InstrSeqType::new(&mut generator.module.types, &[], &[]);
-
-        // In > 2.05 we have three different costs depending if
+        // In > 2.05 we have two different costs depending if
         //      - an error occurred in the interpreter
         //      - no error occurred
-        //          - and the value the operation is performed on is found
-        //          - and the value the operation is performed on is not found
         let success_block_id = {
             // When the linked operation does not fail due to an interpreter error
-            let mut success_block = builder.dangling_instr_seq(block_ty);
-            if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
-                // The cost in < 2.05 has already been handled before
-                let cost = generator.borrow_local(ValType::I32);
-
-                let value_serialized_size = ResolvedLocal::new(value_serialized_size_opt)?;
-                let serialized_key_size = ResolvedLocal::new(serialized_key_size_opt)?;
-                success_block
-                    .local_get(*serialized_key_size.local)
-                    .local_set(*cost)
-                    .local_get(*entry_status)
-                    .if_else(
-                        None,
-                        |then| {
-                            // When the element the operation is performed on was found in the map
-                            // Then we charge the serialized size of the entry we want to store + serialized size of the key
-                            then.local_get(*value_serialized_size.local)
-                                .local_get(*cost)
-                                .binop(BinaryOp::I32Add)
-                                .local_set(*cost);
-                        },
-                        |_| {
-                            // When the element the operation is performed on was not found in the map
-                            // Then we only charge the serialized size of the key
-                            // MapSet never enters this branch as we always insert
-                        },
-                    );
-                self.charge(generator, &mut success_block, *cost)?;
+            let mut success_block = builder.dangling_instr_seq(None);
+            if let Some(cost_local) = &post205_cost_local {
+                self.charge(generator, &mut success_block, **cost_local)?;
             }
             success_block.id()
         };
 
         let error_block_id = {
             // When the linked operation fails due to an interpreter error
-            let mut error_block = builder.dangling_instr_seq(block_ty);
+            let mut error_block = builder.dangling_instr_seq(None);
 
-            if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+            if post205_cost_local.is_some() {
                 // The cost in < 2.05 has already been handled before
                 charge_default_cost_value_and_key_size(
                     &value_type,
@@ -402,7 +368,6 @@ impl ComplexWord for MapSet {
                 alternative: error_block_id,
             });
 
-        builder.local_get(*entry_status);
         Ok(())
     }
 }
@@ -760,20 +725,6 @@ fn charge_default_cost_value_and_key_size(
     Ok(())
 }
 
-struct ResolvedLocal {
-    local: BorrowedLocal,
-}
-
-impl ResolvedLocal {
-    pub fn new(opt: Option<BorrowedLocal>) -> Result<Self, GeneratorError> {
-        let borrowed_local = opt.ok_or_else(|| {
-            GeneratorError::InternalError("optional local should have been set".to_owned())
-        })?;
-        Ok(ResolvedLocal {
-            local: borrowed_local,
-        })
-    }
-}
 #[cfg(test)]
 mod tests {
     // use clarity::vm::errors::{CheckErrors, Error};
