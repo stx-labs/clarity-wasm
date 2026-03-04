@@ -1517,14 +1517,14 @@ mod word {
     decl_tests!("map_get_non_existing", "(define-map squares { x: int } { y: int }) \
                                          (map-set squares {x: 1} {y : 0})
                                          (map-get? squares { x: 0 })", {
-        1 => CostMeter { runtime: 98000, read_count: 2, read_length: 48, write_count: 1, write_length: 47},
+        1 => CostMeter { runtime: 97000, read_count: 2, read_length: 47, write_count: 1, write_length: 47},
         2 => CostMeter { runtime: 7262,  read_count: 2, read_length: 25, write_count: 1, write_length: 49 },
         3 => CostMeter { runtime: 8768,  read_count: 2, read_length: 25, write_count: 1, write_length: 49 },
     });
     decl_tests!("map_get_existing", "(define-map squares { x: int } { y: int }) \
                                      (map-set squares {x: 1} {y : 0})
                                      (map-get? squares { x : 1 } )", {
-        1 => CostMeter { runtime: 98000, read_count: 2, read_length: 48, write_count: 1, write_length: 47},
+        1 => CostMeter { runtime: 97000, read_count: 2, read_length: 47, write_count: 1, write_length: 47},
         2 => CostMeter { runtime: 7287,  read_count: 2, read_length: 50, write_count: 1, write_length: 49 },
         3 => CostMeter { runtime: 8793,  read_count: 2, read_length: 50, write_count: 1, write_length: 49 },
     });
