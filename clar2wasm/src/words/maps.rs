@@ -452,7 +452,7 @@ impl ComplexWord for MapInsert {
         // for epoch >= 2.05, we compute the serialization size of the key.
         let post205_serialized_sized_value_local = if post205_cost_local.is_some() {
             let l = generator.borrow_local(ValType::I32);
-            generator.serialization_size(builder, &key_ty)?;
+            generator.serialization_size(builder, &value_type)?;
             builder.local_set(*l);
             Some(l)
         } else {
