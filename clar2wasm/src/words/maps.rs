@@ -1,4 +1,5 @@
 use clarity::types::StacksEpochId;
+use clarity::vm::analysis::ContractAnalysis;
 use clarity::vm::types::{TypeSignature, TypeSignatureExt};
 use clarity::vm::{ClarityName, SymbolicExpression};
 use walrus::ir::{BinaryOp, IfElse, InstrSeqType};
@@ -119,13 +120,9 @@ impl ComplexWord for MapGet {
             let l = generator.borrow_local(ValType::I32);
             Some(l)
         } else {
-            charge_default_cost_value_and_key_size(
-                &key_ty,
-                &original_value_type,
-                generator,
-                builder,
-                self,
-            )?;
+            let contract_analysis = generator.contract_analysis_original.clone();
+            let (key_ty, value_ty) = get_original_types(&contract_analysis, name)?;
+            charge_default_cost_value_and_key_size(value_ty, key_ty, generator, builder, self)?;
             None
         };
 
@@ -203,9 +200,11 @@ impl ComplexWord for MapGet {
             // When the linked operation fails due to an interpreter error
             let mut error_block = builder.dangling_instr_seq(None);
             if post205_cost_local.is_some() {
+                let contract_analysis = generator.contract_analysis_original.clone();
+                let (key_ty, value_ty) = get_original_types(&contract_analysis, name)?;
                 charge_default_cost_value_and_key_size(
-                    &original_value_type,
-                    &key_ty,
+                    value_ty,
+                    key_ty,
                     generator,
                     &mut error_block,
                     self,
@@ -283,7 +282,9 @@ impl ComplexWord for MapSet {
             let l = generator.borrow_local(ValType::I32);
             Some(l)
         } else {
-            charge_default_cost_value_and_key_size(&value_type, &key_ty, generator, builder, self)?;
+            let contract_analysis = generator.contract_analysis_original.clone();
+            let (key_ty, value_ty) = get_original_types(&contract_analysis, name)?;
+            charge_default_cost_value_and_key_size(value_ty, key_ty, generator, builder, self)?;
             None
         };
 
@@ -343,9 +344,11 @@ impl ComplexWord for MapSet {
 
             if post205_cost_local.is_some() {
                 // The cost in < 2.05 has already been handled before
+                let contract_analysis = generator.contract_analysis_original.clone();
+                let (key_ty, value_ty) = get_original_types(&contract_analysis, name)?;
                 charge_default_cost_value_and_key_size(
-                    &value_type,
-                    &key_ty,
+                    value_ty,
+                    key_ty,
                     generator,
                     &mut error_block,
                     self,
@@ -424,7 +427,9 @@ impl ComplexWord for MapInsert {
             let l = generator.borrow_local(ValType::I32);
             Some(l)
         } else {
-            charge_default_cost_value_and_key_size(&value_type, &key_ty, generator, builder, self)?;
+            let contract_analysis = generator.contract_analysis_original.clone();
+            let (key_ty, value_ty) = get_original_types(&contract_analysis, name)?;
+            charge_default_cost_value_and_key_size(value_ty, key_ty, generator, builder, self)?;
             None
         };
 
@@ -512,9 +517,11 @@ impl ComplexWord for MapInsert {
             // When the linked operation fails due to an interpreter error
             let mut error_block = builder.dangling_instr_seq(None);
             if post205_cost_local.is_some() {
+                let contract_analysis = generator.contract_analysis_original.clone();
+                let (key_ty, value_ty) = get_original_types(&contract_analysis, name)?;
                 charge_default_cost_value_and_key_size(
-                    &value_type,
-                    &key_ty,
+                    value_ty,
+                    key_ty,
                     generator,
                     &mut error_block,
                     self,
@@ -601,7 +608,9 @@ impl ComplexWord for MapDelete {
             let l = generator.borrow_local(ValType::I32);
             Some(l)
         } else {
-            charge_default_cost_key_size(generator, builder, &key_ty, self)?;
+            let contract_analysis = generator.contract_analysis_original.clone();
+            let (key_ty, _) = get_original_types(&contract_analysis, name)?;
+            charge_default_cost_key_size(generator, builder, key_ty, self)?;
             None
         };
 
@@ -674,7 +683,9 @@ impl ComplexWord for MapDelete {
 
             // in epoch >= 2.05, we charge depending on the size of the key.
             if post205_cost_local.is_some() {
-                charge_default_cost_key_size(generator, &mut error_block, &key_ty, self)?;
+                let contract_analysis = generator.contract_analysis_original.clone();
+                let (key_ty, _) = get_original_types(&contract_analysis, name)?;
+                charge_default_cost_key_size(generator, &mut error_block, key_ty, self)?;
             }
 
             // Throws back the runtime error that occurred in the interpreter after charging the cost
@@ -723,6 +734,15 @@ fn charge_default_cost_value_and_key_size(
         }
     }
     Ok(())
+}
+
+fn get_original_types<'a>(
+    contract_analysis: &'a ContractAnalysis,
+    name: &str,
+) -> Result<&'a (TypeSignature, TypeSignature), GeneratorError> {
+    contract_analysis.get_map_type(name).ok_or_else(|| {
+        GeneratorError::TypeError("Types should have been set in contract analysis".to_owned())
+    })
 }
 
 #[cfg(test)]

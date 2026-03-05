@@ -39,6 +39,8 @@ pub struct WasmGenerator {
     /// The contract analysis, which contains the expressions and type
     /// information for the contract.
     pub(crate) contract_analysis: ContractAnalysis,
+    /// original contract_analysis were types have not been mingled with for the duck typing.
+    pub(crate) contract_analysis_original: ContractAnalysis,
     /// The WebAssembly module that is being generated.
     pub(crate) module: Module,
     /// Offset of the end of the literal memory.
@@ -388,6 +390,7 @@ impl WasmGenerator {
         let linked_error_id = get_global(&module, "runtime-error-linked")?;
 
         Ok(WasmGenerator {
+            contract_analysis_original: contract_analysis.clone(),
             contract_analysis,
             module,
             literal_memory_end: END_OF_STANDARD_DATA,
