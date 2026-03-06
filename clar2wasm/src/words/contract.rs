@@ -8,7 +8,7 @@ use walrus::ValType;
 use super::{ComplexWord, Word};
 use crate::check_args;
 use crate::cost::WordCharge;
-use crate::wasm_generator::{ArgumentsExt, GeneratorError, WasmGenerator};
+use crate::wasm_generator::{clar2wasm_ty, ArgumentsExt, GeneratorError, WasmGenerator};
 use crate::wasm_utils::ArgumentCountCheck;
 use crate::words::SimpleWord;
 
@@ -32,7 +32,7 @@ impl ComplexWord for AsContract {
         &self,
         generator: &mut WasmGenerator,
         builder: &mut walrus::InstrSeqBuilder,
-        _expr: &SymbolicExpression,
+        expr: &SymbolicExpression,
         args: &[SymbolicExpression],
     ) -> Result<(), GeneratorError> {
         // The two implementations need to be seperated as the linker functions return return different results
@@ -57,20 +57,108 @@ impl ComplexWord for AsContract {
                 check_args!(generator, builder, 2, args.len(), ArgumentCountCheck::Exact);
 
                 // TODO: add cost tracking #783
-                let allowance = args.get_expr(0)?;
-
+                let allowances = args.get_list(0)?;
                 let inner = args.get_expr(1)?;
 
-                // Call the host interface function, `enter_as_contract_new`
+                // `as-contract?` returns a response type: (response <inner_type> uint).
+                // In WASM, this is represented as [i32_indicator, ok_wasm_vals..., err_wasm_vals...].
+                // For example, (response bool uint) = [i32, i32, i64, i64].
+                //   - On success: [1, inner_result, 0, 0]
+                //   - On failure: [0, 0, violation_lo, violation_hi]
+                let inner_ty = generator
+                    .get_expr_type(inner)
+                    .ok_or_else(|| {
+                        GeneratorError::TypeError(
+                            "as-contract? inner expression must be typed".to_owned(),
+                        )
+                    })?
+                    .clone();
+
+                let return_ty = generator
+                    .get_expr_type(expr)
+                    .ok_or_else(|| {
+                        GeneratorError::TypeError(
+                            "as-contract? expression must be typed".to_owned(),
+                        )
+                    })?
+                    .clone();
+
+                // Enter the as-contract context (pushes sender/caller, begins transaction)
                 builder.call(generator.func_by_name("stdlib.enter_as_contract_new"));
 
-                generator.traverse_expr(builder, allowance)?;
+                // Traverse each allowance expression in the list.
+                // Each one registers its allowance in the asset context.
+                for allowance in allowances {
+                    generator.traverse_expr(builder, allowance)?;
+                }
 
-                // Traverse the inner expression
+                // Traverse the inner expression — its result is pushed onto the WASM stack
                 generator.traverse_expr(builder, inner)?;
 
-                // Call the host interface function, `exit_as_contract_new`
+                // Save the inner result to locals so we can use it later.
+                // We need to get it off the stack before calling exit, which
+                // pushes its own return values.
+                let inner_locals = generator.save_to_locals(builder, &inner_ty, true);
+
+                // Call exit
+                // Returns (indicator: i32, padding: i32, err_lo: i64, err_hi: i64).
+                // The host function can't access the inner result on the WASM stack,
+                // so the ok slot (padding) is always 0 — we splice in the real inner
+                // result below.
                 builder.call(generator.func_by_name("stdlib.exit_as_contract_new"));
+
+                // Save the 4 exit return values to locals (popped in reverse order)
+                let hi_local = generator.module.locals.add(ValType::I64);
+                let lo_local = generator.module.locals.add(ValType::I64);
+                let _padding_local = generator.module.locals.add(ValType::I32);
+                let indicator_local = generator.module.locals.add(ValType::I32);
+                builder.local_set(hi_local);
+                builder.local_set(lo_local);
+                builder.local_set(_padding_local);
+                builder.local_set(indicator_local);
+
+                // Allocate locals for the full response result
+                let result_wasm_types = clar2wasm_ty(&return_ty);
+                let result_locals: Vec<_> = result_wasm_types
+                    .iter()
+                    .map(|t| generator.module.locals.add(*t))
+                    .collect();
+
+                // Set the response indicator (1 = ok, 0 = err)
+                builder
+                    .local_get(indicator_local)
+                    .local_set(result_locals[0]);
+
+                let inner_wasm_len = clar2wasm_ty(&inner_ty).len();
+
+                // Conditionally populate the ok or err slots of the response.
+                // Locals default to zero, so we only need to set the relevant slots.
+                builder.local_get(indicator_local).if_else(
+                    None,
+                    |then| {
+                        // Success: copy the saved inner result into the ok slots.
+                        // The err slots remain at their default zero values.
+                        for (i, local) in inner_locals.iter().enumerate() {
+                            then.local_get(*local).local_set(result_locals[1 + i]);
+                        }
+                    },
+                    |else_| {
+                        // Failure: the ok slots remain at their default zero values.
+                        // Copy the violation index (u128) into the err slots.
+                        let err_offset = 1 + inner_wasm_len;
+                        else_
+                            .local_get(lo_local)
+                            .local_set(result_locals[err_offset]);
+                        else_
+                            .local_get(hi_local)
+                            .local_set(result_locals[err_offset + 1]);
+                    },
+                );
+
+                // Push the full response type onto the WASM stack
+                for local in &result_locals {
+                    builder.local_get(*local);
+                }
             }
         }
         Ok(())
@@ -94,7 +182,7 @@ impl ComplexWord for WithAllAssetsUnsafe {
         _expr: &SymbolicExpression,
         args: &[SymbolicExpression],
     ) -> Result<(), GeneratorError> {
-        check_args!(generator, builder, 1, args.len(), ArgumentCountCheck::Exact);
+        check_args!(generator, builder, 0, args.len(), ArgumentCountCheck::Exact);
 
         self.charge(generator, builder, 0)?;
 
@@ -1195,12 +1283,14 @@ mod tests {
         feature = "test-clarity-v2",
         feature = "test-clarity-v3"
     )))]
+
     mod clarity_v4 {
         use clarity::util::hash::Sha512Trunc256Sum;
-        use clarity_types::types::StandardPrincipalData;
+        use clarity::vm::types::PrincipalData;
+        use clarity_types::{types::StandardPrincipalData, ClarityName};
 
         use super::*;
-        use crate::tools::{crosscheck, crosscheck_with_env};
+        use crate::tools::{crosscheck, crosscheck_with_env, evaluate};
 
         #[test]
         fn contract_hash_ok_returns_buff32() {
@@ -1261,35 +1351,147 @@ mod tests {
             );
         }
 
+        // ==================== argument count checks ====================
+
         #[test]
-        fn as_contract_with_all_assets_unsafe() {
+        fn with_all_assets_unsafe_too_many_args() {
+            let result = evaluate("(as-contract? ((with-all-assets-unsafe u1)) (ok true))");
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("expecting 0 arguments, got 1"));
+        }
+
+        #[test]
+        fn with_stx_no_args() {
+            let result = evaluate("(as-contract? ((with-stx)) (ok true))");
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("expecting 1 arguments, got 0"));
+        }
+
+        #[test]
+        fn with_stx_too_many_args() {
+            let result = evaluate("(as-contract? ((with-stx u100 u200)) (ok true))");
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("expecting 1 arguments, got 2"));
+        }
+
+        #[test]
+        fn with_stacking_no_args() {
+            let result = evaluate("(as-contract? ((with-stacking)) (ok true))");
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("expecting 1 arguments, got 0"));
+        }
+
+        #[test]
+        fn with_stacking_too_many_args() {
+            let result = evaluate("(as-contract? ((with-stacking u100 u200)) (ok true))");
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("expecting 1 arguments, got 2"));
+        }
+
+        #[test]
+        fn with_ft_no_args() {
+            let result = evaluate("(as-contract? ((with-ft)) (ok true))");
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("expecting 3 arguments, got 0"));
+        }
+
+        #[test]
+        fn with_ft_too_few_args() {
+            let result = evaluate(r#"(as-contract? ((with-ft .contract "token")) (ok true))"#);
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("expecting 3 arguments, got 2"));
+        }
+
+        #[test]
+        fn with_ft_too_many_args() {
+            let result =
+                evaluate(r#"(as-contract? ((with-ft .contract "token" u100 u200)) (ok true))"#);
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("expecting 3 arguments, got 4"));
+        }
+
+        #[test]
+        fn with_nft_no_args() {
+            let result = evaluate("(as-contract? ((with-nft)) (ok true))");
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("expecting 3 arguments, got 0"));
+        }
+
+        #[test]
+        fn with_nft_too_few_args() {
+            let result = evaluate(r#"(as-contract? ((with-nft .contract "token")) (ok true))"#);
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("expecting 3 arguments, got 2"));
+        }
+
+        #[test]
+        fn with_nft_too_many_args() {
+            let result = evaluate(
+                r#"(as-contract? ((with-nft .contract "token" (list u1) u99)) (ok true))"#,
+            );
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("expecting 3 arguments, got 4"));
+        }
+
+        // ==================== with-all-assets-unsafe ====================
+
+        #[test]
+        fn as_contract_unsafe_nft_transfer() {
             let mut env = TestEnvironment::default();
             let contract = r#"
-            (define-non-fungible-token token uint)
-            
-            (define-public (mint-nft (asset uint)) 
-              (begin
-                (try! 
-                  (nft-mint? token asset current-contract)
-                )
-                (ok true)
-              )
-            )
-            
-            (define-public (transfer-token (asset uint))
-              (let (
-                  (recipient tx-sender)
-                )
-                (try!
-                  (as-contract? ((with-all-assets-unsafe))
-                    (try! (nft-transfer? token asset current-contract recipient))
-                  )
-                )
-                (ok true)
-              )
-            )
-            "#;
+(define-non-fungible-token token uint)
 
+(define-public (mint-nft (asset uint))
+    (begin
+        (try! (nft-mint? token asset current-contract))
+        (ok true)
+    )
+)
+
+(define-public (transfer-token (asset uint))
+    (let ((recipient tx-sender))
+        (try!
+            (as-contract? ((with-all-assets-unsafe))
+                (try! (nft-transfer? token asset current-contract recipient))
+            )
+        )
+        (ok true)
+    )
+)
+"#;
             env.init_contract_with_snippet("contract", contract)
                 .expect("failed to init contract");
             crosscheck_with_env(
@@ -1300,43 +1502,921 @@ mod tests {
             );
         }
 
-        //         #[test]
-        //         fn as_contract_with_nft() {
-        //             let mut env = TestEnvironment::default();
-        //             let contract = r#"
-        // (define-non-fungible-token token uint)
+        #[test]
+        fn as_contract_unsafe_stx_transfer() {
+            let mut env = TestEnvironment::default();
+            let contract = r#"
+(define-public (send-stx (amount uint) (recipient principal))
+    (begin
+        (try!
+            (as-contract? ((with-all-assets-unsafe))
+                (try! (stx-transfer? amount current-contract recipient))
+            )
+        )
+        (ok true)
+    )
+)
+"#;
+            env.init_contract_with_snippet("contract", contract)
+                .expect("failed to init contract");
+            crosscheck_with_env(
+                "(stx-transfer? u500 tx-sender .contract)
+                (contract-call? .contract send-stx u50 tx-sender)",
+                Ok(Some(Value::okay_true())),
+                env,
+            );
+        }
 
-        // (define-public (mint-nft (asset uint))
-        //   (begin
-        //     (try!
-        //       (nft-mint? token asset current-contract)
-        //     )
-        //     (ok true)
-        //   )
-        // )
+        // ==================== with-stx ====================
 
-        // (define-public (transfer-token (asset uint))
-        //   (let (
-        //       (recipient tx-sender)
-        //     )
-        //     (try!
-        //       (as-contract? ((with-nft .test "token" (list u1)))
-        //         (try! (nft-transfer? token asset current-contract recipient))
-        //       )
-        //     )
-        //     (ok true)
-        //   )
-        // )
-        // "#;
+        #[test]
+        fn as_contract_stx_ok() {
+            let mut env = TestEnvironment::default();
+            let contract = r#"
+(define-public (send-stx (amount uint) (recipient principal))
+    (begin
+        (try!
+            (as-contract? ((with-stx u100))
+                (try! (stx-transfer? amount current-contract recipient))
+            )
+        )
+        (ok true)
+    )
+)
+"#;
+            env.init_contract_with_snippet("contract", contract)
+                .expect("failed to init contract");
+            crosscheck_with_env(
+                "(stx-transfer? u500 tx-sender .contract)
+                (contract-call? .contract send-stx u100 tx-sender)",
+                Ok(Some(Value::okay_true())),
+                env,
+            );
+        }
 
-        //             env.init_contract_with_snippet("contract", contract)
-        //                 .expect("failed to init contract");
-        //             crosscheck_with_env(
-        //                 "(contract-call? .contract mint-nft u1)
-        //                 (contract-call? .contract transfer-token u1)",
-        //                 Ok(Some(Value::okay_true())),
-        //                 env,
-        //             );
-        //         }
+        #[test]
+        fn as_contract_stx_exceeds_allowance() {
+            let mut env = TestEnvironment::default();
+            let contract = r#"
+(define-public (send-stx (amount uint) (recipient principal))
+    (begin
+        (try!
+            (as-contract? ((with-stx u10))
+                (try! (stx-transfer? amount current-contract recipient))
+            )
+        )
+        (ok true)
+    )
+)
+"#;
+            env.init_contract_with_snippet("contract", contract)
+                .expect("failed to init contract");
+            crosscheck_with_env(
+                "(stx-transfer? u500 tx-sender .contract)
+                (let ((result (contract-call? .contract send-stx u50 tx-sender)))
+                    {error-code: result, balance: (stx-get-balance .contract)}
+                )",
+                Ok(Some(Value::Tuple(
+                    clarity::vm::types::TupleData::from_data(vec![
+                        (ClarityName::from_literal("balance"), Value::UInt(500)),
+                        (
+                            ClarityName::from_literal("error-code"),
+                            Value::error(Value::UInt(0)).unwrap(),
+                        ),
+                    ])
+                    .unwrap(),
+                ))),
+                env,
+            );
+        }
+
+        #[test]
+        fn as_contract_stx_no_allowance() {
+            let mut env = TestEnvironment::default();
+            let contract = r#"
+(define-public (send-stx (amount uint) (recipient principal))
+    (begin
+        (try!
+            (as-contract? ()
+                (try! (stx-transfer? amount current-contract recipient))
+            )
+        )
+        (ok true)
+    )
+)
+"#;
+            env.init_contract_with_snippet("contract", contract)
+                .expect("failed to init contract");
+            crosscheck_with_env(
+                "(stx-transfer? u500 tx-sender .contract)
+                (let ((result (contract-call? .contract send-stx u50 tx-sender)))
+                    {error-code: result, balance: (stx-get-balance .contract)}
+                )",
+                Ok(Some(Value::Tuple(
+                    clarity::vm::types::TupleData::from_data(vec![
+                        (ClarityName::from_literal("balance"), Value::UInt(500)),
+                        (
+                            ClarityName::from_literal("error-code"),
+                            Value::error(Value::UInt(128)).unwrap(),
+                        ),
+                    ])
+                    .unwrap(),
+                ))),
+                env,
+            );
+        }
+
+        // ==================== with-ft ====================
+
+        #[test]
+        fn as_contract_ft_ok() {
+            let mut env = TestEnvironment::default();
+            let contract = r#"
+(define-fungible-token my-token)
+
+(define-public (mint-ft (amount uint))
+    (ft-mint? my-token amount current-contract)
+)
+
+(define-public (transfer-ft (amount uint) (recipient principal))
+    (begin
+        (try!
+            (as-contract? ((with-ft .contract "my-token" u100))
+                (try! (ft-transfer? my-token amount current-contract recipient))
+            )
+        )
+        (ok true)
+    )
+)
+"#;
+            env.init_contract_with_snippet("contract", contract)
+                .expect("failed to init contract");
+            crosscheck_with_env(
+                "(contract-call? .contract mint-ft u100)
+                (contract-call? .contract transfer-ft u100 tx-sender)",
+                Ok(Some(Value::okay_true())),
+                env,
+            );
+        }
+
+        #[test]
+        fn as_contract_ft_exceeds_allowance() {
+            let mut env = TestEnvironment::default();
+            let contract = r#"
+(define-fungible-token my-token)
+
+(define-public (mint-ft (amount uint))
+    (ft-mint? my-token amount current-contract)
+)
+
+(define-public (transfer-ft (amount uint) (recipient principal))
+    (begin
+        (try!
+            (as-contract? ((with-ft .contract "my-token" u10))
+                (try! (ft-transfer? my-token amount current-contract recipient))
+            )
+        )
+        (ok true)
+    )
+)
+
+(define-read-only (get-ft-balance)
+    (ft-get-balance my-token current-contract)
+)
+"#;
+            env.init_contract_with_snippet("contract", contract)
+                .expect("failed to init contract");
+            crosscheck_with_env(
+                "(contract-call? .contract mint-ft u100)
+                (let ((result (contract-call? .contract transfer-ft u50 tx-sender)))
+                    {error-code: result, balance: (contract-call? .contract get-ft-balance)}
+                )",
+                Ok(Some(Value::Tuple(
+                    clarity::vm::types::TupleData::from_data(vec![
+                        (ClarityName::from_literal("balance"), Value::UInt(100)),
+                        (
+                            ClarityName::from_literal("error-code"),
+                            Value::error(Value::UInt(0)).unwrap(),
+                        ),
+                    ])
+                    .unwrap(),
+                ))),
+                env,
+            );
+        }
+
+        #[test]
+        fn as_contract_ft_no_allowance() {
+            let mut env = TestEnvironment::default();
+            let contract = r#"
+(define-fungible-token my-token)
+
+(define-public (mint-ft (amount uint))
+    (ft-mint? my-token amount current-contract)
+)
+
+(define-public (transfer-ft (amount uint) (recipient principal))
+    (begin
+        (try!
+            (as-contract? ()
+                (try! (ft-transfer? my-token amount current-contract recipient))
+            )
+        )
+        (ok true)
+    )
+)
+
+(define-read-only (get-ft-balance)
+    (ft-get-balance my-token current-contract)
+)
+"#;
+            env.init_contract_with_snippet("contract", contract)
+                .expect("failed to init contract");
+            crosscheck_with_env(
+                "(contract-call? .contract mint-ft u100)
+                (let ((result (contract-call? .contract transfer-ft u50 tx-sender)))
+                    {error-code: result, balance: (contract-call? .contract get-ft-balance)}
+                )",
+                Ok(Some(Value::Tuple(
+                    clarity::vm::types::TupleData::from_data(vec![
+                        (ClarityName::from_literal("balance"), Value::UInt(100)),
+                        (
+                            ClarityName::from_literal("error-code"),
+                            Value::error(Value::UInt(128)).unwrap(),
+                        ),
+                    ])
+                    .unwrap(),
+                ))),
+                env,
+            );
+        }
+
+        // ==================== with-nft ====================
+
+        #[test]
+        fn as_contract_nft_ok() {
+            let mut env = TestEnvironment::default();
+            let contract = r#"
+(define-non-fungible-token token uint)
+
+(define-public (mint-nft (asset uint))
+    (begin
+        (try! (nft-mint? token asset current-contract))
+        (ok true)
+    )
+)
+
+(define-public (transfer-token (asset uint))
+    (let ((recipient tx-sender))
+        (try!
+            (as-contract? ((with-nft .contract "token" (list u1)))
+                (try! (nft-transfer? token asset current-contract recipient))
+            )
+        )
+        (ok true)
+    )
+)
+"#;
+            env.init_contract_with_snippet("contract", contract)
+                .expect("failed to init contract");
+            crosscheck_with_env(
+                "(contract-call? .contract mint-nft u1)
+                (contract-call? .contract transfer-token u1)",
+                Ok(Some(Value::okay_true())),
+                env,
+            );
+        }
+
+        #[test]
+        fn as_contract_nft_wrong_id() {
+            let mut env = TestEnvironment::default();
+            let contract = r#"
+(define-non-fungible-token token uint)
+
+(define-public (mint-nft (asset uint))
+    (begin
+        (try! (nft-mint? token asset current-contract))
+        (ok true)
+    )
+)
+
+(define-public (transfer-token (asset uint))
+    (let ((recipient tx-sender))
+        (try!
+            (as-contract? ((with-nft .contract "token" (list u999)))
+                (try! (nft-transfer? token asset current-contract recipient))
+            )
+        )
+        (ok true)
+    )
+)
+
+(define-read-only (get-nft-owner (asset uint))
+    (nft-get-owner? token asset)
+)
+"#;
+            env.init_contract_with_snippet("contract", contract)
+                .expect("failed to init contract");
+            let contract_principal = Value::Principal(PrincipalData::Contract(
+                clarity::vm::types::QualifiedContractIdentifier::new(
+                    StandardPrincipalData::transient(),
+                    ContractName::from_literal("contract"),
+                ),
+            ));
+            crosscheck_with_env(
+                "(contract-call? .contract mint-nft u1)
+                (let ((result (contract-call? .contract transfer-token u1)))
+                    {error-code: result, owner: (contract-call? .contract get-nft-owner u1)}
+                )",
+                Ok(Some(Value::Tuple(
+                    clarity::vm::types::TupleData::from_data(vec![
+                        (
+                            ClarityName::from_literal("error-code"),
+                            Value::error(Value::UInt(0)).unwrap(),
+                        ),
+                        (
+                            ClarityName::from_literal("owner"),
+                            Value::some(contract_principal).unwrap(),
+                        ),
+                    ])
+                    .unwrap(),
+                ))),
+                env,
+            );
+        }
+
+        #[test]
+        fn as_contract_nft_no_allowance() {
+            let mut env = TestEnvironment::default();
+            let contract = r#"
+(define-non-fungible-token token uint)
+
+(define-public (mint-nft (asset uint))
+    (begin
+        (try! (nft-mint? token asset current-contract))
+        (ok true)
+    )
+)
+
+(define-public (transfer-token (asset uint))
+    (let ((recipient tx-sender))
+        (try!
+            (as-contract? ()
+                (try! (nft-transfer? token asset current-contract recipient))
+            )
+        )
+        (ok true)
+    )
+)
+
+(define-read-only (get-nft-owner (asset uint))
+    (nft-get-owner? token asset)
+)
+"#;
+            env.init_contract_with_snippet("contract", contract)
+                .expect("failed to init contract");
+            let contract_principal = Value::Principal(PrincipalData::Contract(
+                clarity::vm::types::QualifiedContractIdentifier::new(
+                    StandardPrincipalData::transient(),
+                    ContractName::from_literal("contract"),
+                ),
+            ));
+            crosscheck_with_env(
+                "(contract-call? .contract mint-nft u1)
+                (let ((result (contract-call? .contract transfer-token u1)))
+                    {error-code: result, owner: (contract-call? .contract get-nft-owner u1)}
+                )",
+                Ok(Some(Value::Tuple(
+                    clarity::vm::types::TupleData::from_data(vec![
+                        (
+                            ClarityName::from_literal("error-code"),
+                            Value::error(Value::UInt(128)).unwrap(),
+                        ),
+                        (
+                            ClarityName::from_literal("owner"),
+                            Value::some(contract_principal).unwrap(),
+                        ),
+                    ])
+                    .unwrap(),
+                ))),
+                env,
+            );
+        }
+
+        // ==================== with-stacking ====================
+
+        #[test]
+        fn as_contract_stacking_ok() {
+            let mut env = TestEnvironment::default();
+            let pox4_code = include_str!("../../tests/contracts/boot-contracts/pox-4.clar");
+            env.init_contract_with_snippet("pox-4", pox4_code)
+                .expect("failed to init pox-4 contract");
+
+            let wrapper = r#"
+(define-public (do-delegate (amount uint) (delegate-to principal))
+    (begin
+        (try!
+            (as-contract? ((with-stacking u1000000))
+                (unwrap-panic (contract-call? .pox-4 delegate-stx
+                    amount delegate-to none none))
+            )
+        )
+        (ok true)
+    )
+)
+"#;
+            env.init_contract_with_snippet("wrapper", wrapper)
+                .expect("failed to init wrapper contract");
+            crosscheck_with_env(
+                "(contract-call? .wrapper do-delegate u1000 tx-sender)",
+                Ok(Some(Value::okay_true())),
+                env,
+            );
+        }
+
+        #[test]
+        fn as_contract_stacking_pox_indirect() {
+            let mut env = TestEnvironment::default();
+            let pox4_code = include_str!("../../tests/contracts/boot-contracts/pox-4.clar");
+            env.init_contract_with_snippet("pox-4", pox4_code)
+                .expect("failed to init pox-4 contract");
+
+            let intermediary = r#"
+(define-public (do-delegate (amount uint) (delegate-to principal))
+    (contract-call? .pox-4 delegate-stx amount delegate-to none none)
+)
+"#;
+            env.init_contract_with_snippet("intermediary", intermediary)
+                .expect("failed to init intermediary contract");
+
+            // setup-allowance grants the intermediary permission to call pox-4
+            // on behalf of the wrapper (as-contract? changes tx-sender to wrapper)
+            let wrapper = r#"
+(define-public (setup-allowance)
+    (begin
+        (try!
+            (as-contract? ((with-all-assets-unsafe))
+                (unwrap-panic (contract-call? .pox-4 allow-contract-caller .intermediary none))
+            )
+        )
+        (ok true)
+    )
+)
+
+(define-public (delegate-via-intermediary (amount uint) (delegate-to principal))
+    (begin
+        (try!
+            (as-contract? ((with-stacking u1000000))
+                (unwrap-panic (contract-call? .intermediary do-delegate
+                    amount delegate-to))
+            )
+        )
+        (ok true)
+    )
+)
+"#;
+            env.init_contract_with_snippet("wrapper", wrapper)
+                .expect("failed to init wrapper contract");
+            crosscheck_with_env(
+                "(contract-call? .wrapper setup-allowance)
+                (contract-call? .wrapper delegate-via-intermediary u1000 tx-sender)",
+                Ok(Some(Value::okay_true())),
+                env,
+            );
+        }
+
+        #[test]
+        fn as_contract_stacking_and_stx_pox() {
+            let mut env = TestEnvironment::default();
+            let pox4_code = include_str!("../../tests/contracts/boot-contracts/pox-4.clar");
+            env.init_contract_with_snippet("pox-4", pox4_code)
+                .expect("failed to init pox-4 contract");
+
+            let wrapper = r#"
+(define-public (delegate-and-send-stx (delegate-amount uint) (stx-amount uint) (recipient principal))
+    (begin
+        (try!
+            (as-contract? ((with-stacking u1000000) (with-stx u500))
+                (begin
+                    (unwrap-panic (contract-call? .pox-4 delegate-stx
+                        delegate-amount recipient none none))
+                    (try! (stx-transfer? stx-amount current-contract recipient))
+                )
+            )
+        )
+        (ok true)
+    )
+)
+"#;
+            env.init_contract_with_snippet("wrapper", wrapper)
+                .expect("failed to init wrapper contract");
+
+            crosscheck_with_env(
+                "(stx-transfer? u1000 tx-sender .wrapper)
+                (contract-call? .wrapper delegate-and-send-stx u5000 u200 tx-sender)",
+                Ok(Some(Value::okay_true())),
+                env,
+            );
+        }
+
+        // ==================== mixed / multiple allowances ====================
+
+        #[test]
+        fn as_contract_wrong_allowance_type() {
+            let mut env = TestEnvironment::default();
+            let contract = r#"
+(define-fungible-token my-token)
+
+(define-public (send-stx (amount uint) (recipient principal))
+    (begin
+        (try!
+            (as-contract? ((with-ft .contract "my-token" u100))
+                (try! (stx-transfer? amount current-contract recipient))
+            )
+        )
+        (ok true)
+    )
+)
+"#;
+            env.init_contract_with_snippet("contract", contract)
+                .expect("failed to init contract");
+            crosscheck_with_env(
+                "(stx-transfer? u500 tx-sender .contract)
+                (let ((result (contract-call? .contract send-stx u50 tx-sender)))
+                    {error-code: result, balance: (stx-get-balance .contract)}
+                )",
+                Ok(Some(Value::Tuple(
+                    clarity::vm::types::TupleData::from_data(vec![
+                        (ClarityName::from_literal("balance"), Value::UInt(500)),
+                        (
+                            ClarityName::from_literal("error-code"),
+                            Value::error(Value::UInt(128)).unwrap(),
+                        ),
+                    ])
+                    .unwrap(),
+                ))),
+                env,
+            );
+        }
+
+        #[test]
+        fn as_contract_multiple_stx_second_violation() {
+            let mut env = TestEnvironment::default();
+            let contract = r#"
+(define-public (send-stx (amount uint) (recipient principal))
+    (begin
+        (try!
+            (as-contract? ((with-stx u100) (with-stx u20))
+                (try! (stx-transfer? amount current-contract recipient))
+            )
+        )
+        (ok true)
+    )
+)
+"#;
+            env.init_contract_with_snippet("contract", contract)
+                .expect("failed to init contract");
+            crosscheck_with_env(
+                "(stx-transfer? u500 tx-sender .contract)
+                (let ((result (contract-call? .contract send-stx u40 tx-sender)))
+                    {error-code: result, balance: (stx-get-balance .contract)}
+                )",
+                Ok(Some(Value::Tuple(
+                    clarity::vm::types::TupleData::from_data(vec![
+                        (ClarityName::from_literal("balance"), Value::UInt(500)),
+                        (
+                            ClarityName::from_literal("error-code"),
+                            Value::error(Value::UInt(1)).unwrap(),
+                        ),
+                    ])
+                    .unwrap(),
+                ))),
+                env,
+            );
+        }
+
+        #[test]
+        fn as_contract_mixed_stx_ft_nft() {
+            let mut env = TestEnvironment::default();
+            let contract = r#"
+(define-fungible-token my-token)
+(define-non-fungible-token my-nft uint)
+
+(define-public (mint-ft (amount uint))
+    (ft-mint? my-token amount current-contract)
+)
+
+(define-public (mint-nft (asset uint))
+    (begin
+        (try! (nft-mint? my-nft asset current-contract))
+        (ok true)
+    )
+)
+
+(define-public (transfer-all (ft-amount uint) (nft-id uint) (stx-amount uint))
+    (let ((recipient tx-sender))
+        (try!
+            (as-contract?
+                ((with-stx u500)
+                 (with-ft .contract "my-token" u200)
+                 (with-nft .contract "my-nft" (list u1 u2)))
+                (begin
+                    (try! (stx-transfer? stx-amount current-contract recipient))
+                    (try! (ft-transfer? my-token ft-amount current-contract recipient))
+                    (try! (nft-transfer? my-nft nft-id current-contract recipient))
+                )
+            )
+        )
+        (ok true)
+    )
+)
+"#;
+            env.init_contract_with_snippet("contract", contract)
+                .expect("failed to init contract");
+            crosscheck_with_env(
+                "(stx-transfer? u1000 tx-sender .contract)
+                (contract-call? .contract mint-ft u500)
+                (contract-call? .contract mint-nft u1)
+                (contract-call? .contract transfer-all u100 u1 u200)",
+                Ok(Some(Value::okay_true())),
+                env,
+            );
+        }
+
+        // ==================== nested as-contract? ====================
+
+        #[test]
+        fn as_contract_nested_unsafe_outer_nft_inner() {
+            let mut env = TestEnvironment::default();
+            let contract = r#"
+(define-non-fungible-token token uint)
+
+(define-public (mint-nft (asset uint))
+    (begin
+        (try! (nft-mint? token asset current-contract))
+        (ok true)
+    )
+)
+
+(define-public (transfer-token (asset uint))
+    (let ((recipient tx-sender))
+        (try!
+            (as-contract? ((with-all-assets-unsafe))
+                (try!
+                    (as-contract? ((with-nft .contract "token" (list u1)))
+                        (try! (nft-transfer? token asset current-contract recipient))
+                    )
+                )
+            )
+        )
+        (ok true)
+    )
+)
+"#;
+            env.init_contract_with_snippet("contract", contract)
+                .expect("failed to init contract");
+            crosscheck_with_env(
+                "(contract-call? .contract mint-nft u1)
+                (contract-call? .contract transfer-token u1)",
+                Ok(Some(Value::okay_true())),
+                env,
+            );
+        }
+
+        #[test]
+        fn as_contract_nested_inner_nft_violation() {
+            let mut env = TestEnvironment::default();
+            let contract = r#"
+(define-non-fungible-token token uint)
+
+(define-public (mint-nft (asset uint))
+    (begin
+        (try! (nft-mint? token asset current-contract))
+        (ok true)
+    )
+)
+
+(define-public (transfer-token (asset uint))
+    (let ((recipient tx-sender))
+        (try!
+            (as-contract? ((with-all-assets-unsafe))
+                (try!
+                    (as-contract? ((with-nft .contract "token" (list u999)))
+                        (try! (nft-transfer? token asset current-contract recipient))
+                    )
+                )
+            )
+        )
+        (ok true)
+    )
+)
+"#;
+            env.init_contract_with_snippet("contract", contract)
+                .expect("failed to init contract");
+            crosscheck_with_env(
+                "(contract-call? .contract mint-nft u1)
+                (contract-call? .contract transfer-token u1)",
+                Ok(Some(Value::error(Value::UInt(0)).unwrap())),
+                env,
+            );
+        }
+
+        #[test]
+        fn as_contract_nested_cross_contract() {
+            let mut env = TestEnvironment::default();
+            let callee = r#"
+(define-non-fungible-token token uint)
+
+(define-public (mint-nft (asset uint))
+    (begin
+        (try! (nft-mint? token asset current-contract))
+        (ok true)
+    )
+)
+
+(define-public (transfer-nft (asset uint) (recipient principal))
+    (begin
+        (try! (nft-transfer? token asset current-contract recipient))
+        (ok true)
+    )
+)
+"#;
+            let caller = r#"
+(define-public (do-transfer (asset uint))
+    (let ((recipient tx-sender))
+        (try!
+            (as-contract? ((with-all-assets-unsafe))
+                (try! (contract-call? .callee transfer-nft asset recipient))
+            )
+        )
+        (ok true)
+    )
+)
+"#;
+            env.init_contract_with_snippet("callee", callee)
+                .expect("failed to init callee");
+            env.init_contract_with_snippet("caller", caller)
+                .expect("failed to init caller");
+            crosscheck_with_env(
+                "(contract-call? .callee mint-nft u1)
+                (contract-call? .caller do-transfer u1)",
+                Ok(Some(Value::okay_true())),
+                env,
+            );
+        }
+
+        #[test]
+        fn as_contract_nested_stx_outer_ft_inner() {
+            let mut env = TestEnvironment::default();
+            let contract = r#"
+(define-fungible-token my-token)
+
+(define-public (mint-ft (amount uint))
+    (ft-mint? my-token amount current-contract)
+)
+
+(define-public (transfer-both (stx-amount uint) (ft-amount uint) (recipient principal))
+    (begin
+        (try!
+            (as-contract? ((with-stx u200) (with-ft .contract "my-token" u100))
+                (begin
+                    (try! (stx-transfer? stx-amount current-contract recipient))
+                    (try!
+                        (as-contract? ((with-ft .contract "my-token" u100))
+                            (try! (ft-transfer? my-token ft-amount current-contract recipient))
+                        )
+                    )
+                )
+            )
+        )
+        (ok true)
+    )
+)
+
+(define-read-only (get-ft-balance)
+    (ft-get-balance my-token current-contract)
+)
+"#;
+            env.init_contract_with_snippet("contract", contract)
+                .expect("failed to init contract");
+            crosscheck_with_env(
+                "(stx-transfer? u500 tx-sender .contract)
+                (contract-call? .contract mint-ft u200)
+                (let ((result (contract-call? .contract transfer-both u100 u50 tx-sender)))
+                    {result: result,
+                     stx-balance: (stx-get-balance .contract),
+                     ft-balance: (contract-call? .contract get-ft-balance)})",
+                Ok(Some(Value::Tuple(
+                    clarity::vm::types::TupleData::from_data(vec![
+                        (ClarityName::from_literal("ft-balance"), Value::UInt(150)),
+                        (ClarityName::from_literal("result"), Value::okay_true()),
+                        (ClarityName::from_literal("stx-balance"), Value::UInt(400)),
+                    ])
+                    .unwrap(),
+                ))),
+                env,
+            );
+        }
+
+        #[test]
+        fn as_contract_nested_inner_ft_violation_rollback() {
+            let mut env = TestEnvironment::default();
+            let contract = r#"
+(define-fungible-token my-token)
+
+(define-public (mint-ft (amount uint))
+    (ft-mint? my-token amount current-contract)
+)
+
+(define-public (transfer-both (stx-amount uint) (ft-amount uint) (recipient principal))
+    (begin
+        (try!
+            (as-contract? ((with-stx u200))
+                (begin
+                    (try! (stx-transfer? stx-amount current-contract recipient))
+                    (try!
+                        (as-contract? ((with-ft .contract "my-token" u10))
+                            (try! (ft-transfer? my-token ft-amount current-contract recipient))
+                        )
+                    )
+                )
+            )
+        )
+        (ok true)
+    )
+)
+
+(define-read-only (get-ft-balance)
+    (ft-get-balance my-token current-contract)
+)
+"#;
+            env.init_contract_with_snippet("contract", contract)
+                .expect("failed to init contract");
+            // Inner FT allowance u10 is too low for u50 transfer.
+            // The inner violation (err u0) propagates via try!, causing full rollback.
+            crosscheck_with_env(
+                "(stx-transfer? u500 tx-sender .contract)
+                (contract-call? .contract mint-ft u200)
+                (let ((result (contract-call? .contract transfer-both u100 u50 tx-sender)))
+                    {error-code: result,
+                     stx-balance: (stx-get-balance .contract),
+                     ft-balance: (contract-call? .contract get-ft-balance)}
+                )",
+                Ok(Some(Value::Tuple(
+                    clarity::vm::types::TupleData::from_data(vec![
+                        (
+                            ClarityName::from_literal("error-code"),
+                            Value::error(Value::UInt(0)).unwrap(),
+                        ),
+                        (ClarityName::from_literal("ft-balance"), Value::UInt(200)),
+                        (ClarityName::from_literal("stx-balance"), Value::UInt(500)),
+                    ])
+                    .unwrap(),
+                ))),
+                env,
+            );
+        }
+
+        #[test]
+        fn as_contract_nested_nft_outer_stx_inner() {
+            let mut env = TestEnvironment::default();
+            let contract = r#"
+(define-non-fungible-token token uint)
+
+(define-public (mint-nft (asset uint))
+    (begin
+        (try! (nft-mint? token asset current-contract))
+        (ok true)
+    )
+)
+
+(define-public (transfer-nft-and-stx (asset uint) (stx-amount uint))
+    (let ((recipient tx-sender))
+        (try!
+            (as-contract? ((with-nft .contract "token" (list u1)) (with-stx u200))
+                (begin
+                    (try! (nft-transfer? token asset current-contract recipient))
+                    (try!
+                        (as-contract? ((with-stx u200))
+                            (try! (stx-transfer? stx-amount current-contract recipient))
+                        )
+                    )
+                )
+            )
+        )
+        (ok true)
+    )
+)
+"#;
+            env.init_contract_with_snippet("contract", contract)
+                .expect("failed to init contract");
+            crosscheck_with_env(
+                "(stx-transfer? u500 tx-sender .contract)
+                (contract-call? .contract mint-nft u1)
+                (contract-call? .contract transfer-nft-and-stx u1 u100)",
+                Ok(Some(Value::okay_true())),
+                env,
+            );
+        }
     }
 }

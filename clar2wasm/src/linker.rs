@@ -1324,14 +1324,6 @@ fn link_exit_as_contract_new_fn(
                 };
 
                 let allowances = caller.data_mut().pop_as_contract().unwrap_or_default();
-                if allowances.is_empty() {
-                    caller
-                        .data_mut()
-                        .global_context
-                        .commit()
-                        .map_err(wasmtime::Error::new)?;
-                    return Ok((1i32, 0i32, 0i64, 0i64)); // no violation
-                }
 
                 let asset_map = caller.data_mut().global_context.get_readonly_asset_map()?;
 
@@ -1634,11 +1626,18 @@ fn link_with_nft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                     .key_type
                     .clone();
 
+                // Compute a safe max list length from the entry's serialized value size.
+                // ListTypeData::inner_size() = entry_size * max_len + type_overhead,
+                // so we need (MAX_VALUE_SIZE - type_overhead) / entry_size to stay
+                // within bounds and avoid ValueTooLarge.
+                let entry_size = key_type.size()?;
+                let max_list_len = (MAX_VALUE_SIZE.saturating_sub(entry_size + 5)) / entry_size;
+
                 let identifiers_value = read_from_wasm(
                     memory,
                     &mut caller,
                     &TypeSignature::SequenceType(SequenceSubtype::ListType(
-                        ListTypeData::new_list(key_type, MAX_VALUE_SIZE)?,
+                        ListTypeData::new_list(key_type, max_list_len)?,
                     )),
                     identifiers_offset,
                     identifiers_length,
@@ -1706,26 +1705,8 @@ fn link_with_stacking_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
         .func_wrap(
             "clarity",
             "with_stacking",
-            |mut caller: Caller<'_, ClarityWasmContext>,
-             allowance_offset: i32,
-             allowance_length: i32| {
-                let memory = caller
-                    .get_export("memory")
-                    .and_then(|export| export.into_memory())
-                    .ok_or(WasmError::MemoryNotFound)?;
-
-                let epoch = caller.data().global_context.epoch_id;
-
-                // Read the allowance amount
-                let allowance_value = read_from_wasm(
-                    memory,
-                    &mut caller,
-                    &TypeSignature::UIntType,
-                    allowance_offset,
-                    allowance_length,
-                    epoch,
-                )?;
-                let allowance = value_as_u128(&allowance_value)?;
+            |mut caller: Caller<'_, ClarityWasmContext>, allowance_lo: i64, allowance_hi: i64| {
+                let allowance = ((allowance_hi as u128) << 64) | ((allowance_lo as u64) as u128);
 
                 caller.data_mut().push_asset_context_stacking(allowance);
                 Ok(())
@@ -1748,23 +1729,8 @@ fn link_with_stx_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
         .func_wrap(
             "clarity",
             "with_stx",
-            |mut caller: Caller<'_, ClarityWasmContext>, amount_offset: i32, amount_length: i32| {
-                let memory = caller
-                    .get_export("memory")
-                    .and_then(|export| export.into_memory())
-                    .ok_or(WasmError::MemoryNotFound)?;
-
-                let epoch = caller.data().global_context.epoch_id;
-
-                let allowed_amount_value = read_from_wasm(
-                    memory,
-                    &mut caller,
-                    &TypeSignature::UIntType,
-                    amount_offset,
-                    amount_length,
-                    epoch,
-                )?;
-                let allowed_amount = value_as_u128(&allowed_amount_value)?;
+            |mut caller: Caller<'_, ClarityWasmContext>, amount_lo: i64, amount_hi: i64| {
+                let allowed_amount = ((amount_hi as u128) << 64) | ((amount_lo as u64) as u128);
 
                 caller.data_mut().push_asset_context_stx(allowed_amount);
                 Ok(())
