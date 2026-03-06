@@ -6364,14 +6364,10 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
         Ok(())
     })?;
 
-    linker.func_wrap(
-        "clarity",
-        "with_stx",
-        |_amount_lo: i64, _amount_hi: i64| {
-            println!("with_stx: enter");
-            Ok(())
-        },
-    )?;
+    linker.func_wrap("clarity", "with_stx", |_amount_lo: i64, _amount_hi: i64| {
+        println!("with_stx: enter");
+        Ok(())
+    })?;
 
     linker.func_wrap("clarity", "exit_with_stx", |_: Caller<'_, ()>| {
         println!("with_stx: exit");
