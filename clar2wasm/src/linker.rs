@@ -6315,10 +6315,12 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
     linker.func_wrap(
         "clarity",
         "with_ft",
-        |_asset_identifier_offset: i32,
-         _asset_identifier_length: i32,
-         _allowance_offset: i32,
-         _allowance_length: i32| {
+        |_contract_id_offset: i32,
+         _contract_id_length: i32,
+         _token_name_offset: i32,
+         _token_name_length: i32,
+         _amount_lo: i64,
+         _amount_hi: i64| {
             println!("with_ft: enter");
             Ok(())
         },
@@ -6332,10 +6334,12 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
     linker.func_wrap(
         "clarity",
         "with_nft",
-        |_asset_identifier_offset: i32,
-         _asset_identifier_length: i32,
-         _allowance_offset: i32,
-         _allowance_length: i32| {
+        |_contract_id_offset: i32,
+         _contract_id_length: i32,
+         _token_name_offset: i32,
+         _token_name_length: i32,
+         _identifiers_offset: i32,
+         _identifiers_length: i32| {
             println!("with_nft: enter");
             Ok(())
         },
@@ -6349,7 +6353,7 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
     linker.func_wrap(
         "clarity",
         "with_stacking",
-        |_allowance_offset: i32, _allowance_length: i32| {
+        |_allowance_lo: i64, _allowance_hi: i64| {
             println!("with_stacking: enter");
             Ok(())
         },
@@ -6363,7 +6367,7 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
     linker.func_wrap(
         "clarity",
         "with_stx",
-        |_allowance_offset: i32, _allowance_length: i32| {
+        |_amount_lo: i64, _amount_hi: i64| {
             println!("with_stx: enter");
             Ok(())
         },
