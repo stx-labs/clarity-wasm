@@ -1,7 +1,9 @@
+use std::collections::BTreeMap;
+
 use clarity::types::StacksEpochId;
-use clarity::vm::analysis::ContractAnalysis;
 use clarity::vm::types::{TypeSignature, TypeSignatureExt};
 use clarity::vm::{ClarityName, SymbolicExpression};
+use clarity_types::errors::CheckErrors;
 use walrus::ir::{BinaryOp, IfElse, InstrSeqType};
 use walrus::ValType;
 
@@ -91,7 +93,7 @@ impl ComplexWord for MapGet {
         let name = args.get_name(0)?;
         let key = args.get_expr(1)?;
 
-        let (key_ty, original_value_type) = generator
+        let (key_ty, value_type) = generator
             .maps_types
             .get(name)
             .ok_or_else(|| {
@@ -117,12 +119,15 @@ impl ComplexWord for MapGet {
         // cost tracking. In this case, the cost tracking charge is applied after the delete operation.
         // In epoch < 2.05, the charge is immediately computed like it is in the interpreter.
         let post205_cost_local = if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
-            let l = generator.borrow_local(ValType::I32);
-            Some(l)
+            Some(generator.borrow_local(ValType::I32))
         } else {
-            let contract_analysis = generator.contract_analysis_original.clone();
-            let (key_ty, value_ty) = get_original_types(&contract_analysis, name)?;
-            charge_default_cost_value_and_key_size(value_ty, key_ty, generator, builder, self)?;
+            let (key_ty, value_ty) = get_original_types(&generator.map_types_original, name)?;
+            charge_default_cost_value_and_key_size(
+                &value_ty.size().and_then(|a| key_ty.size().map(|b| a + b)),
+                generator,
+                builder,
+                self,
+            )?;
             None
         };
 
@@ -141,9 +146,9 @@ impl ComplexWord for MapGet {
         // Push the key offset and size to the data stack
         builder.local_get(key_offset).i32_const(key_size as i32);
 
-        let value_type = TypeSignature::OptionalType(Box::new(original_value_type.clone()));
+        let return_type = TypeSignature::OptionalType(Box::new(value_type.clone()));
         let (return_offset, size) =
-            generator.create_call_stack_local(builder, &value_type, true, true);
+            generator.create_call_stack_local(builder, &return_type, true, true);
 
         let return_size = generator.module.locals.add(ValType::I32);
         builder.i32_const(size).local_set(return_size);
@@ -156,9 +161,9 @@ impl ComplexWord for MapGet {
 
         // Host interface fills the result into the specified memory. Read it
         // back out, and place the value on the data stack.
-        generator.read_from_memory(builder, return_offset, 0, &value_type)?;
+        generator.read_from_memory(builder, return_offset, 0, &return_type)?;
 
-        let ty = clar2wasm_ty(&value_type);
+        let ty = clar2wasm_ty(&return_type);
 
         let block_ty = InstrSeqType::new(&mut generator.module.types, &ty.clone(), &ty);
         // In > 2.05 we have three different costs depending if
@@ -170,27 +175,23 @@ impl ComplexWord for MapGet {
             // When the linked operation does not fail due to an interpreter error
             let mut success_block = builder.dangling_instr_seq(block_ty);
             if let Some(cost_local) = &post205_cost_local {
-                generator.serialization_size(&mut success_block, &value_type)?;
+                generator.serialization_size(&mut success_block, &return_type)?;
                 let value_serialization_size = generator.borrow_local(ValType::I32);
                 // We check if the serialized size of the returned value is different than 1, aka the serialization size of a none
                 success_block
+                    // We check if the serialization size of the TOS is not equal to 1, Which is the serialization size of a none
+                    // If it is not a none, aka a value was found in the map, we add the serialization size of the value we retrieved to the cost
+                    // Otherwise the cost is just the serialization size key
                     .local_tee(*value_serialization_size)
+                    .i32_const(0)
+                    .local_get(*value_serialization_size)
                     .i32_const(1)
                     .binop(BinaryOp::I32Ne)
-                    .if_else(
-                        None,
-                        |then| {
-                            // If it is different it means that a value was found in the map
-                            // In which case we charge the serialization size of the key + the serialization size of the found value
-                            then.local_get(**cost_local)
-                                .local_get(*value_serialization_size)
-                                .binop(BinaryOp::I32Add)
-                                .local_set(**cost_local);
-                        },
-                        |_| {
-                            // If it is equal then we charge only the serialization size of the key, which has already been assigned to post205_cost_local
-                        },
-                    );
+                    .select(None);
+                success_block
+                    .local_get(**cost_local)
+                    .binop(BinaryOp::I32Add)
+                    .local_set(**cost_local);
                 self.charge(generator, &mut success_block, **cost_local)?;
             }
             success_block.id()
@@ -200,11 +201,9 @@ impl ComplexWord for MapGet {
             // When the linked operation fails due to an interpreter error
             let mut error_block = builder.dangling_instr_seq(None);
             if post205_cost_local.is_some() {
-                let contract_analysis = generator.contract_analysis_original.clone();
-                let (key_ty, value_ty) = get_original_types(&contract_analysis, name)?;
+                let (key_ty, value_ty) = get_original_types(&generator.map_types_original, name)?;
                 charge_default_cost_value_and_key_size(
-                    value_ty,
-                    key_ty,
+                    &value_ty.size().and_then(|a| key_ty.size().map(|b| a + b)),
                     generator,
                     &mut error_block,
                     self,
@@ -279,12 +278,15 @@ impl ComplexWord for MapSet {
         // cost tracking. In this case, the cost tracking charge is applied after the delete operation.
         // In epoch < 2.05, the charge is immediately computed like it is in the interpreter.
         let post205_cost_local = if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
-            let l = generator.borrow_local(ValType::I32);
-            Some(l)
+            Some(generator.borrow_local(ValType::I32))
         } else {
-            let contract_analysis = generator.contract_analysis_original.clone();
-            let (key_ty, value_ty) = get_original_types(&contract_analysis, name)?;
-            charge_default_cost_value_and_key_size(value_ty, key_ty, generator, builder, self)?;
+            let (key_ty, value_ty) = get_original_types(&generator.map_types_original, name)?;
+            charge_default_cost_value_and_key_size(
+                &value_ty.size().and_then(|a| key_ty.size().map(|b| a + b)),
+                generator,
+                builder,
+                self,
+            )?;
             None
         };
 
@@ -344,11 +346,9 @@ impl ComplexWord for MapSet {
 
             if post205_cost_local.is_some() {
                 // The cost in < 2.05 has already been handled before
-                let contract_analysis = generator.contract_analysis_original.clone();
-                let (key_ty, value_ty) = get_original_types(&contract_analysis, name)?;
+                let (key_ty, value_ty) = get_original_types(&generator.map_types_original, name)?;
                 charge_default_cost_value_and_key_size(
-                    value_ty,
-                    key_ty,
+                    &value_ty.size().and_then(|a| key_ty.size().map(|b| a + b)),
                     generator,
                     &mut error_block,
                     self,
@@ -424,12 +424,18 @@ impl ComplexWord for MapInsert {
         // cost tracking. In this case, the cost tracking charge is applied after the delete operation.
         // In epoch < 2.05, the charge is immediately computed like it is in the interpreter.
         let post205_cost_local = if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
-            let l = generator.borrow_local(ValType::I32);
-            Some(l)
+            Some((
+                generator.borrow_local(ValType::I32),
+                generator.borrow_local(ValType::I32),
+            ))
         } else {
-            let contract_analysis = generator.contract_analysis_original.clone();
-            let (key_ty, value_ty) = get_original_types(&contract_analysis, name)?;
-            charge_default_cost_value_and_key_size(value_ty, key_ty, generator, builder, self)?;
+            let (key_ty, value_ty) = get_original_types(&generator.map_types_original, name)?;
+            charge_default_cost_value_and_key_size(
+                &value_ty.size().and_then(|a| key_ty.size().map(|b| a + b)),
+                generator,
+                builder,
+                self,
+            )?;
             None
         };
 
@@ -437,7 +443,7 @@ impl ComplexWord for MapInsert {
         generator.set_expr_type(key, key_ty.clone())?;
         generator.traverse_expr(builder, key)?;
 
-        if let Some(cost_local) = &post205_cost_local {
+        if let Some((cost_local, _)) = &post205_cost_local {
             generator.serialization_size(builder, &key_ty)?;
             builder.local_set(**cost_local);
         }
@@ -455,13 +461,9 @@ impl ComplexWord for MapInsert {
         generator.set_expr_type(value, value_type.clone())?;
         generator.traverse_expr(builder, value)?;
         // for epoch >= 2.05, we compute the serialization size of the key.
-        let post205_serialized_sized_value_local = if post205_cost_local.is_some() {
-            let l = generator.borrow_local(ValType::I32);
+        if let Some((_, serialized_sized_value_local)) = &post205_cost_local {
             generator.serialization_size(builder, &value_type)?;
-            builder.local_set(*l);
-            Some(l)
-        } else {
-            None
+            builder.local_set(**serialized_sized_value_local);
         };
 
         // Write the value to the memory (it's already on the data stack)
@@ -487,26 +489,22 @@ impl ComplexWord for MapInsert {
         let success_block_id = {
             // When the linked operation does not fail due to an interpreter error
             let mut success_block = builder.dangling_instr_seq(block_ty);
-            if let (Some(cost_local), Some(value_serialized_size_local)) =
-                (&post205_cost_local, &post205_serialized_sized_value_local)
-            {
+            // The cost in < 2.05 has already been handled before
+            if let Some((cost_local, value_serialized_size_local)) = &post205_cost_local {
                 let entry_status = generator.borrow_local(ValType::I32);
-                // The cost in < 2.05 has already been handled before
-                success_block.local_tee(*entry_status).if_else(
-                    None,
-                    |then| {
-                        // When the element the operation is performed on was found in the map
-                        // Then we charge the serialized size of the entry we want to store + serialized size of the key
-                        then.local_get(**cost_local)
-                            .local_get(**value_serialized_size_local)
-                            .binop(BinaryOp::I32Add)
-                            .local_set(**cost_local);
-                    },
-                    |_| {
-                        // When the element the operation is performed on was not found in the map
-                        // Then we only charge the serialized size of the key which is already stored in cost_local
-                    },
-                );
+                // When the element the operation is performed on was found in the map
+                // Then we charge the serialized size of the entry we want to store + serialized size of the key
+                // Otherwise just the serialized size of the key
+                success_block
+                    .local_set(*entry_status)
+                    .local_get(**value_serialized_size_local)
+                    .i32_const(0)
+                    .local_get(*entry_status)
+                    .select(None);
+                success_block
+                    .local_get(**cost_local)
+                    .binop(BinaryOp::I32Add)
+                    .local_set(**cost_local);
                 self.charge(generator, &mut success_block, **cost_local)?;
                 success_block.local_get(*entry_status);
             }
@@ -517,11 +515,9 @@ impl ComplexWord for MapInsert {
             // When the linked operation fails due to an interpreter error
             let mut error_block = builder.dangling_instr_seq(None);
             if post205_cost_local.is_some() {
-                let contract_analysis = generator.contract_analysis_original.clone();
-                let (key_ty, value_ty) = get_original_types(&contract_analysis, name)?;
+                let (key_ty, value_ty) = get_original_types(&generator.map_types_original, name)?;
                 charge_default_cost_value_and_key_size(
-                    value_ty,
-                    key_ty,
+                    &value_ty.size().and_then(|a| key_ty.size().map(|b| a + b)),
                     generator,
                     &mut error_block,
                     self,
@@ -578,39 +574,14 @@ impl ComplexWord for MapDelete {
             })?
             .clone();
 
-        // This will compute the key type size and charge on it. If this operation fails,
-        // we still need to be able to compile the contract, so we generate a runtime error.
-        let charge_default_cost_key_size = |generator: &mut WasmGenerator,
-                                            builder: &mut walrus::InstrSeqBuilder,
-                                            key_type: &TypeSignature,
-                                            word: &dyn ComplexWord|
-         -> Result<(), GeneratorError> {
-            // The two cases it is used in are:
-            // 1) for cost computation in epoch < 2.05
-            // 2) for cost computation in case of an interpreter error in epoch >= 2.05
-            match key_type.size() {
-                Ok(key_size) => {
-                    word.charge(generator, builder, key_size)?;
-                }
-                Err(_) => {
-                    builder
-                        .i32_const(ErrorMap::SignatureTypeSizeCheckError as i32)
-                        .call(generator.func_by_name("stdlib.runtime-error"));
-                }
-            }
-            Ok(())
-        };
-
         // In epoch >= 2.05, we generate a local to compute intermediary results used in the
         // cost tracking. In this case, the cost tracking charge is applied after the delete operation.
         // In epoch < 2.05, the charge is immediately computed like it is in the interpreter.
         let post205_cost_local = if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
-            let l = generator.borrow_local(ValType::I32);
-            Some(l)
+            Some(generator.borrow_local(ValType::I32))
         } else {
-            let contract_analysis = generator.contract_analysis_original.clone();
-            let (key_ty, _) = get_original_types(&contract_analysis, name)?;
-            charge_default_cost_key_size(generator, builder, key_ty, self)?;
+            let (key_ty, _) = get_original_types(&generator.map_types_original, name)?;
+            charge_default_cost_value_and_key_size(&key_ty.size(), generator, builder, self)?;
             None
         };
 
@@ -683,9 +654,13 @@ impl ComplexWord for MapDelete {
 
             // in epoch >= 2.05, we charge depending on the size of the key.
             if post205_cost_local.is_some() {
-                let contract_analysis = generator.contract_analysis_original.clone();
-                let (key_ty, _) = get_original_types(&contract_analysis, name)?;
-                charge_default_cost_key_size(generator, &mut error_block, key_ty, self)?;
+                let (key_ty, _) = get_original_types(&generator.map_types_original, name)?;
+                charge_default_cost_value_and_key_size(
+                    &key_ty.size(),
+                    generator,
+                    &mut error_block,
+                    self,
+                )?;
             }
 
             // Throws back the runtime error that occurred in the interpreter after charging the cost
@@ -717,32 +692,31 @@ impl ComplexWord for MapDelete {
 /// 1) for cost computation in epoch < 2.05
 /// 2) for cost computation in case of an interpreter error in epoch >= 2.05
 fn charge_default_cost_value_and_key_size(
-    value_type: &TypeSignature,
-    key_type: &TypeSignature,
+    cost: &Result<u32, CheckErrors>,
     generator: &mut WasmGenerator,
     builder: &mut walrus::InstrSeqBuilder,
     word: &dyn ComplexWord,
 ) -> Result<(), GeneratorError> {
-    match (value_type.size(), key_type.size()) {
-        (Ok(value_size), Ok(key_size)) => {
-            word.charge(generator, builder, value_size + key_size)?;
-        }
-        (_, Err(_)) | (Err(_), _) => {
-            builder
-                .i32_const(ErrorMap::SignatureTypeSizeCheckError as i32)
-                .call(generator.func_by_name("stdlib.runtime-error"));
-        }
+    if let Ok(cost) = cost {
+        word.charge(generator, builder, *cost)?;
+    } else {
+        builder
+            .i32_const(ErrorMap::SignatureTypeSizeCheckError as i32)
+            .call(generator.func_by_name("stdlib.runtime-error"));
     }
     Ok(())
 }
-
-fn get_original_types<'a>(
-    contract_analysis: &'a ContractAnalysis,
+type MapTypes = BTreeMap<ClarityName, (TypeSignature, TypeSignature)>;
+fn get_original_types(
+    map_types: &MapTypes,
     name: &str,
-) -> Result<&'a (TypeSignature, TypeSignature), GeneratorError> {
-    contract_analysis.get_map_type(name).ok_or_else(|| {
-        GeneratorError::TypeError("Types should have been set in contract analysis".to_owned())
-    })
+) -> Result<(TypeSignature, TypeSignature), GeneratorError> {
+    map_types
+        .get(name)
+        .ok_or_else(|| {
+            GeneratorError::TypeError("Types should have been set in contract analysis".to_owned())
+        })
+        .map(|(t1, t2)| (t1.clone(), t2.clone()))
 }
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Deref;
 use std::rc::Rc;
 
@@ -39,8 +39,8 @@ pub struct WasmGenerator {
     /// The contract analysis, which contains the expressions and type
     /// information for the contract.
     pub(crate) contract_analysis: ContractAnalysis,
-    /// original contract_analysis were types have not been mingled with for the duck typing.
-    pub(crate) contract_analysis_original: ContractAnalysis,
+    /// original map_types, used for cost computation were we need a 1:1 mapping of the original complete types
+    pub(crate) map_types_original: BTreeMap<ClarityName, (TypeSignature, TypeSignature)>,
     /// The WebAssembly module that is being generated.
     pub(crate) module: Module,
     /// Offset of the end of the literal memory.
@@ -390,7 +390,7 @@ impl WasmGenerator {
         let linked_error_id = get_global(&module, "runtime-error-linked")?;
 
         Ok(WasmGenerator {
-            contract_analysis_original: contract_analysis.clone(),
+            map_types_original: contract_analysis.map_types.clone(),
             contract_analysis,
             module,
             literal_memory_end: END_OF_STANDARD_DATA,
