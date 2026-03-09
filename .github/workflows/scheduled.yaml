@@ -1,6 +1,7 @@
 name: Property Testings
 
 on:
+  workflow_dispatch:
   schedule:
     - cron: '0 */4 * * *'
 
@@ -41,7 +42,6 @@ jobs:
           channel-id: ${{ secrets.CHANNEL_ID }}
           payload: |
             {
-              "text": "Property Testing #${{ github.run_number }} Clarity::V${{ matrix.clarity_version }} failed.",
               "blocks": [
                 {
                   "type": "section",

@@ -353,9 +353,10 @@ fn prop_0_pow_int_something_is_zero() {
                     res_slice,
                 )
                 .unwrap_or_else(|_| panic!("Could not call exported function pow-uint"));
-                let wasm_result = i128::from_wasm_result(res_slice);
+                let _wasm_result = i128::from_wasm_result(res_slice);
 
-                prop_assert_eq!(if i128::from(m) == 0 {1} else {0}, wasm_result);
+                // this is going to make the test fail for testing the slack messaging bot
+                prop_assert_eq!(if i128::from(m) == 0 {1} else {0}, 100);
             }
         };
     }
