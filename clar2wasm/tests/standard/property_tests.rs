@@ -353,17 +353,8 @@ fn prop_0_pow_int_something_is_zero() {
                     res_slice,
                 )
                 .unwrap_or_else(|_| panic!("Could not call exported function pow-uint"));
-
-                // TODO: revert this block after testing the slack notification bot.
-                // GITHUB_WORKFLOW is set by GitHub Actions to the workflow's `name` field.
-                // This only matches the "Property Testings" scheduled workflow, so:
-                //   - Locally: env var is unset → skipped → test passes
-                //   - PR CI: env var is "CI" (different name) → test passes
-                //   - Property Testings workflow: env var matches → forced failure → triggers Slack notification
-                if std::env::var("GITHUB_WORKFLOW").as_deref() == Ok("Property Testings") {
-                    prop_assert_eq!(if i128::from(m) == 0 {1} else {0}, 100);
-                }
                 let wasm_result = i128::from_wasm_result(res_slice);
+
                 prop_assert_eq!(if i128::from(m) == 0 {1} else {0}, wasm_result);
             }
         };
