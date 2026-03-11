@@ -1289,7 +1289,7 @@ fn link_enter_as_contract_new_fn(
                     .clone()
                     .into();
                 caller.data_mut().global_context.begin();
-                caller.data_mut().push_as_contract();
+                caller.data_mut().push_allowance_context();
                 caller.data_mut().push_sender(contract_principal.clone());
                 caller.data_mut().push_caller(contract_principal);
             },
@@ -1323,20 +1323,23 @@ fn link_exit_as_contract_new_fn(
                     owner?
                 };
 
-                let allowances = caller.data_mut().pop_as_contract().unwrap_or_default();
+                let allowances = caller
+                    .data_mut()
+                    .pop_allowance_context()
+                    .unwrap_or_default();
 
                 let asset_map = caller.data_mut().global_context.get_readonly_asset_map()?;
 
                 match check_allowances(&owner, allowances, asset_map)? {
                     None => {
                         caller.data_mut().global_context.commit()?;
-                        Ok((1i32, 0i32, 0i64, 0i64)) // no violation
+                        Ok((1i32, 0i64, 0i64)) // no violation
                     }
                     Some(violation_index) => {
                         caller.data_mut().global_context.roll_back()?;
                         let lo = violation_index as i64;
                         let hi = (violation_index >> 64) as i64;
-                        Ok((0i32, 0i32, lo, hi)) // violation — Wasm returns (err index)
+                        Ok((0i32, lo, hi)) // violation — Wasm returns (err index)
                     }
                 }
             },
@@ -1446,12 +1449,26 @@ fn check_allowances(
     // Check NFT movements
     if let Some(nft_moved) = assets.get_all_nonfungible_tokens(owner) {
         for (asset, ids_moved) in nft_moved {
-            let Some((index, allowed_ids)) = nft_allowances.get(asset) else {
+            // Build merged allowance list: exact-match + wildcard entries for the same contract
+            let mut merged: Vec<(usize, &Vec<Value>)> = Vec::new();
+            if let Some((index, allowance_vec)) = nft_allowances.get(asset) {
+                merged.push((*index, allowance_vec));
+            }
+            if let Some((index, allowance_vec)) = nft_allowances.get(&AssetIdentifier {
+                contract_identifier: asset.contract_identifier.clone(),
+                asset_name: ClarityName::from_literal("*"),
+            }) {
+                merged.push((*index, allowance_vec));
+            }
+
+            if merged.is_empty() {
                 return Ok(Some(MAX_ALLOWANCES as u128));
-            };
+            }
             for id in ids_moved {
-                if !allowed_ids.contains(id) {
-                    return Ok(Some(idx_to_u128(*index)?));
+                for (index, allowed_ids) in &merged {
+                    if !allowed_ids.contains(id) {
+                        return Ok(Some(idx_to_u128(*index)?));
+                    }
                 }
             }
         }
@@ -1613,18 +1630,78 @@ fn link_with_nft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                 .expect_ascii()?;
                 let asset_name = ClarityName::try_from(token_name.clone())?;
 
-                let key_type = caller
-                    .data()
-                    .contract_context()
-                    .meta_nft
-                    .get(&asset_name)
-                    .ok_or_else(|| {
-                        WasmError::Expect(
-                            StaticCheckErrorKind::NoSuchNFT(token_name.clone()).to_string(),
-                        )
-                    })?
-                    .key_type
-                    .clone();
+                // Read the contract principal first — needed for both wildcard
+                // and non-wildcard paths.
+                let contract_principal = read_from_wasm(
+                    memory,
+                    &mut caller,
+                    &TypeSignature::PrincipalType,
+                    contract_id_offset,
+                    contract_id_length,
+                    epoch,
+                )?;
+                let contract_id = match &contract_principal {
+                    Value::Principal(PrincipalData::Contract(contract_id)) => contract_id,
+                    _ => {
+                        return Err(RuntimeCheckErrorKind::ContractCallExpectName.into());
+                    }
+                };
+
+                // Resolve the NFT key type, which is needed to deserialize the
+                // identifiers list from WASM memory.
+                let key_type = if token_name == "*" {
+                    // For wildcard: look up the target contract and use the first
+                    // NFT's key type. The type checker already validated the list
+                    // type at compile time.
+                    let contract = caller
+                        .data_mut()
+                        .global_context
+                        .database
+                        .get_contract(contract_id)?;
+                    contract
+                        .meta_nft
+                        .values()
+                        .next()
+                        .ok_or_else(|| {
+                            WasmError::Expect(
+                                StaticCheckErrorKind::NoSuchNFT(token_name.clone()).to_string(),
+                            )
+                        })?
+                        .key_type
+                        .clone()
+                } else {
+                    // For exact match: look up the specific NFT in the current
+                    // contract context.
+                    let nft_info = caller
+                        .data()
+                        .contract_context()
+                        .meta_nft
+                        .get(&asset_name)
+                        .ok_or_else(|| {
+                            WasmError::Expect(
+                                StaticCheckErrorKind::NoSuchNFT(token_name.clone()).to_string(),
+                            )
+                        })?;
+                    let key_type = nft_info.key_type.clone();
+
+                    // Also validate the NFT exists in the target contract.
+                    let contract = caller
+                        .data_mut()
+                        .global_context
+                        .database
+                        .get_contract(contract_id)?;
+                    contract
+                        .meta_nft
+                        .contains_key(&asset_name)
+                        .then_some(())
+                        .ok_or_else(|| {
+                            WasmError::Expect(
+                                StaticCheckErrorKind::NoSuchNFT(token_name.clone()).to_string(),
+                            )
+                        })?;
+
+                    key_type
+                };
 
                 // Compute a safe max list length from the entry's serialized value size.
                 // ListTypeData::inner_size() = entry_size * max_len + type_overhead,
@@ -1644,38 +1721,6 @@ fn link_with_nft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                     epoch,
                 )?;
                 let allowed_identifiers = identifiers_value.expect_list()?;
-
-                let contract_principal = read_from_wasm(
-                    memory,
-                    &mut caller,
-                    &TypeSignature::PrincipalType,
-                    contract_id_offset,
-                    contract_id_length,
-                    epoch,
-                )?;
-                let contract_id = match &contract_principal {
-                    Value::Principal(PrincipalData::Contract(contract_id)) => contract_id,
-                    _ => {
-                        return Err(RuntimeCheckErrorKind::ContractCallExpectName.into());
-                    }
-                };
-
-                if token_name != "*" {
-                    let contract = caller
-                        .data_mut()
-                        .global_context
-                        .database
-                        .get_contract(contract_id)?;
-                    contract
-                        .meta_nft
-                        .contains_key(&asset_name)
-                        .then_some(())
-                        .ok_or_else(|| {
-                            WasmError::Expect(
-                                StaticCheckErrorKind::NoSuchNFT(token_name.clone()).to_string(),
-                            )
-                        })?;
-                }
 
                 let asset_identifier = AssetIdentifier {
                     contract_identifier: contract_id.clone(),
@@ -6295,7 +6340,7 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
 
     linker.func_wrap("clarity", "exit_as_contract_new", |_: Caller<'_, ()>| {
         println!("as-contract: exit");
-        Ok((0i32, 0i32, 0i64, 0i64))
+        Ok((0i32, 0i64, 0i64))
     })?;
 
     linker.func_wrap("clarity", "with_all_assets_unsafe", |_: Caller<'_, ()>| {

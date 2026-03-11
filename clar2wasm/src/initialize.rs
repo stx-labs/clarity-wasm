@@ -135,15 +135,18 @@ impl<'a, 'b> ClarityWasmContext<'a, 'b> {
             )))
     }
 
-    pub fn push_as_contract(&mut self) {
+    pub fn push_allowance_context(&mut self) {
         self.asset_context_stack.push(Vec::new());
     }
 
-    pub fn pop_as_contract(&mut self) -> Option<Vec<Allowance>> {
+    pub fn pop_allowance_context(&mut self) -> Option<Vec<Allowance>> {
         self.asset_context_stack.pop()
     }
 
     pub fn push_asset_context_unsafe(&mut self) {
+        if self.asset_context_stack.is_empty() {
+            self.asset_context_stack.push(vec![]);
+        }
         self.asset_context_stack
             .last_mut()
             .unwrap()

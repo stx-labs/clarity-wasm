@@ -653,7 +653,7 @@ lazy_static! {
             },
         );
         map.insert(
-            AsContract::Original.name(),
+            AsContract::PreClarity4.name(),
             WordCost {
                 runtime: Constant(138),
                 read_count: None,

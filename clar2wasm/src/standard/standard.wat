@@ -50,7 +50,7 @@
     (import "clarity" "enter_as_contract_original" (func $stdlib.enter_as_contract_original))
     (import "clarity" "exit_as_contract_original" (func $stdlib.exit_as_contract_original))
     (import "clarity" "enter_as_contract_new" (func $stdlib.enter_as_contract_new))
-    (import "clarity" "exit_as_contract_new" (func $stdlib.exit_as_contract_new (result i32 i32 i64 i64)))
+    (import "clarity" "exit_as_contract_new" (func $stdlib.exit_as_contract_new (result i32 i64 i64)))
     (import "clarity" "with_all_assets_unsafe" (func $stdlib.with_all_assets_unsafe))
     (import "clarity" "with_ft" (func $stdlib.with_ft (param $contract_id_offset i32)
                                                       (param $contract_id_length i32)
