@@ -16,6 +16,15 @@
 
 ## Features
 
+- **Full Clarity Language Support** - Compile Clarity v1 through v4 contracts to WebAssembly
+- **Type-Safe Compilation** - Leverages Clarity's type system for safe WebAssembly code generation
+- **128-bit Arithmetic** - Full support for Clarity's 128-bit integer operations
+- **Standard Library** - Built-in standard library implementing core Clarity operations
+- **Cost Tracking** - Optional execution cost tracking code generation
+- **Host Interface** - Clean host interface for blockchain interaction (MARF, events, etc.)
+- **Benchmarking Tools** - Integrated benchmarking with flamegraph and protobuf support
+- **Developer Mode** - Test utilities for development and debugging
+
 ## Quick-start
 
 ### Clone the repository
@@ -236,4 +245,41 @@ To standardize the formatting of the code, we use rustfmt. To format your change
 
 ```sh
 cargo +nightly fmt-stacks
+```
+
+## Development Prerequisites
+
+Before building clar2wasm, ensure you have:
+
+- **Rust toolchain** - Install via [rustup](https://rustup.rs/) (stable + nightly for formatting)
+- **Git** - For cloning and submodule management
+- **wasm-tools** (optional) - For validating generated Wasm files
+- **wabt** (optional) - For viewing Wasm text format with `wasm2wat`
+
+## Troubleshooting
+
+### Common Issues
+
+**Submodule not initialized**
+```
+error: could not find `clarity` crate
+```
+Solution: Run `git submodule update --init --recursive`
+
+**Nightly toolchain not available**
+```
+error: toolchain 'nightly-x86_64-...' is not installed
+```
+Solution: Run `rustup toolchain install nightly`
+
+**Formatting check fails**
+```
+Diff in /path/to/file.rs
+```
+Solution: Run `cargo +nightly fmt-stacks` to auto-format your code
+
+**Build fails with linker errors**
+Ensure all required system libraries are installed. On Ubuntu/Debian:
+```sh
+sudo apt-get install build-essential pkg-config libssl-dev
 ```

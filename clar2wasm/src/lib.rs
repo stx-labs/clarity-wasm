@@ -1,3 +1,50 @@
+//! # clar2wasm
+//!
+//! `clar2wasm` is a compiler for generating [WebAssembly](https://webassembly.org/) from
+//! [Clarity](https://github.com/clarity-lang/reference) smart contract source code.
+//!
+//! ## Overview
+//!
+//! This crate provides the core compilation functionality to transform Clarity smart contracts
+//! into WebAssembly modules that can be executed in a Wasm runtime environment. The compilation
+//! process includes parsing, type analysis, and code generation phases.
+//!
+//! ## Module Organization
+//!
+//! - [`wasm_generator`] - Core WebAssembly code generation from Clarity AST
+//! - [`wasm_utils`] - Utility functions for WebAssembly operations
+//! - [`linker`] - WebAssembly linker for connecting host functions
+//! - [`initialize`] - Module initialization utilities
+//! - [`datastore`] - Data storage interface for contract state
+//! - [`tools`] - Development and debugging tools
+//! - [`duck_type`] - Dynamic type checking utilities
+//!
+//! ## Usage
+//!
+//! The primary entry point is the [`compile`] function:
+//!
+//! ```ignore
+//! use clar2wasm::compile;
+//!
+//! let source = "(define-read-only (hello) \"world\")";
+//! let result = compile(
+//!     source,
+//!     &contract_id,
+//!     cost_tracker,
+//!     clarity_version,
+//!     epoch,
+//!     &mut analysis_db,
+//!     false,
+//! );
+//! ```
+//!
+//! ## Features
+//!
+//! - `developer-mode` - Enables test utilities for development
+//! - `test-clarity-v1` through `test-clarity-v4` - Test with specific Clarity versions
+//! - `flamegraph` - Enable flamegraph profiling for benchmarks
+//! - `pb` - Enable protobuf output for benchmarks
+
 use clarity::types::StacksEpochId;
 use clarity::vm::analysis::{run_analysis, AnalysisDatabase, ContractAnalysis};
 use clarity::vm::ast::{build_ast_with_diagnostics, ContractAST};
@@ -30,6 +77,14 @@ mod error_mapping;
 #[cfg(feature = "developer-mode")]
 pub mod test_utils;
 
+/// Block execution cost limits for Stacks 2.1 mainnet.
+///
+/// These constants define the maximum execution costs allowed per block:
+/// - `write_length`: Maximum bytes written (15 MB)
+/// - `write_count`: Maximum write operations (15,000)
+/// - `read_length`: Maximum bytes read (100 MB)
+/// - `read_count`: Maximum read operations (15,000)
+/// - `runtime`: Maximum runtime cost units (5 billion)
 // FIXME: This is copied from stacks-blockchain
 // Block limit in Stacks 2.1
 pub const BLOCK_LIMIT_MAINNET_21: ExecutionCost = ExecutionCost {
@@ -40,23 +95,60 @@ pub const BLOCK_LIMIT_MAINNET_21: ExecutionCost = ExecutionCost {
     runtime: 5_000_000_000,
 };
 
+/// The successful result of compiling a Clarity contract to WebAssembly.
+///
+/// Contains all artifacts produced during compilation, including the AST,
+/// any diagnostics (warnings), the generated Wasm module, and the contract analysis.
 #[derive(Debug)]
 pub struct CompileResult {
+    /// The abstract syntax tree of the parsed Clarity source code.
     pub ast: ContractAST,
+    /// Any diagnostic messages (typically warnings) produced during compilation.
     pub diagnostics: Vec<Diagnostic>,
+    /// The generated WebAssembly module.
     pub module: Module,
+    /// The result of type analysis on the contract.
     pub contract_analysis: ContractAnalysis,
 }
 
+/// Error type returned when contract compilation fails.
+///
+/// Contains the partial compilation state at the point of failure,
+/// which can be useful for error reporting and debugging.
 #[derive(Debug)]
 pub enum CompileError {
+    /// A generic compilation error containing the AST, diagnostics, and cost tracker.
     Generic {
+        /// The AST at the point of failure.
         ast: Box<ContractAST>,
+        /// Diagnostic messages including the error that caused the failure.
         diagnostics: Vec<Diagnostic>,
+        /// The cost tracker at the point of failure.
         cost_tracker: Box<LimitedCostTracker>,
     },
 }
 
+/// Compiles Clarity source code into a WebAssembly module.
+///
+/// This is the primary entry point for the compilation process. It performs:
+/// 1. Parsing: Converts source code to an AST
+/// 2. Analysis: Type checking and semantic analysis
+/// 3. Concretization: Resolves union and callable types
+/// 4. Code generation: Produces the WebAssembly module
+///
+/// # Arguments
+///
+/// * `source` - The Clarity source code to compile
+/// * `contract_id` - The qualified contract identifier
+/// * `cost_tracker` - Tracks execution costs during compilation
+/// * `clarity_version` - The Clarity language version to use
+/// * `epoch` - The Stacks epoch for compatibility
+/// * `analysis_db` - Database for contract analysis
+/// * `emit_cost_code` - Whether to include cost tracking code in output
+///
+/// # Returns
+///
+/// Returns `Ok(CompileResult)` on success, or `Err(CompileError)` if compilation fails.
 pub fn compile(
     source: &str,
     contract_id: &QualifiedContractIdentifier,
@@ -153,6 +245,20 @@ pub fn compile(
     }
 }
 
+/// Compiles a pre-analyzed contract directly to a WebAssembly module.
+///
+/// This is a lower-level function that skips parsing and analysis,
+/// directly generating WebAssembly from an existing `ContractAnalysis`.
+/// Useful when you have already performed analysis separately.
+///
+/// # Arguments
+///
+/// * `contract_analysis` - The pre-analyzed contract to compile
+///
+/// # Returns
+///
+/// Returns `Ok(Module)` containing the WebAssembly module, or
+/// `Err(GeneratorError)` if code generation fails.
 pub fn compile_contract(contract_analysis: ContractAnalysis) -> Result<Module, GeneratorError> {
     let generator = WasmGenerator::new(contract_analysis)?;
     generator.generate()
