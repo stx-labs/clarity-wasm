@@ -10,7 +10,9 @@ use clarity::vm::errors::{
     WasmError,
 };
 use clarity::vm::functions::crypto::{pubkey_to_address_v1, pubkey_to_address_v2};
-use clarity::vm::functions::post_conditions::Allowance;
+use clarity::vm::functions::post_conditions::{
+    Allowance, FtAllowance, NftAllowance, StackingAllowance, StxAllowance,
+};
 use clarity::vm::types::{
     AssetIdentifier, BuffData, BufferLength, FunctionType, ListTypeData, PrincipalData,
     SequenceData, SequenceSubtype, StacksAddressExtensions, TraitIdentifier, TupleData,
@@ -56,10 +58,10 @@ pub fn link_host_functions(
     link_is_in_regtest_fn(linker)?;
     link_is_in_mainnet_fn(linker)?;
     link_chain_id_fn(linker)?;
-    link_enter_as_contract_original_fn(linker)?;
-    link_exit_as_contract_original_fn(linker)?;
-    link_enter_as_contract_new_fn(linker)?;
-    link_exit_as_contract_new_fn(linker)?;
+    link_enter_as_contract_pre_v4_fn(linker)?;
+    link_exit_as_contract_pre_v4_fn(linker)?;
+    link_enter_as_contract_post_v4_fn(linker)?;
+    link_exit_as_contract_post_v4_fn(linker)?;
     link_with_all_assets_unsafe_fn(linker)?;
     link_with_ft_fn(linker)?;
     link_with_nft_fn(linker)?;
@@ -1216,16 +1218,16 @@ fn link_chain_id_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
         })
 }
 
-/// Link host interface function, `enter_as_contract_original`, into the Wasm module.
+/// Link host interface function, `enter_as_contract_pre_v4`, into the Wasm module.
 /// This function is called before processing the inner-expression of
 /// `as-contract`.
-fn link_enter_as_contract_original_fn(
+fn link_enter_as_contract_pre_v4_fn(
     linker: &mut Linker<ClarityWasmContext>,
 ) -> Result<(), VmExecutionError> {
     linker
         .func_wrap(
             "clarity",
-            "enter_as_contract_original",
+            "enter_as_contract_pre_v4",
             |mut caller: Caller<'_, ClarityWasmContext>| {
                 let contract_principal: PrincipalData = caller
                     .data()
@@ -1240,22 +1242,22 @@ fn link_enter_as_contract_original_fn(
         .map(|_| ())
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
-                "enter_as_contract_original".to_string(),
+                "enter_as_contract_pre_v4".to_string(),
                 e,
             ))
         })
 }
 
-/// Link host interface function, `exit_as_contract_original`, into the Wasm module.
+/// Link host interface function, `exit_as_contract_pre_v4`, into the Wasm module.
 /// This function is after before processing the inner-expression of
 /// `as-contract`, and is used to restore the caller and sender.
-fn link_exit_as_contract_original_fn(
+fn link_exit_as_contract_pre_v4_fn(
     linker: &mut Linker<ClarityWasmContext>,
 ) -> Result<(), VmExecutionError> {
     linker
         .func_wrap(
             "clarity",
-            "exit_as_contract_original",
+            "exit_as_contract_pre_v4",
             |mut caller: Caller<'_, ClarityWasmContext>| {
                 caller.data_mut().pop_sender()?;
                 caller.data_mut().pop_caller()?;
@@ -1265,23 +1267,23 @@ fn link_exit_as_contract_original_fn(
         .map(|_| ())
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
-                "exit_as_contract_original".to_string(),
+                "exit_as_contract_pre_v4".to_string(),
                 e,
             ))
         })
 }
 
-/// Link host interface function, `enter_as_contract_new`, into the Wasm module.
+/// Link host interface function, `enter_as_contract_post_v4`, into the Wasm module.
 /// This function is called before processing the allowances and inner-expression of
 /// `as-contract?`.
-fn link_enter_as_contract_new_fn(
+fn link_enter_as_contract_post_v4_fn(
     linker: &mut Linker<ClarityWasmContext>,
 ) -> Result<(), VmExecutionError> {
     linker
         .func_wrap(
             "clarity",
-            "enter_as_contract_new",
-            |mut caller: Caller<'_, ClarityWasmContext>| {
+            "enter_as_contract_post_v4",
+            |mut caller: Caller<'_, ClarityWasmContext>| -> Option<ExternRef> {
                 let contract_principal: PrincipalData = caller
                     .data()
                     .contract_context()
@@ -1289,31 +1291,36 @@ fn link_enter_as_contract_new_fn(
                     .clone()
                     .into();
                 caller.data_mut().global_context.begin();
-                caller.data_mut().push_allowance_context();
                 caller.data_mut().push_sender(contract_principal.clone());
                 caller.data_mut().push_caller(contract_principal);
+
+                // Return an ExternRef wrapping a Mutex<Vec<Allowance>> for the
+                // With* host functions to push allowances into.
+                Some(ExternRef::new(std::sync::Mutex::new(
+                    Vec::<Allowance>::new(),
+                )))
             },
         )
         .map(|_| ())
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
-                "enter_as_contract_new".to_string(),
+                "enter_as_contract_post_v4".to_string(),
                 e,
             ))
         })
 }
 
-/// Link host interface function, `exit_as_contract_new`, into the Wasm module.
+/// Link host interface function, `exit_as_contract_post_v4`, into the Wasm module.
 /// This function is after before processing the inner-expression of
 /// `as-contract?`, and is used to restore the caller, sender and check allowances.
-fn link_exit_as_contract_new_fn(
+fn link_exit_as_contract_post_v4_fn(
     linker: &mut Linker<ClarityWasmContext>,
 ) -> Result<(), VmExecutionError> {
     linker
         .func_wrap(
             "clarity",
-            "exit_as_contract_new",
-            |mut caller: Caller<'_, ClarityWasmContext>| {
+            "exit_as_contract_post_v4",
+            |mut caller: Caller<'_, ClarityWasmContext>, allowance_ref: Option<ExternRef>| {
                 // we need to restore the current caller and sender. We pop both and check if we did set
                 // them correctly before. We keep the sender (current-contract) as owner for checking the
                 // allowances.
@@ -1323,10 +1330,8 @@ fn link_exit_as_contract_new_fn(
                     owner?
                 };
 
-                let allowances = caller
-                    .data_mut()
-                    .pop_allowance_context()
-                    .unwrap_or_default();
+                // Extract allowances from the ExternRef
+                let allowances = extract_allowances(&allowance_ref)?;
 
                 let asset_map = caller.data_mut().global_context.get_readonly_asset_map()?;
 
@@ -1351,6 +1356,43 @@ fn link_exit_as_contract_new_fn(
                 e,
             ))
         })
+}
+
+type AllowanceContext = std::sync::Mutex<Vec<Allowance>>;
+
+fn get_allowance_context(
+    externref: &Option<ExternRef>,
+) -> Result<&AllowanceContext, VmExecutionError> {
+    let externref = externref.as_ref().ok_or_else(|| {
+        VmExecutionError::Wasm(WasmError::WasmGeneratorError(
+            "allowance context is missing".to_string(),
+        ))
+    })?;
+    externref
+        .data()
+        .downcast_ref::<AllowanceContext>()
+        .ok_or_else(|| {
+            VmExecutionError::Wasm(WasmError::WasmGeneratorError(
+                "allowance context has wrong type".to_string(),
+            ))
+        })
+}
+
+/// Extract the allowances from an ExternRef, consuming the contents.
+fn extract_allowances(externref: &Option<ExternRef>) -> Result<Vec<Allowance>, VmExecutionError> {
+    let ctx = get_allowance_context(externref)?;
+    let result = ctx.lock().unwrap().drain(..).collect();
+    Ok(result)
+}
+
+/// Add an allowance to the current as-contract? context.
+fn push_allowance(
+    externref: &Option<ExternRef>,
+    allowance: Allowance,
+) -> Result<(), VmExecutionError> {
+    let ctx = get_allowance_context(externref)?;
+    ctx.lock().unwrap().push(allowance);
+    Ok(())
 }
 
 // Checker function for the asset allowances
@@ -1499,8 +1541,9 @@ fn link_with_all_assets_unsafe_fn(
         .func_wrap(
             "clarity",
             "with_all_assets_unsafe",
-            |mut caller: Caller<'_, ClarityWasmContext>| {
-                caller.data_mut().push_asset_context_unsafe();
+            |_caller: Caller<'_, ClarityWasmContext>, allowance_ref: Option<ExternRef>| {
+                push_allowance(&allowance_ref, Allowance::All)?;
+
                 Ok(())
             },
         )
@@ -1522,6 +1565,7 @@ fn link_with_ft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExec
             "clarity",
             "with_ft",
             |mut caller: Caller<'_, ClarityWasmContext>,
+             allowance_ref: Option<ExternRef>,
              contract_id_offset: i32,
              contract_id_length: i32,
              token_name_offset: i32,
@@ -1580,11 +1624,17 @@ fn link_with_ft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExec
                         })?;
                 }
 
-                caller.data_mut().push_asset_context_ft(
-                    contract_id.clone(),
-                    token_name,
-                    allowed_amount,
-                );
+                push_allowance(
+                    &allowance_ref,
+                    Allowance::Ft(FtAllowance {
+                        asset: AssetIdentifier {
+                            contract_identifier: contract_id.clone(),
+                            asset_name: ClarityName::try_from(token_name)?,
+                        },
+                        amount: allowed_amount,
+                    }),
+                )?;
+
                 Ok(())
             },
         )
@@ -1606,6 +1656,7 @@ fn link_with_nft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
             "clarity",
             "with_nft",
             |mut caller: Caller<'_, ClarityWasmContext>,
+             allowance_ref: Option<ExternRef>,
              contract_id_offset: i32,
              contract_id_length: i32,
              token_name_offset: i32,
@@ -1647,12 +1698,10 @@ fn link_with_nft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                     }
                 };
 
-                // Resolve the NFT key type, which is needed to deserialize the
-                // identifiers list from WASM memory.
+                // We need the NFT's key type to know how to read the identifiers list.
                 let key_type = if token_name == "*" {
-                    // For wildcard: look up the target contract and use the first
-                    // NFT's key type. The type checker already validated the list
-                    // type at compile time.
+                    // Wildcard: grab the key type from the first NFT in the
+                    // target contract (the type checker already verified this).
                     let contract = caller
                         .data_mut()
                         .global_context
@@ -1670,8 +1719,7 @@ fn link_with_nft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                         .key_type
                         .clone()
                 } else {
-                    // For exact match: look up the specific NFT in the current
-                    // contract context.
+                    // Named NFT: get the key type from the current contract.
                     let nft_info = caller
                         .data()
                         .contract_context()
@@ -1684,7 +1732,7 @@ fn link_with_nft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                         })?;
                     let key_type = nft_info.key_type.clone();
 
-                    // Also validate the NFT exists in the target contract.
+                    // Make sure this NFT also exists in the target contract.
                     let contract = caller
                         .data_mut()
                         .global_context
@@ -1703,13 +1751,12 @@ fn link_with_nft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                     key_type
                 };
 
-                // Compute a safe max list length from the entry's serialized value size.
-                // ListTypeData::inner_size() = entry_size * max_len + type_overhead,
-                // so we need (MAX_VALUE_SIZE - type_overhead) / entry_size to stay
-                // within bounds and avoid ValueTooLarge.
+                // Figure out the max number of identifiers that fit within
+                // MAX_VALUE_SIZE so we don't hit a ValueTooLarge error.
                 let entry_size = key_type.size()?;
                 let max_list_len = (MAX_VALUE_SIZE.saturating_sub(entry_size + 5)) / entry_size;
 
+                // Read the list of allowed NFT identifiers from WASM memory.
                 let identifiers_value = read_from_wasm(
                     memory,
                     &mut caller,
@@ -1727,9 +1774,14 @@ fn link_with_nft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                     asset_name,
                 };
 
-                caller
-                    .data_mut()
-                    .push_asset_context_nft(asset_identifier, allowed_identifiers);
+                push_allowance(
+                    &allowance_ref,
+                    Allowance::Nft(NftAllowance {
+                        asset: asset_identifier,
+                        asset_ids: allowed_identifiers,
+                    }),
+                )?;
+
                 Ok(())
             },
         )
@@ -1750,10 +1802,17 @@ fn link_with_stacking_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
         .func_wrap(
             "clarity",
             "with_stacking",
-            |mut caller: Caller<'_, ClarityWasmContext>, allowance_lo: i64, allowance_hi: i64| {
+            |_caller: Caller<'_, ClarityWasmContext>,
+             allowance_ref: Option<ExternRef>,
+             allowance_lo: i64,
+             allowance_hi: i64| {
                 let allowance = ((allowance_hi as u128) << 64) | ((allowance_lo as u64) as u128);
 
-                caller.data_mut().push_asset_context_stacking(allowance);
+                push_allowance(
+                    &allowance_ref,
+                    Allowance::Stacking(StackingAllowance { amount: allowance }),
+                )?;
+
                 Ok(())
             },
         )
@@ -1774,10 +1833,19 @@ fn link_with_stx_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
         .func_wrap(
             "clarity",
             "with_stx",
-            |mut caller: Caller<'_, ClarityWasmContext>, amount_lo: i64, amount_hi: i64| {
+            |_caller: Caller<'_, ClarityWasmContext>,
+             allowance_ref: Option<ExternRef>,
+             amount_lo: i64,
+             amount_hi: i64| {
                 let allowed_amount = ((amount_hi as u128) << 64) | ((amount_lo as u64) as u128);
 
-                caller.data_mut().push_asset_context_stx(allowed_amount);
+                push_allowance(
+                    &allowance_ref,
+                    Allowance::Stx(StxAllowance {
+                        amount: allowed_amount,
+                    }),
+                )?;
+
                 Ok(())
             },
         )
@@ -6317,36 +6385,44 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
 
     linker.func_wrap(
         "clarity",
-        "enter_as_contract_original",
+        "enter_as_contract_pre_v4",
         |_: Caller<'_, ()>| {
             println!("as-contract: enter");
             Ok(())
         },
     )?;
 
+    linker.func_wrap("clarity", "exit_as_contract_pre_v4", |_: Caller<'_, ()>| {
+        println!("as-contract: exit");
+        Ok(())
+    })?;
+
     linker.func_wrap(
         "clarity",
-        "exit_as_contract_original",
-        |_: Caller<'_, ()>| {
-            println!("as-contract: exit");
-            Ok(())
+        "enter_as_contract_post_v4",
+        |_: Caller<'_, ()>| -> Option<ExternRef> {
+            println!("as-contract: enter");
+            None
         },
     )?;
 
-    linker.func_wrap("clarity", "enter_as_contract_new", |_: Caller<'_, ()>| {
-        println!("as-contract: enter");
-        Ok(())
-    })?;
+    linker.func_wrap(
+        "clarity",
+        "exit_as_contract_post_v4",
+        |_: Caller<'_, ()>, _allowance_ref: Option<ExternRef>| {
+            println!("as-contract: exit");
+            Ok((0i32, 0i64, 0i64))
+        },
+    )?;
 
-    linker.func_wrap("clarity", "exit_as_contract_new", |_: Caller<'_, ()>| {
-        println!("as-contract: exit");
-        Ok((0i32, 0i64, 0i64))
-    })?;
-
-    linker.func_wrap("clarity", "with_all_assets_unsafe", |_: Caller<'_, ()>| {
-        println!("with_all_assets_unsafe: enter");
-        Ok(())
-    })?;
+    linker.func_wrap(
+        "clarity",
+        "with_all_assets_unsafe",
+        |_: Caller<'_, ()>, _allowance_ref: Option<ExternRef>| {
+            println!("with_all_assets_unsafe: enter");
+            Ok(())
+        },
+    )?;
 
     linker.func_wrap(
         "clarity",
@@ -6360,7 +6436,8 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
     linker.func_wrap(
         "clarity",
         "with_ft",
-        |_contract_id_offset: i32,
+        |_allowance_ref: Option<ExternRef>,
+         _contract_id_offset: i32,
          _contract_id_length: i32,
          _token_name_offset: i32,
          _token_name_length: i32,
@@ -6379,7 +6456,8 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
     linker.func_wrap(
         "clarity",
         "with_nft",
-        |_contract_id_offset: i32,
+        |_allowance_ref: Option<ExternRef>,
+         _contract_id_offset: i32,
          _contract_id_length: i32,
          _token_name_offset: i32,
          _token_name_length: i32,
@@ -6398,7 +6476,7 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
     linker.func_wrap(
         "clarity",
         "with_stacking",
-        |_allowance_lo: i64, _allowance_hi: i64| {
+        |_allowance_ref: Option<ExternRef>, _allowance_lo: i64, _allowance_hi: i64| {
             println!("with_stacking: enter");
             Ok(())
         },
@@ -6409,10 +6487,14 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
         Ok(())
     })?;
 
-    linker.func_wrap("clarity", "with_stx", |_amount_lo: i64, _amount_hi: i64| {
-        println!("with_stx: enter");
-        Ok(())
-    })?;
+    linker.func_wrap(
+        "clarity",
+        "with_stx",
+        |_allowance_ref: Option<ExternRef>, _amount_lo: i64, _amount_hi: i64| {
+            println!("with_stx: enter");
+            Ok(())
+        },
+    )?;
 
     linker.func_wrap("clarity", "exit_with_stx", |_: Caller<'_, ()>| {
         println!("with_stx: exit");

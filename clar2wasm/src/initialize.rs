@@ -2,12 +2,8 @@ use clarity::vm::analysis::ContractAnalysis;
 use clarity::vm::contexts::GlobalContext;
 use clarity::vm::errors::{RuntimeError, VmExecutionError, WasmError};
 use clarity::vm::events::*;
-use clarity::vm::functions::post_conditions::{
-    Allowance, FtAllowance, NftAllowance, StackingAllowance, StxAllowance,
-};
 use clarity::vm::types::{AssetIdentifier, BuffData, PrincipalData, QualifiedContractIdentifier};
 use clarity::vm::{CallStack, ContractContext, Value};
-use clarity_types::ClarityName;
 use stacks_common::types::chainstate::StacksBlockId;
 use wasmtime::{Linker, Module, Store};
 
@@ -31,9 +27,6 @@ pub struct ClarityWasmContext<'a, 'b> {
     caller_stack: Vec<PrincipalData>,
     /// Stack of block hashes, used for `at-block` expressions.
     bhh_stack: Vec<StacksBlockId>,
-    /// Stack of asset contexts, used for `with-*` expressions.
-    pub asset_context_stack: Vec<Vec<Allowance>>,
-
     /// Contract analysis data, used for typing information, and only available
     /// when initializing a contract. Should always be `Some` when initializing
     /// a contract, and `None` otherwise.
@@ -61,7 +54,6 @@ impl<'a, 'b> ClarityWasmContext<'a, 'b> {
             sender_stack: vec![],
             caller_stack: vec![],
             bhh_stack: vec![],
-            asset_context_stack: vec![],
             contract_analysis,
         }
     }
@@ -86,7 +78,6 @@ impl<'a, 'b> ClarityWasmContext<'a, 'b> {
             sender_stack: vec![],
             caller_stack: vec![],
             bhh_stack: vec![],
-            asset_context_stack: vec![],
             contract_analysis,
         }
     }
@@ -133,86 +124,6 @@ impl<'a, 'b> ClarityWasmContext<'a, 'b> {
             .ok_or(VmExecutionError::Wasm(WasmError::WasmGeneratorError(
                 "Could not pop at_block".to_string(),
             )))
-    }
-
-    pub fn push_allowance_context(&mut self) {
-        self.asset_context_stack.push(Vec::new());
-    }
-
-    pub fn pop_allowance_context(&mut self) -> Option<Vec<Allowance>> {
-        self.asset_context_stack.pop()
-    }
-
-    pub fn push_asset_context_unsafe(&mut self) {
-        if self.asset_context_stack.is_empty() {
-            self.asset_context_stack.push(vec![]);
-        }
-        self.asset_context_stack
-            .last_mut()
-            .unwrap()
-            .push(Allowance::All);
-    }
-
-    pub fn push_asset_context_ft(
-        &mut self,
-        contract: QualifiedContractIdentifier,
-        token: String,
-        allowed_amount: u128,
-    ) {
-        if self.asset_context_stack.is_empty() {
-            self.asset_context_stack.push(vec![]);
-        }
-        self.asset_context_stack
-            .last_mut()
-            .unwrap()
-            .push(Allowance::Ft(FtAllowance {
-                asset: AssetIdentifier {
-                    contract_identifier: contract,
-                    asset_name: ClarityName::try_from(token).unwrap(),
-                },
-                amount: allowed_amount,
-            }));
-    }
-
-    pub fn push_asset_context_nft(
-        &mut self,
-        asset_identifier: AssetIdentifier,
-        allowed_identifiers: Vec<clarity_types::Value>,
-    ) {
-        if self.asset_context_stack.is_empty() {
-            self.asset_context_stack.push(vec![]);
-        }
-        self.asset_context_stack
-            .last_mut()
-            .unwrap()
-            .push(Allowance::Nft(NftAllowance {
-                asset: asset_identifier,
-                asset_ids: allowed_identifiers,
-            }));
-    }
-
-    pub fn push_asset_context_stacking(&mut self, allowed_amount: u128) {
-        if self.asset_context_stack.is_empty() {
-            self.asset_context_stack.push(vec![]);
-        }
-        self.asset_context_stack
-            .last_mut()
-            .unwrap()
-            .push(Allowance::Stacking(StackingAllowance {
-                amount: allowed_amount,
-            }));
-    }
-
-    pub fn push_asset_context_stx(&mut self, allowed_amount: u128) {
-        if self.asset_context_stack.is_empty() {
-            self.asset_context_stack.push(vec![]);
-        }
-        self.asset_context_stack
-            .last_mut()
-            .unwrap()
-            .push(Allowance::Stx(StxAllowance {
-                amount: allowed_amount,
-            }));
     }
 
     /// Return an immutable reference to the contract_context

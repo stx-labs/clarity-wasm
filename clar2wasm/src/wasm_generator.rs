@@ -81,6 +81,11 @@ pub struct WasmGenerator {
     /// to be available on the stack.
     max_work_space: u32,
     local_pool: Rc<RefCell<HashMap<ValType, Vec<LocalId>>>>,
+    /// The Wasm local holding the ExternRef for the current
+    /// `as-contract?` / `restrict-assets?` allowance context.
+    /// Set by `AsContractPostV4::traverse` or `RestrictAssets::traverse`
+    /// so the `With*` words can load it onto the stack before calling their host functions.
+    pub(crate) allowance_context: Option<LocalId>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -410,6 +415,7 @@ impl WasmGenerator {
             nft_types: HashMap::new(),
             used_traits: HashMap::new(),
             defined_functions: HashSet::new(),
+            allowance_context: None,
         })
     }
 

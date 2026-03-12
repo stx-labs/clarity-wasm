@@ -12,22 +12,65 @@ use crate::wasm_generator::{clar2wasm_ty, ArgumentsExt, GeneratorError, WasmGene
 use crate::wasm_utils::ArgumentCountCheck;
 use crate::words::SimpleWord;
 
-#[derive(Debug)]
-pub enum AsContract {
-    PreClarity4,
-    Clarity4,
+/// Load the externref allowance context local onto the WASM stack.
+/// Called by each `With*` word before its host function call.
+fn load_allowance_context(
+    generator: &WasmGenerator,
+    builder: &mut walrus::InstrSeqBuilder,
+) -> Result<(), GeneratorError> {
+    let local_id = generator.allowance_context.ok_or_else(|| {
+        GeneratorError::InternalError("with-* used outside of as-contract? context".to_owned())
+    })?;
+    builder.local_get(local_id);
+    Ok(())
 }
 
-impl Word for AsContract {
+#[derive(Debug)]
+pub struct AsContractPreV4;
+
+impl Word for AsContractPreV4 {
     fn name(&self) -> ClarityName {
-        match self {
-            AsContract::PreClarity4 => ClarityName::from_literal("as-contract"),
-            AsContract::Clarity4 => ClarityName::from_literal("as-contract?"),
-        }
+        ClarityName::from_literal("as-contract")
     }
 }
 
-impl ComplexWord for AsContract {
+impl ComplexWord for AsContractPreV4 {
+    fn traverse(
+        &self,
+        generator: &mut WasmGenerator,
+        builder: &mut walrus::InstrSeqBuilder,
+        _expr: &SymbolicExpression,
+        args: &[SymbolicExpression],
+    ) -> Result<(), GeneratorError> {
+        check_args!(generator, builder, 1, args.len(), ArgumentCountCheck::Exact);
+
+        self.charge(generator, builder, 0)?;
+
+        let inner = args.get_expr(0)?;
+
+        // Call the host interface function, `enter_as_contract_pre_v4`
+        builder.call(generator.func_by_name("stdlib.enter_as_contract_pre_v4"));
+
+        // Traverse the inner expression
+        generator.traverse_expr(builder, inner)?;
+
+        // Call the host interface function, `exit_as_contract_pre_v4`
+        builder.call(generator.func_by_name("stdlib.exit_as_contract_pre_v4"));
+
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct AsContractPostV4;
+
+impl Word for AsContractPostV4 {
+    fn name(&self) -> ClarityName {
+        ClarityName::from_literal("as-contract?")
+    }
+}
+
+impl ComplexWord for AsContractPostV4 {
     fn traverse(
         &self,
         generator: &mut WasmGenerator,
@@ -35,127 +78,97 @@ impl ComplexWord for AsContract {
         expr: &SymbolicExpression,
         args: &[SymbolicExpression],
     ) -> Result<(), GeneratorError> {
-        // The two implementations need to be separated as the linker functions return different results
-        match self {
-            Self::PreClarity4 => {
-                check_args!(generator, builder, 1, args.len(), ArgumentCountCheck::Exact);
+        check_args!(generator, builder, 2, args.len(), ArgumentCountCheck::Exact);
 
-                self.charge(generator, builder, 0)?;
+        // TODO: add cost tracking #783
+        let allowances = args.get_list(0)?;
+        let inner = args.get_expr(1)?;
 
-                let inner = args.get_expr(0)?;
+        let inner_ty = generator
+            .get_expr_type(inner)
+            .ok_or_else(|| {
+                GeneratorError::TypeError("as-contract? inner expression must be typed".to_owned())
+            })?
+            .clone();
 
-                // Call the host interface function, `enter_as_contract_original`
-                builder.call(generator.func_by_name("stdlib.enter_as_contract_original"));
+        let return_ty = generator
+            .get_expr_type(expr)
+            .ok_or_else(|| {
+                GeneratorError::TypeError("as-contract? expression must be typed".to_owned())
+            })?
+            .clone();
 
-                // Traverse the inner expression
-                generator.traverse_expr(builder, inner)?;
+        // Call the host interface function, `enter_as_contract_post_v4`
+        builder.call(generator.func_by_name("stdlib.enter_as_contract_post_v4"));
 
-                // Call the host interface function, `exit_as_contract_original`
-                builder.call(generator.func_by_name("stdlib.exit_as_contract_original"));
-            }
-            Self::Clarity4 => {
-                check_args!(generator, builder, 2, args.len(), ArgumentCountCheck::Exact);
+        // Stash the allowance handle so With* words can reference it.
+        let allowance_ref_local = generator.borrow_local(ValType::Externref);
+        builder.local_set(*allowance_ref_local);
+        let prev_allowance_context = generator.allowance_context.replace(*allowance_ref_local);
 
-                // TODO: add cost tracking #783
-                let allowances = args.get_list(0)?;
-                let inner = args.get_expr(1)?;
-
-                // `as-contract?` returns a response type: (response <inner_type> uint).
-                // In WASM, this is represented as [i32_indicator, ok_wasm_vals..., err_wasm_vals...].
-                // For example, (response bool uint) = [i32, i32, i64, i64].
-                //   - On success: [1, inner_result, 0, 0]
-                //   - On failure: [0, 0, violation_lo, violation_hi]
-                let inner_ty = generator
-                    .get_expr_type(inner)
-                    .ok_or_else(|| {
-                        GeneratorError::TypeError(
-                            "as-contract? inner expression must be typed".to_owned(),
-                        )
-                    })?
-                    .clone();
-
-                let return_ty = generator
-                    .get_expr_type(expr)
-                    .ok_or_else(|| {
-                        GeneratorError::TypeError(
-                            "as-contract? expression must be typed".to_owned(),
-                        )
-                    })?
-                    .clone();
-
-                // Enter the as-contract context (pushes sender/caller, begins transaction)
-                builder.call(generator.func_by_name("stdlib.enter_as_contract_new"));
-
-                // Traverse each allowance expression in the list.
-                // Each one registers its allowance in the asset context.
-                for allowance in allowances {
-                    generator.traverse_expr(builder, allowance)?;
-                }
-
-                // Traverse the inner expression — its result is pushed onto the WASM stack
-                generator.traverse_expr(builder, inner)?;
-
-                // Save the inner result to locals so we can use it later.
-                // We need to get it off the stack before calling exit, which
-                // pushes its own return values.
-                let inner_locals = generator.save_to_locals(builder, &inner_ty, true);
-
-                // Call exit
-                // Returns (indicator: i32, err_lo: i64, err_hi: i64).
-                // The host function can't access the inner result on the WASM stack,
-                // so we splice in the real inner result below.
-                builder.call(generator.func_by_name("stdlib.exit_as_contract_new"));
-
-                // Save the 3 exit return values to locals (popped in reverse order)
-                let hi_local = generator.borrow_local(ValType::I64);
-                let lo_local = generator.borrow_local(ValType::I64);
-                let indicator_local = generator.borrow_local(ValType::I32);
-                builder.local_set(*hi_local);
-                builder.local_set(*lo_local);
-                builder.local_set(*indicator_local);
-
-                // Allocate locals for the full response result
-                let result_wasm_types = clar2wasm_ty(&return_ty);
-                let result_locals: Vec<_> = result_wasm_types
-                    .iter()
-                    .map(|t| generator.borrow_local(*t))
-                    .collect();
-
-                // Set the response indicator (1 = ok, 0 = err)
-                builder
-                    .local_get(*indicator_local)
-                    .local_set(*result_locals[0]);
-
-                // Conditionally populate the ok or err slots of the response.
-                // Locals default to zero, so we only need to set the relevant slots.
-                builder.local_get(*indicator_local).if_else(
-                    None,
-                    |then| {
-                        // Success: copy the saved inner result into the ok slots.
-                        // The err slots remain at their default zero values.
-                        for (i, local) in inner_locals.iter().enumerate() {
-                            then.local_get(*local).local_set(*result_locals[1 + i]);
-                        }
-                    },
-                    |else_| {
-                        // Failure: the ok slots remain at their default zero values.
-                        // Copy the violation index (u128) into the err slots.
-                        let err_offset = 1 + inner_locals.len();
-                        else_
-                            .local_get(*lo_local)
-                            .local_set(*result_locals[err_offset]);
-                        else_
-                            .local_get(*hi_local)
-                            .local_set(*result_locals[err_offset + 1]);
-                    },
-                );
-
-                // Push the full response type onto the WASM stack
-                for local in &result_locals {
-                    builder.local_get(**local);
-                }
-            }
+        // Register each allowance (e.g. with-stx, with-stacking).
+        for allowance in allowances {
+            generator.traverse_expr(builder, allowance)?;
         }
+
+        // Run the body expression.
+        generator.traverse_expr(builder, inner)?;
+
+        // Stash the body result before calling exit (exit pushes its own values).
+        let inner_locals = generator.save_to_locals(builder, &inner_ty, true);
+
+        // Validate allowances and commit or abort the transaction.
+        builder.local_get(*allowance_ref_local);
+        builder.call(generator.func_by_name("stdlib.exit_as_contract_post_v4"));
+
+        // Support nested as-contract? by restoring the outer context.
+        generator.allowance_context = prev_allowance_context;
+
+        // Pop the exit return values: (ok_or_err, violation_lo, violation_hi).
+        let hi_local = generator.borrow_local(ValType::I64);
+        let lo_local = generator.borrow_local(ValType::I64);
+        let indicator_local = generator.borrow_local(ValType::I32);
+        builder.local_set(*hi_local);
+        builder.local_set(*lo_local);
+        builder.local_set(*indicator_local);
+
+        // Build the response: [indicator, ok_slots..., err_slots...].
+        let result_wasm_types = clar2wasm_ty(&return_ty);
+        let result_locals: Vec<_> = result_wasm_types
+            .iter()
+            .map(|t| generator.borrow_local(*t))
+            .collect();
+
+        builder
+            .local_get(*indicator_local)
+            .local_set(*result_locals[0]);
+
+        // Fill in either the ok or err portion; the other stays zeroed.
+        builder.local_get(*indicator_local).if_else(
+            None,
+            |then| {
+                // Allowances passed — write the body result into the ok slots.
+                for (i, local) in inner_locals.iter().enumerate() {
+                    then.local_get(*local).local_set(*result_locals[1 + i]);
+                }
+            },
+            |else_| {
+                // Allowance violated — write the violation index into the err slots.
+                let err_offset = 1 + inner_locals.len();
+                else_
+                    .local_get(*lo_local)
+                    .local_set(*result_locals[err_offset]);
+                else_
+                    .local_get(*hi_local)
+                    .local_set(*result_locals[err_offset + 1]);
+            },
+        );
+
+        // Push the final response onto the stack.
+        for local in &result_locals {
+            builder.local_get(**local);
+        }
+
         Ok(())
     }
 }
@@ -180,6 +193,9 @@ impl ComplexWord for WithAllAssetsUnsafe {
         check_args!(generator, builder, 0, args.len(), ArgumentCountCheck::Exact);
 
         self.charge(generator, builder, 0)?;
+
+        // Load the externref allowance context
+        load_allowance_context(generator, builder)?;
 
         // Call the host interface function, `with_all_assets_unsafe`
         builder.call(generator.func_by_name("stdlib.with_all_assets_unsafe"));
@@ -212,6 +228,9 @@ impl ComplexWord for WithFt {
         let token_contract = args.get_expr(0)?;
         let token_name = args.get_expr(1)?;
         let allowance = args.get_expr(2)?;
+
+        // Load the externref allowance context (first param)
+        load_allowance_context(generator, builder)?;
 
         // Traverse the contract principal
         generator.traverse_expr(builder, token_contract)?;
@@ -254,6 +273,9 @@ impl ComplexWord for WithNft {
         let token_name = args.get_expr(1)?;
         let allowance = args.get_expr(2)?;
 
+        // Load the externref allowance context (first param)
+        load_allowance_context(generator, builder)?;
+
         // Traverse the contract principal
         generator.traverse_expr(builder, token_contract)?;
 
@@ -293,6 +315,9 @@ impl ComplexWord for WithStacking {
 
         let allowance = args.get_expr(0)?;
 
+        // Load the externref allowance context (first param)
+        load_allowance_context(generator, builder)?;
+
         // Traverse the allowance amount (uint)
         generator.traverse_expr(builder, allowance)?;
 
@@ -325,6 +350,9 @@ impl ComplexWord for WithStx {
         // TODO: add cost tracking #783
 
         let allowance = args.get_expr(0)?;
+
+        // Load the externref allowance context (first param)
+        load_allowance_context(generator, builder)?;
 
         // Traverse the allowance amount (uint)
         generator.traverse_expr(builder, allowance)?;
