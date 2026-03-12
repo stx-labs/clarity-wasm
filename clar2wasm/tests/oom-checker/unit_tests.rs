@@ -289,28 +289,22 @@ fn map_sha256_oom() {
 fn contract_call_with_workspace_oom() {
     let callee = as_oom_check_snippet(
         r#"
-        (define-public (sha256sum (a uint))
-            (ok (sha256 a))
-        )
-    "#,
-        // To check if we consider the size of the workspace in our contract-call, we need enough space for
-        //   - the workspace
-        //   - the result
-        &[
-            // Space for the workspace = 64 + 8 + 289 (which is equal to the space for a buff of the same size)
-            TypeSignature::SequenceType(SequenceSubtype::BufferType(361u32.try_into().unwrap())),
-            // Space for the result
-            TypeSignature::BUFFER_32,
-        ],
+            (define-public (sha256sum (a (buff 1)))
+                (ok (sha256 a))
+            )
+        "#,
+        &[TypeSignature::SequenceType(SequenceSubtype::BufferType(
+            1u32.try_into().unwrap(),
+        ))],
         TestConfig::latest_epoch(),
         TestConfig::clarity_version(),
     );
 
-    let caller = "(contract-call? .callee sha256sum u1)";
+    let caller = "(contract-call? .callee sha256sum 0x01)";
 
     let expected = Value::okay(
         Value::buff_from(
-            hex::decode("4cbbd8ca5215b8d161aec181a74b694f4e24b001d5b081dc0030ed797a8973e0")
+            hex::decode("4bf5122f344554c53bde2ebb8cd2b7e3d1600ad631c385a5d7cce23c7785459a")
                 .unwrap(),
         )
         .unwrap(),
