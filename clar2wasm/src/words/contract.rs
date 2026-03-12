@@ -1506,12 +1506,9 @@ mod tests {
 
 (define-public (transfer-token (asset uint))
     (let ((recipient tx-sender))
-        (try!
-            (as-contract? ((with-all-assets-unsafe))
-                (try! (nft-transfer? token asset current-contract recipient))
-            )
+        (as-contract? ((with-all-assets-unsafe))
+            (try! (nft-transfer? token asset current-contract recipient))
         )
-        (ok true)
     )
 )
 "#;
@@ -1531,12 +1528,9 @@ mod tests {
             let contract = r#"
 (define-public (send-stx (amount uint) (recipient principal))
     (begin
-        (try!
-            (as-contract? ((with-all-assets-unsafe))
-                (try! (stx-transfer? amount current-contract recipient))
-            )
+        (as-contract? ((with-all-assets-unsafe))
+            (try! (stx-transfer? amount current-contract recipient))
         )
-        (ok true)
     )
 )
 "#;
@@ -1558,12 +1552,9 @@ mod tests {
             let contract = r#"
 (define-public (send-stx (amount uint) (recipient principal))
     (begin
-        (try!
-            (as-contract? ((with-stx u100))
-                (try! (stx-transfer? amount current-contract recipient))
-            )
+        (as-contract? ((with-stx u100))
+            (try! (stx-transfer? amount current-contract recipient))
         )
-        (ok true)
     )
 )
 "#;
@@ -1583,12 +1574,9 @@ mod tests {
             let contract = r#"
 (define-public (send-stx (amount uint) (recipient principal))
     (begin
-        (try!
-            (as-contract? ((with-stx u10))
-                (try! (stx-transfer? amount current-contract recipient))
-            )
+        (as-contract? ((with-stx u10))
+            (try! (stx-transfer? amount current-contract recipient))
         )
-        (ok true)
     )
 )
 "#;
@@ -1619,12 +1607,9 @@ mod tests {
             let contract = r#"
 (define-public (send-stx (amount uint) (recipient principal))
     (begin
-        (try!
-            (as-contract? ()
-                (try! (stx-transfer? amount current-contract recipient))
-            )
+        (as-contract? ()
+            (try! (stx-transfer? amount current-contract recipient))
         )
-        (ok true)
     )
 )
 "#;
@@ -1663,12 +1648,9 @@ mod tests {
 
 (define-public (transfer-ft (amount uint) (recipient principal))
     (begin
-        (try!
-            (as-contract? ((with-ft .contract "my-token" u100))
-                (try! (ft-transfer? my-token amount current-contract recipient))
-            )
+        (as-contract? ((with-ft .contract "my-token" u100))
+            (try! (ft-transfer? my-token amount current-contract recipient))
         )
-        (ok true)
     )
 )
 "#;
@@ -1694,12 +1676,9 @@ mod tests {
 
 (define-public (transfer-ft (amount uint) (recipient principal))
     (begin
-        (try!
-            (as-contract? ((with-ft .contract "my-token" u10))
-                (try! (ft-transfer? my-token amount current-contract recipient))
-            )
+        (as-contract? ((with-ft .contract "my-token" u10))
+            (try! (ft-transfer? my-token amount current-contract recipient))
         )
-        (ok true)
     )
 )
 
@@ -1740,12 +1719,9 @@ mod tests {
 
 (define-public (transfer-ft (amount uint) (recipient principal))
     (begin
-        (try!
-            (as-contract? ()
-                (try! (ft-transfer? my-token amount current-contract recipient))
-            )
+        (as-contract? ()
+            (try! (ft-transfer? my-token amount current-contract recipient))
         )
-        (ok true)
     )
 )
 
@@ -1788,12 +1764,9 @@ mod tests {
 
 (define-public (transfer-ft (amount uint) (recipient principal))
     (begin
-        (try!
-            (as-contract? ((with-ft .contract "*" u100))
-                (try! (ft-transfer? my-token amount current-contract recipient))
-            )
+        (as-contract? ((with-ft .contract "*" u100))
+            (try! (ft-transfer? my-token amount current-contract recipient))
         )
-        (ok true)
     )
 )
 "#;
@@ -1819,12 +1792,9 @@ mod tests {
 
 (define-public (transfer-ft (amount uint) (recipient principal))
     (begin
-        (try!
-            (as-contract? ((with-ft .contract "*" u10))
-                (try! (ft-transfer? my-token amount current-contract recipient))
-            )
+        (as-contract? ((with-ft .contract "*" u10))
+            (try! (ft-transfer? my-token amount current-contract recipient))
         )
-        (ok true)
     )
 )
 
@@ -1865,15 +1835,12 @@ mod tests {
 
 (define-public (transfer-ft (amount uint) (recipient principal))
     (begin
-        (try!
-            (as-contract? (
-                    (with-ft .contract "*" u100)
-                    (with-ft .contract "my-token" u100)
-                )
-                (try! (ft-transfer? my-token amount current-contract recipient))
+        (as-contract? (
+                (with-ft .contract "*" u100)
+                (with-ft .contract "my-token" u100)
             )
+            (try! (ft-transfer? my-token amount current-contract recipient))
         )
-        (ok true)
     )
 )
 "#;
@@ -1899,15 +1866,12 @@ mod tests {
 
 (define-public (transfer-ft (amount uint) (recipient principal))
     (begin
-        (try!
-            (as-contract? (
-                    (with-ft .contract "*" u20)
-                    (with-ft .contract "my-token" u100)
-                )
-                (try! (ft-transfer? my-token amount current-contract recipient))
+        (as-contract? (
+                (with-ft .contract "*" u20)
+                (with-ft .contract "my-token" u100)
             )
+            (try! (ft-transfer? my-token amount current-contract recipient))
         )
-        (ok true)
     )
 )
 
@@ -1953,12 +1917,9 @@ mod tests {
 
 (define-public (transfer-token (asset uint))
     (let ((recipient tx-sender))
-        (try!
-            (as-contract? ((with-nft .contract "token" (list u1)))
-                (try! (nft-transfer? token asset current-contract recipient))
-            )
+        (as-contract? ((with-nft .contract "token" (list u1)))
+            (try! (nft-transfer? token asset current-contract recipient))
         )
-        (ok true)
     )
 )
 "#;
@@ -1987,12 +1948,9 @@ mod tests {
 
 (define-public (transfer-token (asset uint))
     (let ((recipient tx-sender))
-        (try!
-            (as-contract? ((with-nft .contract "token" (list u999)))
-                (try! (nft-transfer? token asset current-contract recipient))
-            )
+        (as-contract? ((with-nft .contract "token" (list u999)))
+            (try! (nft-transfer? token asset current-contract recipient))
         )
-        (ok true)
     )
 )
 
@@ -2045,12 +2003,9 @@ mod tests {
 
 (define-public (transfer-token (asset uint))
     (let ((recipient tx-sender))
-        (try!
-            (as-contract? ()
-                (try! (nft-transfer? token asset current-contract recipient))
-            )
+        (as-contract? ()
+            (try! (nft-transfer? token asset current-contract recipient))
         )
-        (ok true)
     )
 )
 
@@ -2105,12 +2060,9 @@ mod tests {
 
 (define-public (transfer-token (asset uint))
     (let ((recipient tx-sender))
-        (try!
-            (as-contract? ((with-nft .contract "*" (list u1)))
-                (try! (nft-transfer? token asset current-contract recipient))
-            )
+        (as-contract? ((with-nft .contract "*" (list u1)))
+            (try! (nft-transfer? token asset current-contract recipient))
         )
-        (ok true)
     )
 )
 "#;
@@ -2139,12 +2091,9 @@ mod tests {
 
 (define-public (transfer-token (asset uint))
     (let ((recipient tx-sender))
-        (try!
-            (as-contract? ((with-nft .contract "*" (list u999)))
-                (try! (nft-transfer? token asset current-contract recipient))
-            )
+        (as-contract? ((with-nft .contract "*" (list u999)))
+            (try! (nft-transfer? token asset current-contract recipient))
         )
-        (ok true)
     )
 )
 
@@ -2194,13 +2143,10 @@ mod tests {
             let wrapper = r#"
 (define-public (do-delegate (amount uint) (delegate-to principal))
     (begin
-        (try!
-            (as-contract? ((with-stacking u1000000))
-                (unwrap-panic (contract-call? .pox-4 delegate-stx
-                    amount delegate-to none none))
-            )
+        (as-contract? ((with-stacking u1000000))
+            (unwrap-panic (contract-call? .pox-4 delegate-stx
+                amount delegate-to none none))
         )
-        (ok true)
     )
 )
 "#;
@@ -2233,24 +2179,18 @@ mod tests {
             let wrapper = r#"
 (define-public (setup-allowance)
     (begin
-        (try!
-            (as-contract? ((with-all-assets-unsafe))
-                (unwrap-panic (contract-call? .pox-4 allow-contract-caller .intermediary none))
-            )
+        (as-contract? ((with-all-assets-unsafe))
+            (unwrap-panic (contract-call? .pox-4 allow-contract-caller .intermediary none))
         )
-        (ok true)
     )
 )
 
 (define-public (delegate-via-intermediary (amount uint) (delegate-to principal))
     (begin
-        (try!
-            (as-contract? ((with-stacking u1000000))
-                (unwrap-panic (contract-call? .intermediary do-delegate
-                    amount delegate-to))
-            )
+        (as-contract? ((with-stacking u1000000))
+            (unwrap-panic (contract-call? .intermediary do-delegate
+                amount delegate-to))
         )
-        (ok true)
     )
 )
 "#;
@@ -2274,16 +2214,13 @@ mod tests {
             let wrapper = r#"
 (define-public (delegate-and-send-stx (delegate-amount uint) (stx-amount uint) (recipient principal))
     (begin
-        (try!
-            (as-contract? ((with-stacking u1000000) (with-stx u500))
-                (begin
-                    (unwrap-panic (contract-call? .pox-4 delegate-stx
-                        delegate-amount recipient none none))
-                    (try! (stx-transfer? stx-amount current-contract recipient))
-                )
+        (as-contract? ((with-stacking u1000000) (with-stx u500))
+            (begin
+                (unwrap-panic (contract-call? .pox-4 delegate-stx
+                    delegate-amount recipient none none))
+                (try! (stx-transfer? stx-amount current-contract recipient))
             )
         )
-        (ok true)
     )
 )
 "#;
@@ -2308,12 +2245,9 @@ mod tests {
 
 (define-public (send-stx (amount uint) (recipient principal))
     (begin
-        (try!
-            (as-contract? ((with-ft .contract "my-token" u100))
-                (try! (stx-transfer? amount current-contract recipient))
-            )
+        (as-contract? ((with-ft .contract "my-token" u100))
+            (try! (stx-transfer? amount current-contract recipient))
         )
-        (ok true)
     )
 )
 "#;
@@ -2344,12 +2278,9 @@ mod tests {
             let contract = r#"
 (define-public (send-stx (amount uint) (recipient principal))
     (begin
-        (try!
-            (as-contract? ((with-stx u100) (with-stx u20))
-                (try! (stx-transfer? amount current-contract recipient))
-            )
+        (as-contract? ((with-stx u100) (with-stx u20))
+            (try! (stx-transfer? amount current-contract recipient))
         )
-        (ok true)
     )
 )
 "#;
@@ -2394,19 +2325,16 @@ mod tests {
 
 (define-public (transfer-all (ft-amount uint) (nft-id uint) (stx-amount uint))
     (let ((recipient tx-sender))
-        (try!
-            (as-contract?
-                ((with-stx u500)
-                 (with-ft .contract "my-token" u200)
-                 (with-nft .contract "my-nft" (list u1 u2)))
-                (begin
-                    (try! (stx-transfer? stx-amount current-contract recipient))
-                    (try! (ft-transfer? my-token ft-amount current-contract recipient))
-                    (try! (nft-transfer? my-nft nft-id current-contract recipient))
-                )
+        (as-contract?
+            ((with-stx u500)
+                (with-ft .contract "my-token" u200)
+                (with-nft .contract "my-nft" (list u1 u2)))
+            (begin
+                (try! (stx-transfer? stx-amount current-contract recipient))
+                (try! (ft-transfer? my-token ft-amount current-contract recipient))
+                (try! (nft-transfer? my-nft nft-id current-contract recipient))
             )
         )
-        (ok true)
     )
 )
 "#;
@@ -2439,16 +2367,13 @@ mod tests {
 
 (define-public (transfer-token (asset uint))
     (let ((recipient tx-sender))
-        (try!
-            (as-contract? ((with-all-assets-unsafe))
-                (try!
-                    (as-contract? ((with-nft .contract "token" (list u1)))
-                        (try! (nft-transfer? token asset current-contract recipient))
-                    )
+        (as-contract? ((with-all-assets-unsafe))
+            (try!
+                (as-contract? ((with-nft .contract "token" (list u1)))
+                    (try! (nft-transfer? token asset current-contract recipient))
                 )
             )
         )
-        (ok true)
     )
 )
 "#;
@@ -2477,16 +2402,13 @@ mod tests {
 
 (define-public (transfer-token (asset uint))
     (let ((recipient tx-sender))
-        (try!
-            (as-contract? ((with-all-assets-unsafe))
-                (try!
-                    (as-contract? ((with-nft .contract "token" (list u999)))
-                        (try! (nft-transfer? token asset current-contract recipient))
-                    )
+        (as-contract? ((with-all-assets-unsafe))
+            (try!
+                (as-contract? ((with-nft .contract "token" (list u999)))
+                    (try! (nft-transfer? token asset current-contract recipient))
                 )
             )
         )
-        (ok true)
     )
 )
 "#;
@@ -2523,12 +2445,9 @@ mod tests {
             let caller = r#"
 (define-public (do-transfer (asset uint))
     (let ((recipient tx-sender))
-        (try!
-            (as-contract? ((with-all-assets-unsafe))
-                (try! (contract-call? .callee transfer-nft asset recipient))
-            )
+        (as-contract? ((with-all-assets-unsafe))
+            (try! (contract-call? .callee transfer-nft asset recipient))
         )
-        (ok true)
     )
 )
 "#;
@@ -2556,19 +2475,16 @@ mod tests {
 
 (define-public (transfer-both (stx-amount uint) (ft-amount uint) (recipient principal))
     (begin
-        (try!
-            (as-contract? ((with-stx u200) (with-ft .contract "my-token" u100))
-                (begin
-                    (try! (stx-transfer? stx-amount current-contract recipient))
-                    (try!
-                        (as-contract? ((with-ft .contract "my-token" u100))
-                            (try! (ft-transfer? my-token ft-amount current-contract recipient))
-                        )
+        (as-contract? ((with-stx u200) (with-ft .contract "my-token" u100))
+            (begin
+                (try! (stx-transfer? stx-amount current-contract recipient))
+                (try!
+                    (as-contract? ((with-ft .contract "my-token" u100))
+                        (try! (ft-transfer? my-token ft-amount current-contract recipient))
                     )
                 )
             )
         )
-        (ok true)
     )
 )
 
@@ -2609,19 +2525,16 @@ mod tests {
 
 (define-public (transfer-both (stx-amount uint) (ft-amount uint) (recipient principal))
     (begin
-        (try!
-            (as-contract? ((with-stx u200))
-                (begin
-                    (try! (stx-transfer? stx-amount current-contract recipient))
-                    (try!
-                        (as-contract? ((with-ft .contract "my-token" u10))
-                            (try! (ft-transfer? my-token ft-amount current-contract recipient))
-                        )
+        (as-contract? ((with-stx u200))
+            (begin
+                (try! (stx-transfer? stx-amount current-contract recipient))
+                (try!
+                    (as-contract? ((with-ft .contract "my-token" u10))
+                        (try! (ft-transfer? my-token ft-amount current-contract recipient))
                     )
                 )
             )
         )
-        (ok true)
     )
 )
 
@@ -2671,19 +2584,16 @@ mod tests {
 
 (define-public (transfer-nft-and-stx (asset uint) (stx-amount uint))
     (let ((recipient tx-sender))
-        (try!
-            (as-contract? ((with-nft .contract "token" (list u1)) (with-stx u200))
-                (begin
-                    (try! (nft-transfer? token asset current-contract recipient))
-                    (try!
-                        (as-contract? ((with-stx u200))
-                            (try! (stx-transfer? stx-amount current-contract recipient))
-                        )
+        (as-contract? ((with-nft .contract "token" (list u1)) (with-stx u200))
+            (begin
+                (try! (nft-transfer? token asset current-contract recipient))
+                (try!
+                    (as-contract? ((with-stx u200))
+                        (try! (stx-transfer? stx-amount current-contract recipient))
                     )
                 )
             )
         )
-        (ok true)
     )
 )
 "#;
