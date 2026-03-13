@@ -1,9 +1,10 @@
-use clar2wasm::tools::{crosscheck, crosscheck_compare_only};
+use clar2wasm::tools::{crosscheck, crosscheck_compare_only, TestConfig};
 use clarity::vm::types::{
     ListData, ListTypeData, SequenceData, SequenceSubtype, SequencedValue, TypeSignature,
     MAX_VALUE_SIZE,
 };
 use clarity::vm::Value;
+use clarity_types::errors::{CheckError, CheckErrors};
 use proptest::prelude::*;
 
 use crate::{bool, buffer, int, list, prop_signature, prop_value, type_string, PropValue};
@@ -223,18 +224,26 @@ proptest! {
     #[test]
     fn crosscheck_map_append(
         (ty, seq, elem) in prop_signature().prop_flat_map(|ty| {
-            let seq = prop::collection::vec(
-                prop::collection::vec(prop_value(ty.clone()), 1..=10).prop_map(|v| Value::cons_list_unsanitized(v).unwrap()),
-                1..=10).prop_map(|v| {
-                Value::cons_list_unsanitized(v).unwrap()
-            }).prop_map_into();
-
-
-            let elem = prop::collection::vec(prop_value(ty.clone()), 1..=10).prop_map(|v| Value::cons_list_unsanitized(v).unwrap()).prop_map_into();
+            let seq = prop::collection::vec(prop::collection::vec(prop_value(ty.clone()), 1..=10), 1..=10);
+            let elem = prop::collection::vec(prop_value(ty.clone()), 1..=10);
 
             (Just(ty), seq, elem).no_shrink()
         })
     ) {
+        // seq and elem could be too big for an actual value, so we check if it's
+        // buildable before converting it to a value.
+        let seq = seq
+            .into_iter()
+            .map(Value::cons_list_unsanitized)
+            .collect::<Result<Vec<_>, _>>()
+            .and_then(Value::cons_list_unsanitized);
+        prop_assume!(seq.is_ok(), "generated sequence is too big for a value");
+        let seq = PropValue::from(seq.unwrap());
+
+        let elem = Value::cons_list_unsanitized(elem);
+        prop_assume!(elem.is_ok(), "generated elem is too big for a value");
+        let elem = PropValue::from(elem.unwrap());
+
         let snippet = format!(
             r#"
                 (define-private (foo (a (list 10 {t})) (b {t}))
@@ -245,6 +254,23 @@ proptest! {
             "#,
             t = type_string(&ty)
         );
+
+        // Since `type_string` changes the inner types in lists fron NoType to Int,
+        // the test could fail at analysis due to a too large size. We will skip those
+        // tests.
+        if let Err(CheckError { err: e, .. }) = clarity::vm::analysis::mem_type_check(
+            &snippet,
+            TestConfig::clarity_version(),
+            TestConfig::latest_epoch(),
+        ) {
+            prop_assume!(
+                !matches!(
+                    e.as_ref(),
+                    CheckErrors::ValueTooLarge | CheckErrors::ConstructedListTooLarge
+                ),
+                "contract returns a value too large"
+            );
+        }
 
         let expected = {
             let SequenceData::List(seq) = extract_sequence(seq) else {
@@ -267,6 +293,8 @@ proptest! {
                 res.push(Value::cons_list_unsanitized(item).unwrap());
             }
 
+            // we can unwrap like savages here, the analysis of the contract
+            // passed earlier.
             Value::cons_list_unsanitized(res).unwrap()
         };
 
