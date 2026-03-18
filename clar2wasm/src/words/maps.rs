@@ -1,11 +1,19 @@
+use std::collections::BTreeMap;
+
+use clarity::types::StacksEpochId;
 use clarity::vm::types::{TypeSignature, TypeSignatureExt};
 use clarity::vm::{ClarityName, SymbolicExpression};
+use clarity_types::errors::CheckErrors;
+use walrus::ir::{BinaryOp, IfElse, InstrSeqType};
 use walrus::ValType;
 
 use super::{ComplexWord, Word};
 use crate::check_args;
 use crate::cost::WordCharge;
-use crate::wasm_generator::{ArgumentsExt, GeneratorError, LiteralMemoryEntry, WasmGenerator};
+use crate::error_mapping::ErrorMap;
+use crate::wasm_generator::{
+    clar2wasm_ty, ArgumentsExt, GeneratorError, LiteralMemoryEntry, WasmGenerator,
+};
 use crate::wasm_utils::ArgumentCountCheck;
 
 #[derive(Debug)]
@@ -52,15 +60,7 @@ impl ComplexWord for MapDefinition {
             .i32_const(name_offset as i32)
             .i32_const(name_length as i32);
 
-        builder.call(
-            generator
-                .module
-                .funcs
-                .by_name("stdlib.define_map")
-                .ok_or_else(|| {
-                    GeneratorError::InternalError("stdlib.define_map not found".to_owned())
-                })?,
-        );
+        builder.call(generator.func_by_name("stdlib.define_map"));
 
         // Add the map types to generator
         generator
@@ -85,7 +85,7 @@ impl ComplexWord for MapGet {
         &self,
         generator: &mut WasmGenerator,
         builder: &mut walrus::InstrSeqBuilder,
-        expr: &SymbolicExpression,
+        _expr: &SymbolicExpression,
         args: &[SymbolicExpression],
     ) -> Result<(), GeneratorError> {
         check_args!(generator, builder, 2, args.len(), ArgumentCountCheck::Exact);
@@ -93,10 +93,13 @@ impl ComplexWord for MapGet {
         let name = args.get_name(0)?;
         let key = args.get_expr(1)?;
 
-        // WORKAROUND: set correct type for key
-        if let Some((key_ty, _)) = generator.maps_types.get(name) {
-            generator.set_expr_type(key, key_ty.clone())?;
-        }
+        let (key_ty, value_type) = generator
+            .maps_types
+            .get(name)
+            .ok_or_else(|| {
+                GeneratorError::TypeError("Type should have been set in map creation".to_owned())
+            })?
+            .clone();
 
         // Get the offset and length for this identifier in the literal memory
         let id_offset = *generator
@@ -110,36 +113,45 @@ impl ComplexWord for MapGet {
             .i32_const(id_offset as i32)
             .i32_const(id_length as i32);
 
-        // Create space on the call stack to write the key
-        let ty = generator
-            .get_expr_type(key)
-            .ok_or_else(|| {
-                GeneratorError::TypeError("map-set value expression must be typed".to_owned())
-            })?
-            .clone();
-        let (key_offset, key_size) = generator.create_call_stack_local(builder, &ty, true, false);
+        let (key_offset, _) = generator.create_call_stack_local(builder, &key_ty, true, false);
+
+        // In epoch >= 2.05, we generate a local to compute intermediary results used in the
+        // cost tracking. In this case, the cost tracking charge is applied after the delete operation.
+        // In epoch < 2.05, the charge is immediately computed like it is in the interpreter.
+        let post205_cost_local = if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+            Some(generator.borrow_local(ValType::I32))
+        } else {
+            let (key_ty, value_ty) = get_original_types(&generator.map_types_original, name)?;
+            charge_default_cost_value_and_key_size(
+                &value_ty.size().and_then(|a| key_ty.size().map(|b| a + b)),
+                generator,
+                builder,
+                self,
+            )?;
+            None
+        };
 
         // Push the key to the data stack
+        generator.set_expr_type(key, key_ty.clone())?;
         generator.traverse_expr(builder, key)?;
+        // for epoch >= 2.05, we compute the serialization size of the key.
+        if let Some(cost_local) = &post205_cost_local {
+            generator.serialization_size(builder, &key_ty)?;
+            builder.local_set(**cost_local);
+        }
 
         // Write the key to the memory (it's already on the data stack)
-        generator.write_to_memory(builder, key_offset, 0, &ty)?;
+        let key_size = generator.write_to_memory(builder, key_offset, 0, &key_ty)?;
 
         // Push the key offset and size to the data stack
-        builder.local_get(key_offset).i32_const(key_size);
+        builder.local_get(key_offset).i32_const(key_size as i32);
 
-        // Create a new local to hold the result on the call stack
-        let ty = generator
-            .get_expr_type(expr)
-            .ok_or_else(|| {
-                GeneratorError::TypeError("map-get? expression must be typed".to_owned())
-            })?
-            .clone();
-        let (return_offset, size) = generator.create_call_stack_local(builder, &ty, true, true);
+        let return_type = TypeSignature::OptionalType(Box::new(value_type.clone()));
+        let (return_offset, size) =
+            generator.create_call_stack_local(builder, &return_type, true, true);
 
         let return_size = generator.module.locals.add(ValType::I32);
         builder.i32_const(size).local_set(return_size);
-        self.charge(generator, builder, return_size)?;
 
         // Push the return value offset and size to the data stack
         builder.local_get(return_offset).local_get(return_size);
@@ -149,7 +161,69 @@ impl ComplexWord for MapGet {
 
         // Host interface fills the result into the specified memory. Read it
         // back out, and place the value on the data stack.
-        generator.read_from_memory(builder, return_offset, 0, &ty)?;
+        generator.read_from_memory(builder, return_offset, 0, &return_type)?;
+
+        let ty = clar2wasm_ty(&return_type);
+
+        let block_ty = InstrSeqType::new(&mut generator.module.types, &ty.clone(), &ty);
+        // In > 2.05 we have three different costs depending if
+        //      - an error occurred in the interpreter
+        //      - no error occurred
+        //          - and the value the operation is performed on is found
+        //          - and the value the operation is performed on is not found
+        let success_block_id = {
+            // When the linked operation does not fail due to an interpreter error
+            let mut success_block = builder.dangling_instr_seq(block_ty);
+            if let Some(cost_local) = &post205_cost_local {
+                generator.serialization_size(&mut success_block, &return_type)?;
+                let value_serialization_size = generator.borrow_local(ValType::I32);
+                // We check if the serialized size of the returned value is different than 1, aka the serialization size of a none
+                success_block
+                    // We check if the serialization size of the TOS is not equal to 1, Which is the serialization size of a none
+                    // If it is not a none, aka a value was found in the map, we add the serialization size of the value we retrieved to the cost
+                    // Otherwise the cost is just the serialization size key
+                    .local_tee(*value_serialization_size)
+                    .i32_const(0)
+                    .local_get(*value_serialization_size)
+                    .i32_const(1)
+                    .binop(BinaryOp::I32Ne)
+                    .select(None);
+                success_block
+                    .local_get(**cost_local)
+                    .binop(BinaryOp::I32Add)
+                    .local_set(**cost_local);
+                self.charge(generator, &mut success_block, **cost_local)?;
+            }
+            success_block.id()
+        };
+
+        let error_block_id = {
+            // When the linked operation fails due to an interpreter error
+            let mut error_block = builder.dangling_instr_seq(None);
+            if post205_cost_local.is_some() {
+                let (key_ty, value_ty) = get_original_types(&generator.map_types_original, name)?;
+                charge_default_cost_value_and_key_size(
+                    &value_ty.size().and_then(|a| key_ty.size().map(|b| a + b)),
+                    generator,
+                    &mut error_block,
+                    self,
+                )?;
+            }
+
+            // Throws back the runtime error that occurred in the interpreter after charging the cost
+            error_block
+                .i32_const(ErrorMap::ExternError as i32)
+                .call(generator.func_by_name("stdlib.runtime-error"));
+            error_block.id()
+        };
+
+        builder
+            .global_get(generator.linked_error)
+            .ref_is_null()
+            .instr(IfElse {
+                consequent: success_block_id,
+                alternative: error_block_id,
+            });
 
         Ok(())
     }
@@ -178,11 +252,13 @@ impl ComplexWord for MapSet {
         let key = args.get_expr(1)?;
         let value = args.get_expr(2)?;
 
-        // WORKAROUND: set correct types for key and value
-        if let Some((key_ty, value_ty)) = generator.maps_types.get(name).cloned() {
-            generator.set_expr_type(key, key_ty)?;
-            generator.set_expr_type(value, value_ty)?;
-        }
+        let (key_ty, value_type) = generator
+            .maps_types
+            .get(name)
+            .ok_or_else(|| {
+                GeneratorError::TypeError("Types should have been set in map creation".to_owned())
+            })?
+            .clone();
 
         // Get the offset and length for this identifier in the literal memory
         let id_offset = *generator
@@ -196,48 +272,104 @@ impl ComplexWord for MapSet {
             .i32_const(id_offset as i32)
             .i32_const(id_length as i32);
 
-        // Create space on the call stack to write the key
-        let ty = generator
-            .get_expr_type(key)
-            .ok_or_else(|| {
-                GeneratorError::TypeError("map-set value expression must be typed".to_owned())
-            })?
-            .clone();
-        let (key_offset, key_size) = generator.create_call_stack_local(builder, &ty, true, false);
+        let (key_offset, _) = generator.create_call_stack_local(builder, &key_ty, true, false);
+
+        // In epoch >= 2.05, we generate a local to compute intermediary results used in the
+        // cost tracking. In this case, the cost tracking charge is applied after the delete operation.
+        // In epoch < 2.05, the charge is immediately computed like it is in the interpreter.
+        let post205_cost_local = if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+            Some(generator.borrow_local(ValType::I32))
+        } else {
+            let (key_ty, value_ty) = get_original_types(&generator.map_types_original, name)?;
+            charge_default_cost_value_and_key_size(
+                &value_ty.size().and_then(|a| key_ty.size().map(|b| a + b)),
+                generator,
+                builder,
+                self,
+            )?;
+            None
+        };
 
         // Push the key to the data stack
+        generator.set_expr_type(key, key_ty.clone())?;
         generator.traverse_expr(builder, key)?;
 
+        if let Some(cost_local) = &post205_cost_local {
+            generator.serialization_size(builder, &key_ty)?;
+            builder.local_set(**cost_local);
+        }
+
         // Write the key to the memory (it's already on the data stack)
-        generator.write_to_memory(builder, key_offset, 0, &ty)?;
+        let key_size = generator.write_to_memory(builder, key_offset, 0, &key_ty)?;
 
         // Push the key offset and size to the data stack
-        builder.local_get(key_offset).i32_const(key_size);
+        builder.local_get(key_offset).i32_const(key_size as i32);
 
         // Create space on the call stack to write the value
-        let ty = generator
-            .get_expr_type(value)
-            .ok_or_else(|| {
-                GeneratorError::TypeError("map-set value expression must be typed".to_owned())
-            })?
-            .clone();
-        let (val_offset, size) = generator.create_call_stack_local(builder, &ty, true, false);
-
-        let val_size = generator.module.locals.add(ValType::I32);
-        builder.i32_const(size).local_set(val_size);
-        self.charge(generator, builder, val_size)?;
+        let (val_offset, _) = generator.create_call_stack_local(builder, &value_type, true, false);
 
         // Push the value to the data stack
+        generator.set_expr_type(value, value_type.clone())?;
         generator.traverse_expr(builder, value)?;
+        if let Some(cost_local) = &post205_cost_local {
+            generator.serialization_size(builder, &value_type)?;
+            builder
+                .local_get(**cost_local)
+                .binop(BinaryOp::I32Add)
+                .local_set(**cost_local);
+        }
 
         // Write the value to the memory (it's already on the data stack)
-        generator.write_to_memory(builder, val_offset, 0, &ty)?;
+        let val_size = generator.write_to_memory(builder, val_offset, 0, &value_type)?;
 
         // Push the value offset and size to the data stack
-        builder.local_get(val_offset).local_get(val_size);
+        builder.local_get(val_offset).i32_const(val_size as i32);
 
         // Call the host interface function, `map_set`
         builder.call(generator.func_by_name("stdlib.map_set"));
+
+        // In > 2.05 we have two different costs depending if
+        //      - an error occurred in the interpreter
+        //      - no error occurred
+        let success_block_id = {
+            // When the linked operation does not fail due to an interpreter error
+            let mut success_block = builder.dangling_instr_seq(None);
+            if let Some(cost_local) = &post205_cost_local {
+                self.charge(generator, &mut success_block, **cost_local)?;
+            }
+            success_block.id()
+        };
+
+        let error_block_id = {
+            // When the linked operation fails due to an interpreter error
+            let mut error_block = builder.dangling_instr_seq(None);
+
+            if post205_cost_local.is_some() {
+                // The cost in < 2.05 has already been handled before
+                let (key_ty, value_ty) = get_original_types(&generator.map_types_original, name)?;
+                charge_default_cost_value_and_key_size(
+                    &value_ty.size().and_then(|a| key_ty.size().map(|b| a + b)),
+                    generator,
+                    &mut error_block,
+                    self,
+                )?;
+            }
+
+            // Throws back the runtime error that occurred in the interpreter after charging the cost
+            error_block
+                .i32_const(ErrorMap::ExternError as i32)
+                .call(generator.func_by_name("stdlib.runtime-error"));
+
+            error_block.id()
+        };
+
+        builder
+            .global_get(generator.linked_error)
+            .ref_is_null()
+            .instr(IfElse {
+                consequent: success_block_id,
+                alternative: error_block_id,
+            });
 
         Ok(())
     }
@@ -266,11 +398,13 @@ impl ComplexWord for MapInsert {
         let key = args.get_expr(1)?;
         let value = args.get_expr(2)?;
 
-        // WORKAROUND: set correct types for key and value
-        if let Some((key_ty, value_ty)) = generator.maps_types.get(name).cloned() {
-            generator.set_expr_type(key, key_ty)?;
-            generator.set_expr_type(value, value_ty)?;
-        }
+        let (key_ty, value_type) = generator
+            .maps_types
+            .get(name)
+            .ok_or_else(|| {
+                GeneratorError::TypeError("Types should have been set in map creation".to_owned())
+            })?
+            .clone();
 
         // Get the offset and length for this identifier in the literal memory
         let id_offset = *generator
@@ -284,48 +418,127 @@ impl ComplexWord for MapInsert {
             .i32_const(id_offset as i32)
             .i32_const(id_length as i32);
 
-        // Create space on the call stack to write the key
-        let ty = generator
-            .get_expr_type(key)
-            .ok_or_else(|| {
-                GeneratorError::TypeError("map-set value expression must be typed".to_owned())
-            })?
-            .clone();
-        let (key_offset, key_size) = generator.create_call_stack_local(builder, &ty, true, false);
+        let (key_offset, _) = generator.create_call_stack_local(builder, &key_ty, true, false);
+
+        // In epoch >= 2.05, we generate a local to compute intermediary results used in the
+        // cost tracking. In this case, the cost tracking charge is applied after the delete operation.
+        // In epoch < 2.05, the charge is immediately computed like it is in the interpreter.
+        let post205_cost_local = if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+            Some((
+                generator.borrow_local(ValType::I32),
+                generator.borrow_local(ValType::I32),
+            ))
+        } else {
+            let (key_ty, value_ty) = get_original_types(&generator.map_types_original, name)?;
+            charge_default_cost_value_and_key_size(
+                &value_ty.size().and_then(|a| key_ty.size().map(|b| a + b)),
+                generator,
+                builder,
+                self,
+            )?;
+            None
+        };
 
         // Push the key to the data stack
+        generator.set_expr_type(key, key_ty.clone())?;
         generator.traverse_expr(builder, key)?;
 
+        if let Some((cost_local, _)) = &post205_cost_local {
+            generator.serialization_size(builder, &key_ty)?;
+            builder.local_set(**cost_local);
+        }
+
         // Write the key to the memory (it's already on the data stack)
-        generator.write_to_memory(builder, key_offset, 0, &ty)?;
+        let key_size = generator.write_to_memory(builder, key_offset, 0, &key_ty)?;
 
         // Push the key offset and size to the data stack
-        builder.local_get(key_offset).i32_const(key_size);
+        builder.local_get(key_offset).i32_const(key_size as i32);
 
         // Create space on the call stack to write the value
-        let ty = generator
-            .get_expr_type(value)
-            .ok_or_else(|| {
-                GeneratorError::TypeError("map-set value expression must be typed".to_owned())
-            })?
-            .clone();
-        let (val_offset, size) = generator.create_call_stack_local(builder, &ty, true, false);
-
-        let val_size = generator.module.locals.add(ValType::I32);
-        builder.i32_const(size).local_set(val_size);
-        self.charge(generator, builder, val_size)?;
+        let (val_offset, _) = generator.create_call_stack_local(builder, &value_type, true, false);
 
         // Push the value to the data stack
+        generator.set_expr_type(value, value_type.clone())?;
         generator.traverse_expr(builder, value)?;
+        // for epoch >= 2.05, we compute the serialization size of the key.
+        if let Some((_, serialized_sized_value_local)) = &post205_cost_local {
+            generator.serialization_size(builder, &value_type)?;
+            builder.local_set(**serialized_sized_value_local);
+        };
 
         // Write the value to the memory (it's already on the data stack)
-        generator.write_to_memory(builder, val_offset, 0, &ty)?;
+        let val_size = generator.write_to_memory(builder, val_offset, 0, &value_type)?;
 
         // Push the value offset and size to the data stack
-        builder.local_get(val_offset).local_get(val_size);
+        builder.local_get(val_offset).i32_const(val_size as i32);
 
-        // Call the host interface function, `map_insert`
+        // Call the host interface function, `map_set`
         builder.call(generator.func_by_name("stdlib.map_insert"));
+
+        let block_ty = InstrSeqType::new(
+            &mut generator.module.types,
+            &[ValType::I32],
+            &[ValType::I32],
+        );
+
+        // In > 2.05 we have three different costs depending if
+        //      - an error occurred in the interpreter
+        //      - no error occurred
+        //          - and the value the operation is performed on is found
+        //          - and the value the operation is performed on is not found
+        let success_block_id = {
+            // When the linked operation does not fail due to an interpreter error
+            let mut success_block = builder.dangling_instr_seq(block_ty);
+            // The cost in < 2.05 has already been handled before
+            if let Some((cost_local, value_serialized_size_local)) = &post205_cost_local {
+                let entry_status = generator.borrow_local(ValType::I32);
+                // When the element the operation is performed on was found in the map
+                // Then we charge the serialized size of the entry we want to store + serialized size of the key
+                // Otherwise just the serialized size of the key
+                success_block
+                    .local_set(*entry_status)
+                    .local_get(**value_serialized_size_local)
+                    .i32_const(0)
+                    .local_get(*entry_status)
+                    .select(None);
+                success_block
+                    .local_get(**cost_local)
+                    .binop(BinaryOp::I32Add)
+                    .local_set(**cost_local);
+                self.charge(generator, &mut success_block, **cost_local)?;
+                success_block.local_get(*entry_status);
+            }
+            success_block.id()
+        };
+
+        let error_block_id = {
+            // When the linked operation fails due to an interpreter error
+            let mut error_block = builder.dangling_instr_seq(None);
+            if post205_cost_local.is_some() {
+                let (key_ty, value_ty) = get_original_types(&generator.map_types_original, name)?;
+                charge_default_cost_value_and_key_size(
+                    &value_ty.size().and_then(|a| key_ty.size().map(|b| a + b)),
+                    generator,
+                    &mut error_block,
+                    self,
+                )?;
+            }
+
+            // Throws back the runtime error that occurred in the interpreter after charging the cost
+            error_block
+                .i32_const(ErrorMap::ExternError as i32)
+                .call(generator.func_by_name("stdlib.runtime-error"));
+
+            error_block.id()
+        };
+
+        builder
+            .global_get(generator.linked_error)
+            .ref_is_null()
+            .instr(IfElse {
+                consequent: success_block_id,
+                alternative: error_block_id,
+            });
 
         Ok(())
     }
@@ -353,10 +566,24 @@ impl ComplexWord for MapDelete {
         let name = args.get_name(0)?;
         let key = args.get_expr(1)?;
 
-        // WORKAROUND: set correct type for key
-        if let Some((key_ty, _)) = generator.maps_types.get(name) {
-            generator.set_expr_type(key, key_ty.clone())?;
-        }
+        let (key_ty, _) = generator
+            .maps_types
+            .get(name)
+            .ok_or_else(|| {
+                GeneratorError::TypeError("Types should have been set in map creation".to_owned())
+            })?
+            .clone();
+
+        // In epoch >= 2.05, we generate a local to compute intermediary results used in the
+        // cost tracking. In this case, the cost tracking charge is applied after the delete operation.
+        // In epoch < 2.05, the charge is immediately computed like it is in the interpreter.
+        let post205_cost_local = if generator.contract_analysis.epoch >= StacksEpochId::Epoch2_05 {
+            Some(generator.borrow_local(ValType::I32))
+        } else {
+            let (key_ty, _) = get_original_types(&generator.map_types_original, name)?;
+            charge_default_cost_value_and_key_size(&key_ty.size(), generator, builder, self)?;
+            None
+        };
 
         // Get the offset and length for this identifier in the literal memory
         let id_offset = *generator
@@ -372,40 +599,124 @@ impl ComplexWord for MapDelete {
             .i32_const(id_length as i32);
 
         // Create space on the call stack to write the key
-        let ty = generator
-            .get_expr_type(key)
-            .ok_or_else(|| {
-                GeneratorError::TypeError("map-set value expression must be typed".to_owned())
-            })?
-            .clone();
-        let (key_offset, size) = generator.create_call_stack_local(builder, &ty, true, false);
-
-        let key_size = generator.module.locals.add(ValType::I32);
-        builder.i32_const(size).local_set(key_size);
-        self.charge(generator, builder, key_size)?;
+        let (key_offset, _) = generator.create_call_stack_local(builder, &key_ty, true, false);
 
         // Push the key to the data stack
+        generator.set_expr_type(key, key_ty.clone())?;
         generator.traverse_expr(builder, key)?;
 
+        // for epoch >= 2.05, we compute the serialization size of the key.
+        if let Some(cost_local) = &post205_cost_local {
+            generator.serialization_size(builder, &key_ty)?;
+            builder.local_set(**cost_local);
+        }
+
         // Write the key to the memory (it's already on the data stack)
-        generator.write_to_memory(builder, key_offset, 0, &ty)?;
+        let key_size = generator.write_to_memory(builder, key_offset, 0, &key_ty)?;
 
         // Push the key offset and size to the data stack
-        builder.local_get(key_offset).local_get(key_size);
+        builder.local_get(key_offset).i32_const(key_size as i32);
 
         // Call the host interface function, `map_delete`
-        builder.call(
-            generator
-                .module
-                .funcs
-                .by_name("stdlib.map_delete")
-                .ok_or_else(|| {
-                    GeneratorError::TypeError("stdlib.map_delete not found".to_owned())
-                })?,
-        );
+        builder.call(generator.func_by_name("stdlib.map_delete"));
+
+        let result = generator.borrow_local(ValType::I32);
+        builder.local_set(*result);
+
+        // In > 2.05 we have three different costs depending if
+        //      - an error occurred in the interpreter
+        //      - no error occurred
+        //          - and the value the operation is performed on is found
+        //          - and the value the operation is performed on is not found
+        let success_block_id = {
+            // When the linked operation does not fail due to an interpreter error
+            let mut success_block = builder.dangling_instr_seq(None);
+
+            if let Some(cost_local) = &post205_cost_local {
+                // the cost here will be the serialization size of the key (already in cost_local)
+                //  + the size of a None if the operation succeeds. Fortunately, this size is 1 when
+                // a value is found, which is the same as the value inside result. If no value was
+                // deleted, we add 0, which is the value of result.
+                success_block
+                    .local_get(**cost_local)
+                    .local_get(*result)
+                    .binop(BinaryOp::I32Add)
+                    .local_set(**cost_local);
+                self.charge(generator, &mut success_block, **cost_local)?;
+            }
+
+            success_block.id()
+        };
+
+        let error_block_id = {
+            // When the linked operation fails due to an interpreter error
+            let mut error_block = builder.dangling_instr_seq(None);
+
+            // in epoch >= 2.05, we charge depending on the size of the key.
+            if post205_cost_local.is_some() {
+                let (key_ty, _) = get_original_types(&generator.map_types_original, name)?;
+                charge_default_cost_value_and_key_size(
+                    &key_ty.size(),
+                    generator,
+                    &mut error_block,
+                    self,
+                )?;
+            }
+
+            // Throws back the runtime error that occurred in the interpreter after charging the cost
+            error_block
+                .i32_const(ErrorMap::ExternError as i32)
+                .call(generator.func_by_name("stdlib.runtime-error"));
+
+            error_block.id()
+        };
+
+        builder
+            .global_get(generator.linked_error)
+            .ref_is_null()
+            .instr(IfElse {
+                consequent: success_block_id,
+                alternative: error_block_id,
+            });
+
+        builder.local_get(*result);
 
         Ok(())
     }
+}
+
+/// helper function to compute the cost of value and key type sizes
+/// This function charges the the size of the value type + the size of the key type (non serialized)
+/// It is used for Get, Insert,and Set functions
+/// The two cases it is used in are:
+/// 1) for cost computation in epoch < 2.05
+/// 2) for cost computation in case of an interpreter error in epoch >= 2.05
+fn charge_default_cost_value_and_key_size(
+    cost: &Result<u32, CheckErrors>,
+    generator: &mut WasmGenerator,
+    builder: &mut walrus::InstrSeqBuilder,
+    word: &dyn ComplexWord,
+) -> Result<(), GeneratorError> {
+    if let Ok(cost) = cost {
+        word.charge(generator, builder, *cost)?;
+    } else {
+        builder
+            .i32_const(ErrorMap::SignatureTypeSizeCheckError as i32)
+            .call(generator.func_by_name("stdlib.runtime-error"));
+    }
+    Ok(())
+}
+type MapTypes = BTreeMap<ClarityName, (TypeSignature, TypeSignature)>;
+fn get_original_types(
+    map_types: &MapTypes,
+    name: &str,
+) -> Result<(TypeSignature, TypeSignature), GeneratorError> {
+    map_types
+        .get(name)
+        .ok_or_else(|| {
+            GeneratorError::TypeError("Types should have been set in contract analysis".to_owned())
+        })
+        .map(|(t1, t2)| (t1.clone(), t2.clone()))
 }
 
 #[cfg(test)]

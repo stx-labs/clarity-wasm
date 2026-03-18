@@ -94,6 +94,11 @@ pub enum ErrorMap {
     /// Indicates a write length cost overrun
     CostOverrunWriteLength = 104,
 
+    ExternError = 105,
+
+    // Indicate that a call to TypeSignature.size() failed
+    SignatureTypeSizeCheckError = 106,
+
     /// A catch-all for errors that are not mapped to specific error codes.
     /// This might be used for unexpected or unclassified errors.
     NotMapped = 99,
@@ -124,11 +129,31 @@ impl From<i32> for ErrorMap {
             102 => ErrorMap::CostOverrunReadLength,
             103 => ErrorMap::CostOverrunWriteCount,
             104 => ErrorMap::CostOverrunWriteLength,
+            105 => ErrorMap::ExternError,
+            106 => ErrorMap::SignatureTypeSizeCheckError,
             _ => ErrorMap::NotMapped,
         }
     }
 }
 
+fn referror_to_error<T>(referror: &T, placeholder_error: T) -> T {
+    // SAFETY:
+    //
+    // This unsafe operation returns the value of a location pointed by `*mut T`.
+    //
+    // The purpose of this code is to take the ownership of the `referror` value
+    // since clarity::vm::errors::Error is not a Clonable type.
+    //
+    // Converting a `&T` (referror) to a `*mut T` doesn't cause any issues here
+    // because the reference is not borrowed elsewhere.
+    //
+    // The replaced `T` value is deallocated after the operation. Therefore, the chosen `T`
+    // is a placeholder value, which avoids having two copies of the same pointer.
+    //
+    // Otherwise we would encounter a double free. For example if we had used core::ptr::read to extract the error
+    // held in the referror.
+    unsafe { core::ptr::replace((referror as *const T) as *mut T, placeholder_error) }
+}
 pub(crate) fn resolve_error(
     e: wasmtime::Error,
     instance: Instance,
@@ -137,54 +162,15 @@ pub(crate) fn resolve_error(
     clarity_version: &ClarityVersion,
 ) -> Error {
     if let Some(vm_error) = e.root_cause().downcast_ref::<Error>() {
-        // SAFETY:
-        //
-        // This unsafe operation returns the value of a location pointed by `*mut T`.
-        //
-        // The purpose of this code is to take the ownership of the `vm_error` value
-        // since clarity::vm::errors::Error is not a Clonable type.
-        //
-        // Converting a `&T` (vm_error) to a `*mut T` doesn't cause any issues here
-        // because the reference is not borrowed elsewhere.
-        //
-        // The replaced `T` value is deallocated after the operation. Therefore, the chosen `T`
-        // is a dummy value, solely to satisfy the signature of the replace function
-        // and not cause harm when it is deallocated.
-        //
-        // Specifically, Error::Wasm(WasmError::ModuleNotFound) was selected as the placeholder value.
-        return unsafe {
-            core::ptr::replace(
-                (vm_error as *const Error) as *mut Error,
-                Error::Wasm(WasmError::ModuleNotFound),
-            )
-        };
-    }
+        return referror_to_error(vm_error, Error::Wasm(WasmError::ModuleNotFound));
+    };
 
     if let Some(vm_error) = e.root_cause().downcast_ref::<CheckErrors>() {
-        // SAFETY:
-        //
-        // This unsafe operation returns the value of a location pointed by `*mut T`.
-        //
-        // The purpose of this code is to take the ownership of the `vm_error` value
-        // since clarity::vm::errors::Error is not a Clonable type.
-        //
-        // Converting a `&T` (vm_error) to a `*mut T` doesn't cause any issues here
-        // because the reference is not borrowed elsewhere.
-        //
-        // The replaced `T` value is deallocated after the operation. Therefore, the chosen `T`
-        // is a dummy value, solely to satisfy the signature of the replace function
-        // and not cause harm when it is deallocated.
-        //
-        // Specifically, CheckErrors::ExpectedName was selected as the placeholder value.
-        return unsafe {
-            let err = core::ptr::replace(
-                (vm_error as *const CheckErrors) as *mut CheckErrors,
-                CheckErrors::ExpectedName,
-            );
-
-            <CheckErrors as std::convert::Into<Error>>::into(err)
-        };
-    }
+        return <CheckErrors as std::convert::Into<Error>>::into(referror_to_error(
+            vm_error,
+            CheckErrors::ExpectedName,
+        ));
+    };
 
     // Check if the error is caused by
     // an unreachable Wasm trap.
@@ -308,6 +294,28 @@ fn from_runtime_error_code(
         ErrorMap::CostOverrunReadLength => Error::from(CostErrors::CostOverflow),
         ErrorMap::CostOverrunWriteCount => Error::from(CostErrors::CostOverflow),
         ErrorMap::CostOverrunWriteLength => Error::from(CostErrors::CostOverflow),
+        ErrorMap::ExternError => {
+            match instance.get_global(store.as_context_mut(), "linked-error") {
+                None => Error::Wasm(WasmError::GlobalNotFound("runtime-error-linked".to_owned())),
+                Some(global) => match global.get(store.as_context_mut()).unwrap_externref() {
+                    None => Error::Wasm(WasmError::Expect("".to_owned())),
+                    Some(linked_error_extern) => {
+                        match linked_error_extern.data().downcast_ref::<Error>() {
+                            None => Error::Wasm(WasmError::Expect(
+                                "runtime-error-linked should hold an error type".to_owned(),
+                            )),
+                            Some(ref_error) => {
+                                referror_to_error(ref_error, Error::Wasm(WasmError::ModuleNotFound))
+                            }
+                        }
+                    }
+                },
+            }
+        }
+        ErrorMap::SignatureTypeSizeCheckError => Error::from(CheckErrors::Expects(
+            "FAIL: .size() overflowed on too large of a type. construction should have failed!"
+                .into(),
+        )),
         _ => panic!("Runtime error code {runtime_error_code} not supported"),
     }
 }
