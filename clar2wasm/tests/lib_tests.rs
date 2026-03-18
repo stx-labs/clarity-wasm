@@ -4,7 +4,6 @@ use clar2wasm::compile;
 use clar2wasm::datastore::{BurnDatastore, StacksConstants};
 use clar2wasm::initialize::initialize_contract;
 use clar2wasm::tools::execute;
-use clar2wasm::wasm_utils::call_function;
 use clarity::consts::CHAIN_ID_TESTNET;
 use clarity::types::chainstate::BlockHeaderHash;
 use clarity::types::StacksEpochId;
@@ -205,7 +204,7 @@ macro_rules! test_multi_contract_call {
                 // Initialize a call stack
                 let mut call_stack = CallStack::new();
 
-                let result = call_function(
+                let result = clarity::vm::clarity_wasm::call_function(
                     $contract_func,
                     $params,
                     global_context,
@@ -325,7 +324,7 @@ macro_rules! test_multi_contract_call_events {
                 // Initialize a call stack
                 let mut call_stack = CallStack::new();
 
-                let result = call_function(
+                let result = clarity::vm::clarity_wasm::call_function(
                     $contract_func,
                     $params,
                     global_context,
@@ -488,7 +487,7 @@ macro_rules! test_contract_call_error {
                 // Initialize a call stack
                 let mut call_stack = CallStack::new();
 
-                let result = call_function(
+                let result = clarity::vm::clarity_wasm::call_function(
                     $contract_func,
                     &[],
                     global_context,
