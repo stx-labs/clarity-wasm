@@ -133,10 +133,10 @@
 ;;
 
 (define-read-only (check-list-string-utf8
-        (entry (string-utf8 1))
+        (entry (string-utf8 5))
         (context uint)
     )
     (begin (print entry) (print context)))
 
-(define-public (test-list-string-utf8 (listparam (list 3 (string-utf8 1))))
+(define-public (test-list-string-utf8 (listparam (list 3 (string-utf8 5))))
   (ok (fold check-list-string-utf8 listparam u1)))
