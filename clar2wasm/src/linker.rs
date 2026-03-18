@@ -1,8 +1,7 @@
-use std::collections::HashMap;
 use std::io::{Cursor, Write as _};
 
 use clarity::vm::callables::{DefineType, DefinedFunction};
-use clarity::vm::contexts::{AssetMap, ExecutionState, InvocationContext};
+use clarity::vm::contexts::{ExecutionState, InvocationContext};
 use clarity::vm::costs::{constants as cost_constants, CostTracker};
 use clarity::vm::database::{ClarityDatabase, STXBalance, StoreType};
 use clarity::vm::errors::{
@@ -11,7 +10,7 @@ use clarity::vm::errors::{
 };
 use clarity::vm::functions::crypto::{pubkey_to_address_v1, pubkey_to_address_v2};
 use clarity::vm::functions::post_conditions::{
-    Allowance, FtAllowance, NftAllowance, StackingAllowance, StxAllowance,
+    check_allowances, Allowance, FtAllowance, NftAllowance, StackingAllowance, StxAllowance,
 };
 use clarity::vm::types::{
     AssetIdentifier, BuffData, BufferLength, FunctionType, ListTypeData, PrincipalData,
@@ -1294,11 +1293,7 @@ fn link_enter_as_contract_post_v4_fn(
                 caller.data_mut().push_sender(contract_principal.clone());
                 caller.data_mut().push_caller(contract_principal);
 
-                // Return an ExternRef wrapping a Mutex<Vec<Allowance>> for the
-                // With* host functions to push allowances into.
-                Some(ExternRef::new(std::sync::Mutex::new(
-                    Vec::<Allowance>::new(),
-                )))
+                Some(ExternRef::new(AllowanceContext::new()))
             },
         )
         .map(|_| ())
@@ -1321,6 +1316,8 @@ fn link_exit_as_contract_post_v4_fn(
             "clarity",
             "exit_as_contract_post_v4",
             |mut caller: Caller<'_, ClarityWasmContext>, allowance_ref: Option<ExternRef>| {
+                let epoch = caller.data().global_context.epoch_id;
+
                 // we need to restore the current caller and sender. We pop both and check if we did set
                 // them correctly before. We keep the sender (current-contract) as owner for checking the
                 // allowances.
@@ -1330,12 +1327,11 @@ fn link_exit_as_contract_post_v4_fn(
                     owner?
                 };
 
-                // Extract allowances from the ExternRef
-                let allowances = extract_allowances(&allowance_ref)?;
+                let allowances = AllowanceContext::extract(&allowance_ref)?;
 
                 let asset_map = caller.data_mut().global_context.get_readonly_asset_map()?;
 
-                match check_allowances(&owner, allowances, asset_map)? {
+                match check_allowances(&owner, allowances, asset_map, epoch)? {
                     None => {
                         caller.data_mut().global_context.commit()?;
                         Ok((1i32, 0i64, 0i64)) // no violation
@@ -1358,177 +1354,43 @@ fn link_exit_as_contract_post_v4_fn(
         })
 }
 
-type AllowanceContext = std::sync::Mutex<Vec<Allowance>>;
+/// Holds the list of allowances for an `as-contract?` block.
+/// Passed through WASM as an `ExternRef` handle.
+/// Needs a `Mutex` because `ExternRef` only gives us a shared
+/// reference, but we still need to mutate the list.
+struct AllowanceContext(std::sync::Mutex<Vec<Allowance>>);
 
-fn get_allowance_context(
-    externref: &Option<ExternRef>,
-) -> Result<&AllowanceContext, VmExecutionError> {
-    let externref = externref.as_ref().ok_or_else(|| {
-        VmExecutionError::Wasm(WasmError::WasmGeneratorError(
-            "allowance context is missing".to_string(),
-        ))
-    })?;
-    externref
-        .data()
-        .downcast_ref::<AllowanceContext>()
-        .ok_or_else(|| {
+impl AllowanceContext {
+    fn new() -> Self {
+        Self(std::sync::Mutex::new(Vec::new()))
+    }
+
+    fn from_externref(externref: &Option<ExternRef>) -> Result<&Self, VmExecutionError> {
+        let externref = externref.as_ref().ok_or_else(|| {
             VmExecutionError::Wasm(WasmError::WasmGeneratorError(
-                "allowance context has wrong type".to_string(),
+                "allowance context is missing".to_string(),
             ))
-        })
-}
-
-/// Extract the allowances from an ExternRef, consuming the contents.
-fn extract_allowances(externref: &Option<ExternRef>) -> Result<Vec<Allowance>, VmExecutionError> {
-    let ctx = get_allowance_context(externref)?;
-    let result = ctx.lock().unwrap().drain(..).collect();
-    Ok(result)
-}
-
-/// Add an allowance to the current as-contract? context.
-fn push_allowance(
-    externref: &Option<ExternRef>,
-    allowance: Allowance,
-) -> Result<(), VmExecutionError> {
-    let ctx = get_allowance_context(externref)?;
-    ctx.lock().unwrap().push(allowance);
-    Ok(())
-}
-
-// Checker function for the asset allowances
-fn check_allowances(
-    owner: &PrincipalData,
-    allowances: Vec<Allowance>,
-    assets: &AssetMap,
-) -> Result<Option<u128>, VmExecutionError> {
-    const MAX_ALLOWANCES: usize = 128;
-    let mut stx_allowances: Vec<(usize, u128)> = Vec::new();
-    let mut ft_allowances: HashMap<AssetIdentifier, Vec<(usize, u128)>> = HashMap::new();
-    let mut nft_allowances: HashMap<AssetIdentifier, (usize, Vec<Value>)> = HashMap::new();
-    let mut stacking_allowances: Vec<(usize, u128)> = Vec::new();
-
-    for (i, allowance) in allowances.into_iter().enumerate() {
-        match allowance {
-            Allowance::All => return Ok(None),
-            Allowance::Stx(stx) => {
-                stx_allowances.push((i, stx.amount));
-            }
-            Allowance::Ft(ft) => {
-                ft_allowances
-                    .entry(ft.asset)
-                    .or_default()
-                    .push((i, ft.amount));
-            }
-            Allowance::Nft(nft) => {
-                let (_, vec) = nft_allowances
-                    .entry(nft.asset)
-                    .or_insert_with(|| (i, Vec::new()));
-                vec.extend(nft.asset_ids);
-            }
-            Allowance::Stacking(stacking) => {
-                stacking_allowances.push((i, stacking.amount));
-            }
-        }
+        })?;
+        externref
+            .data()
+            .downcast_ref::<AllowanceContext>()
+            .ok_or_else(|| {
+                VmExecutionError::Wasm(WasmError::WasmGeneratorError(
+                    "allowance context has wrong type".to_string(),
+                ))
+            })
     }
 
-    let idx_to_u128 = |idx: usize| {
-        u128::try_from(idx).map_err(|_| VmExecutionError::Wasm(WasmError::AllowanceIndexOverflow))
-    };
-
-    // Check STX movements
-    if let Some(stx_moved) = assets.get_stx(owner) {
-        if stx_allowances.is_empty() {
-            return Ok(Some(MAX_ALLOWANCES as u128));
-        }
-        for (index, allowance) in &stx_allowances {
-            if stx_moved > *allowance {
-                return Ok(Some(idx_to_u128(*index)?));
-            }
-        }
+    fn push(externref: &Option<ExternRef>, allowance: Allowance) -> Result<(), VmExecutionError> {
+        let ctx = Self::from_externref(externref)?;
+        ctx.0.lock().unwrap().push(allowance);
+        Ok(())
     }
 
-    // Check STX burns
-    if let Some(stx_burned) = assets.get_stx_burned(owner) {
-        if stx_allowances.is_empty() {
-            return Ok(Some(MAX_ALLOWANCES as u128));
-        }
-        for (index, allowance) in &stx_allowances {
-            if stx_burned > *allowance {
-                return Ok(Some(idx_to_u128(*index)?));
-            }
-        }
+    fn extract(externref: &Option<ExternRef>) -> Result<Vec<Allowance>, VmExecutionError> {
+        let ctx = Self::from_externref(externref)?;
+        Ok(std::mem::take(&mut *ctx.0.lock().unwrap()))
     }
-
-    // Check FT movements
-    if let Some(ft_moved) = assets.get_all_fungible_tokens(owner) {
-        for (asset, amount_moved) in ft_moved {
-            let mut merged: Vec<(usize, u128)> = Vec::new();
-
-            if let Some(v) = ft_allowances.get(asset) {
-                merged.extend(v.iter().cloned());
-            }
-            if let Some(wildcard_vec) = ft_allowances.get(&AssetIdentifier {
-                contract_identifier: asset.contract_identifier.clone(),
-                asset_name: ClarityName::from_literal("*"),
-            }) {
-                merged.extend(wildcard_vec.iter().cloned());
-            }
-
-            if merged.is_empty() {
-                return Ok(Some(MAX_ALLOWANCES as u128));
-            }
-
-            merged.sort_by_key(|(idx, _)| *idx);
-
-            for (index, allowance) in merged {
-                if *amount_moved > allowance {
-                    return Ok(Some(idx_to_u128(index)?));
-                }
-            }
-        }
-    }
-
-    // Check NFT movements
-    if let Some(nft_moved) = assets.get_all_nonfungible_tokens(owner) {
-        for (asset, ids_moved) in nft_moved {
-            // Build merged allowance list: exact-match + wildcard entries for the same contract
-            let mut merged: Vec<(usize, &Vec<Value>)> = Vec::new();
-            if let Some((index, allowance_vec)) = nft_allowances.get(asset) {
-                merged.push((*index, allowance_vec));
-            }
-            if let Some((index, allowance_vec)) = nft_allowances.get(&AssetIdentifier {
-                contract_identifier: asset.contract_identifier.clone(),
-                asset_name: ClarityName::from_literal("*"),
-            }) {
-                merged.push((*index, allowance_vec));
-            }
-
-            if merged.is_empty() {
-                return Ok(Some(MAX_ALLOWANCES as u128));
-            }
-            for id in ids_moved {
-                for (index, allowed_ids) in &merged {
-                    if !allowed_ids.contains(id) {
-                        return Ok(Some(idx_to_u128(*index)?));
-                    }
-                }
-            }
-        }
-    }
-
-    // Check stacking
-    if let Some(stacking_amount) = assets.get_stacking(owner) {
-        if stacking_allowances.is_empty() {
-            return Ok(Some(MAX_ALLOWANCES as u128));
-        }
-        for (index, allowance) in &stacking_allowances {
-            if stacking_amount > *allowance {
-                return Ok(Some(idx_to_u128(*index)?));
-            }
-        }
-    }
-
-    Ok(None)
 }
 
 /// Link host interface function, `with_all_assets_unsafe`, into the Wasm module.
@@ -1542,7 +1404,7 @@ fn link_with_all_assets_unsafe_fn(
             "clarity",
             "with_all_assets_unsafe",
             |_caller: Caller<'_, ClarityWasmContext>, allowance_ref: Option<ExternRef>| {
-                push_allowance(&allowance_ref, Allowance::All)?;
+                AllowanceContext::push(&allowance_ref, Allowance::All)?;
 
                 Ok(())
             },
@@ -1624,7 +1486,7 @@ fn link_with_ft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExec
                         })?;
                 }
 
-                push_allowance(
+                AllowanceContext::push(
                     &allowance_ref,
                     Allowance::Ft(FtAllowance {
                         asset: AssetIdentifier {
@@ -1756,7 +1618,10 @@ fn link_with_nft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                 let entry_size = key_type.size()?;
                 let max_list_len = (MAX_VALUE_SIZE.saturating_sub(entry_size + 5)) / entry_size;
 
-                // Read the list of allowed NFT identifiers from WASM memory.
+                // We use read_from_wasm (not read_identifier_from_wasm) because
+                // this is a typed list of NFT key values, not a string identifier.
+                // The wildcard ("*") case also requires this since the key type
+                // is resolved dynamically from the target contract.
                 let identifiers_value = read_from_wasm(
                     memory,
                     &mut caller,
@@ -1774,7 +1639,7 @@ fn link_with_nft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                     asset_name,
                 };
 
-                push_allowance(
+                AllowanceContext::push(
                     &allowance_ref,
                     Allowance::Nft(NftAllowance {
                         asset: asset_identifier,
@@ -1808,7 +1673,7 @@ fn link_with_stacking_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
              allowance_hi: i64| {
                 let allowance = ((allowance_hi as u128) << 64) | ((allowance_lo as u64) as u128);
 
-                push_allowance(
+                AllowanceContext::push(
                     &allowance_ref,
                     Allowance::Stacking(StackingAllowance { amount: allowance }),
                 )?;
@@ -1839,7 +1704,7 @@ fn link_with_stx_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
              amount_hi: i64| {
                 let allowed_amount = ((amount_hi as u128) << 64) | ((amount_lo as u64) as u128);
 
-                push_allowance(
+                AllowanceContext::push(
                     &allowance_ref,
                     Allowance::Stx(StxAllowance {
                         amount: allowed_amount,

@@ -1,9 +1,11 @@
+use std::cell::Cell;
+
 use clarity::vm::clarity_wasm::get_type_size;
 use clarity::vm::types::signatures::CallableSubtype;
 use clarity::vm::types::{PrincipalData, TypeSignature};
 use clarity::vm::{ClarityName, SymbolicExpression, SymbolicExpressionType, Value};
 use walrus::ir::BinaryOp;
-use walrus::ValType;
+use walrus::{LocalId, ValType};
 
 use super::{ComplexWord, Word};
 use crate::check_args;
@@ -12,15 +14,26 @@ use crate::wasm_generator::{clar2wasm_ty, ArgumentsExt, GeneratorError, WasmGene
 use crate::wasm_utils::ArgumentCountCheck;
 use crate::words::SimpleWord;
 
+// The WASM local holding the ExternRef for the current `as-contract?`
+// allowance context. Set by `AsContractPostV4::traverse` so the `With*`
+// words can load it onto the stack before calling their host functions.
+//
+// Stored in a thread_local because it is only relevant during code
+// generation (not at runtime) and is only used within this module.
+thread_local! {
+    static ALLOWANCE_CONTEXT: Cell<Option<LocalId>> = const { Cell::new(None) };
+}
+
 /// Load the externref allowance context local onto the WASM stack.
 /// Called by each `With*` word before its host function call.
 fn load_allowance_context(
-    generator: &WasmGenerator,
     builder: &mut walrus::InstrSeqBuilder,
+    func: &str,
 ) -> Result<(), GeneratorError> {
-    let local_id = generator.allowance_context.ok_or_else(|| {
-        GeneratorError::InternalError("with-* used outside of as-contract? context".to_owned())
-    })?;
+    let msg = format!("{func} used outside of as-contract? context");
+    let local_id = ALLOWANCE_CONTEXT
+        .get()
+        .ok_or(GeneratorError::InternalError(msg))?;
     builder.local_get(local_id);
     Ok(())
 }
@@ -104,7 +117,7 @@ impl ComplexWord for AsContractPostV4 {
         // Stash the allowance handle so With* words can reference it.
         let allowance_ref_local = generator.borrow_local(ValType::Externref);
         builder.local_set(*allowance_ref_local);
-        let prev_allowance_context = generator.allowance_context.replace(*allowance_ref_local);
+        let prev_allowance_context = ALLOWANCE_CONTEXT.replace(Some(*allowance_ref_local));
 
         // Register each allowance (e.g. with-stx, with-stacking).
         for allowance in allowances {
@@ -122,7 +135,7 @@ impl ComplexWord for AsContractPostV4 {
         builder.call(generator.func_by_name("stdlib.exit_as_contract_post_v4"));
 
         // Support nested as-contract? by restoring the outer context.
-        generator.allowance_context = prev_allowance_context;
+        ALLOWANCE_CONTEXT.set(prev_allowance_context);
 
         // Pop the exit return values: (ok_or_err, violation_lo, violation_hi).
         let hi_local = generator.borrow_local(ValType::I64);
@@ -195,7 +208,7 @@ impl ComplexWord for WithAllAssetsUnsafe {
         self.charge(generator, builder, 0)?;
 
         // Load the externref allowance context
-        load_allowance_context(generator, builder)?;
+        load_allowance_context(builder, "with-all-assets-unsafe")?;
 
         // Call the host interface function, `with_all_assets_unsafe`
         builder.call(generator.func_by_name("stdlib.with_all_assets_unsafe"));
@@ -230,7 +243,7 @@ impl ComplexWord for WithFt {
         let allowance = args.get_expr(2)?;
 
         // Load the externref allowance context (first param)
-        load_allowance_context(generator, builder)?;
+        load_allowance_context(builder, "with-ft")?;
 
         // Traverse the contract principal
         generator.traverse_expr(builder, token_contract)?;
@@ -274,7 +287,7 @@ impl ComplexWord for WithNft {
         let allowance = args.get_expr(2)?;
 
         // Load the externref allowance context (first param)
-        load_allowance_context(generator, builder)?;
+        load_allowance_context(builder, "with-nft")?;
 
         // Traverse the contract principal
         generator.traverse_expr(builder, token_contract)?;
@@ -316,7 +329,7 @@ impl ComplexWord for WithStacking {
         let allowance = args.get_expr(0)?;
 
         // Load the externref allowance context (first param)
-        load_allowance_context(generator, builder)?;
+        load_allowance_context(builder, "with-stacking")?;
 
         // Traverse the allowance amount (uint)
         generator.traverse_expr(builder, allowance)?;
@@ -352,7 +365,7 @@ impl ComplexWord for WithStx {
         let allowance = args.get_expr(0)?;
 
         // Load the externref allowance context (first param)
-        load_allowance_context(generator, builder)?;
+        load_allowance_context(builder, "with-stx")?;
 
         // Traverse the allowance amount (uint)
         generator.traverse_expr(builder, allowance)?;
@@ -1958,14 +1971,14 @@ mod tests {
     (nft-get-owner? token asset)
 )
 "#;
-            env.init_contract_with_snippet("contract", contract)
-                .expect("failed to init contract");
             let contract_principal = Value::Principal(PrincipalData::Contract(
                 clarity::vm::types::QualifiedContractIdentifier::new(
                     StandardPrincipalData::transient(),
                     ContractName::from_literal("contract"),
                 ),
             ));
+            env.init_contract_with_snippet("contract", contract)
+                .expect("failed to init contract");
             crosscheck_with_env(
                 "(contract-call? .contract mint-nft u1)
                 (let ((result (contract-call? .contract transfer-token u1)))
@@ -2013,14 +2026,14 @@ mod tests {
     (nft-get-owner? token asset)
 )
 "#;
-            env.init_contract_with_snippet("contract", contract)
-                .expect("failed to init contract");
             let contract_principal = Value::Principal(PrincipalData::Contract(
                 clarity::vm::types::QualifiedContractIdentifier::new(
                     StandardPrincipalData::transient(),
                     ContractName::from_literal("contract"),
                 ),
             ));
+            env.init_contract_with_snippet("contract", contract)
+                .expect("failed to init contract");
             crosscheck_with_env(
                 "(contract-call? .contract mint-nft u1)
                 (let ((result (contract-call? .contract transfer-token u1)))
@@ -2101,14 +2114,14 @@ mod tests {
     (nft-get-owner? token asset)
 )
 "#;
-            env.init_contract_with_snippet("contract", contract)
-                .expect("failed to init contract");
             let contract_principal = Value::Principal(PrincipalData::Contract(
                 clarity::vm::types::QualifiedContractIdentifier::new(
                     StandardPrincipalData::transient(),
                     ContractName::from_literal("contract"),
                 ),
             ));
+            env.init_contract_with_snippet("contract", contract)
+                .expect("failed to init contract");
             crosscheck_with_env(
                 "(contract-call? .contract mint-nft u1)
                 (let ((result (contract-call? .contract transfer-token u1)))
@@ -2135,11 +2148,7 @@ mod tests {
 
         #[test]
         fn as_contract_stacking_ok() {
-            let mut env = TestEnvironment::default();
             let pox4_code = include_str!("../../tests/contracts/boot-contracts/pox-4.clar");
-            env.init_contract_with_snippet("pox-4", pox4_code)
-                .expect("failed to init pox-4 contract");
-
             let wrapper = r#"
 (define-public (do-delegate (amount uint) (delegate-to principal))
     (begin
@@ -2150,30 +2159,28 @@ mod tests {
     )
 )
 "#;
-            env.init_contract_with_snippet("wrapper", wrapper)
-                .expect("failed to init wrapper contract");
-            crosscheck_with_env(
-                "(contract-call? .wrapper do-delegate u1000 tx-sender)",
+            crosscheck_multi_contract_with_env(
+                &[
+                    (ContractName::from_literal("pox-4"), pox4_code),
+                    (ContractName::from_literal("wrapper"), wrapper),
+                    (
+                        ContractName::from_literal("test"),
+                        "(contract-call? .wrapper do-delegate u1000 tx-sender)",
+                    ),
+                ],
                 Ok(Some(Value::okay_true())),
-                env,
+                TestEnvironment::default(),
             );
         }
 
         #[test]
         fn as_contract_stacking_pox_indirect() {
-            let mut env = TestEnvironment::default();
             let pox4_code = include_str!("../../tests/contracts/boot-contracts/pox-4.clar");
-            env.init_contract_with_snippet("pox-4", pox4_code)
-                .expect("failed to init pox-4 contract");
-
             let intermediary = r#"
 (define-public (do-delegate (amount uint) (delegate-to principal))
     (contract-call? .pox-4 delegate-stx amount delegate-to none none)
 )
 "#;
-            env.init_contract_with_snippet("intermediary", intermediary)
-                .expect("failed to init intermediary contract");
-
             // setup-allowance grants the intermediary permission to call pox-4
             // on behalf of the wrapper (as-contract? changes tx-sender to wrapper)
             let wrapper = r#"
@@ -2194,23 +2201,25 @@ mod tests {
     )
 )
 "#;
-            env.init_contract_with_snippet("wrapper", wrapper)
-                .expect("failed to init wrapper contract");
-            crosscheck_with_env(
-                "(contract-call? .wrapper setup-allowance)
+            crosscheck_multi_contract_with_env(
+                &[
+                    (ContractName::from_literal("pox-4"), pox4_code),
+                    (ContractName::from_literal("intermediary"), intermediary),
+                    (ContractName::from_literal("wrapper"), wrapper),
+                    (
+                        ContractName::from_literal("test"),
+                        "(contract-call? .wrapper setup-allowance)
                 (contract-call? .wrapper delegate-via-intermediary u1000 tx-sender)",
+                    ),
+                ],
                 Ok(Some(Value::okay_true())),
-                env,
+                TestEnvironment::default(),
             );
         }
 
         #[test]
         fn as_contract_stacking_and_stx_pox() {
-            let mut env = TestEnvironment::default();
             let pox4_code = include_str!("../../tests/contracts/boot-contracts/pox-4.clar");
-            env.init_contract_with_snippet("pox-4", pox4_code)
-                .expect("failed to init pox-4 contract");
-
             let wrapper = r#"
 (define-public (delegate-and-send-stx (delegate-amount uint) (stx-amount uint) (recipient principal))
     (begin
@@ -2224,14 +2233,18 @@ mod tests {
     )
 )
 "#;
-            env.init_contract_with_snippet("wrapper", wrapper)
-                .expect("failed to init wrapper contract");
-
-            crosscheck_with_env(
-                "(stx-transfer? u1000 tx-sender .wrapper)
+            crosscheck_multi_contract_with_env(
+                &[
+                    (ContractName::from_literal("pox-4"), pox4_code),
+                    (ContractName::from_literal("wrapper"), wrapper),
+                    (
+                        ContractName::from_literal("test"),
+                        "(stx-transfer? u1000 tx-sender .wrapper)
                 (contract-call? .wrapper delegate-and-send-stx u5000 u200 tx-sender)",
+                    ),
+                ],
                 Ok(Some(Value::okay_true())),
-                env,
+                TestEnvironment::default(),
             );
         }
 
@@ -2424,7 +2437,6 @@ mod tests {
 
         #[test]
         fn as_contract_nested_cross_contract() {
-            let mut env = TestEnvironment::default();
             let callee = r#"
 (define-non-fungible-token token uint)
 
@@ -2451,15 +2463,17 @@ mod tests {
     )
 )
 "#;
-            env.init_contract_with_snippet("callee", callee)
-                .expect("failed to init callee");
-            env.init_contract_with_snippet("caller", caller)
-                .expect("failed to init caller");
-            crosscheck_with_env(
-                "(contract-call? .callee mint-nft u1)
+            crosscheck_multi_contract(
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                    (
+                        ContractName::from_literal("test"),
+                        "(contract-call? .callee mint-nft u1)
                 (contract-call? .caller do-transfer u1)",
+                    ),
+                ],
                 Ok(Some(Value::okay_true())),
-                env,
             );
         }
 
@@ -2542,10 +2556,10 @@ mod tests {
     (ft-get-balance my-token current-contract)
 )
 "#;
-            env.init_contract_with_snippet("contract", contract)
-                .expect("failed to init contract");
             // Inner FT allowance u10 is too low for u50 transfer.
             // The inner violation (err u0) propagates via try!, causing full rollback.
+            env.init_contract_with_snippet("contract", contract)
+                .expect("failed to init contract");
             crosscheck_with_env(
                 "(stx-transfer? u500 tx-sender .contract)
                 (contract-call? .contract mint-ft u200)
