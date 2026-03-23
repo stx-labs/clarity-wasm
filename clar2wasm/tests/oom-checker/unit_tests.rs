@@ -1,8 +1,10 @@
 use clar2wasm::tools::{
-    crosscheck_oom, crosscheck_oom_with_env, crosscheck_oom_with_non_literal_args, TestEnvironment,
+    as_oom_check_snippet, crosscheck_multi_contract, crosscheck_oom, crosscheck_oom_with_env,
+    crosscheck_oom_with_non_literal_args, TestConfig, TestEnvironment,
 };
 use clarity::vm::types::{PrincipalData, TypeSignature};
 use clarity::vm::Value;
+use clarity_types::types::SequenceSubtype;
 
 use crate::list_of;
 
@@ -244,6 +246,74 @@ fn secp256k1_recover_oom() {
     crosscheck_oom(
         "(secp256k1-recover? 0xde5b9eb9e7c5592930eb2e30a01369c36586d872082ed8181ee83d2a0ec20f04 0x8738487ebe69b93d8e51583be8eee50bb4213fc49c767d329632730cc193b873554428fc936ca3569afc15f1c9365f6591d6251a89fee9c9ac661116824d3a1301)",
         Ok(Some(Value::okay(Value::buff_from(vec![3, 173, 184, 222, 75, 251, 101, 219, 44, 253, 97, 32, 213, 92, 101, 38, 174, 156, 82, 230, 117, 219, 126, 71, 48, 134, 54, 83, 75, 167, 120, 97, 16]).unwrap()).unwrap())),
+    );
+}
+
+#[test]
+fn sha256sum_oom() {
+    crosscheck_oom(
+        "(sha256 u1)",
+        Ok(Some(
+            Value::buff_from(
+                hex::decode("4cbbd8ca5215b8d161aec181a74b694f4e24b001d5b081dc0030ed797a8973e0")
+                    .unwrap(),
+            )
+            .unwrap(),
+        )),
+    );
+}
+
+#[test]
+fn map_sha256_oom() {
+    let snippet = "(map sha256 (list u1 u2 u3))";
+    let expected = Value::cons_list_unsanitized(
+        [
+            "4cbbd8ca5215b8d161aec181a74b694f4e24b001d5b081dc0030ed797a8973e0",
+            "b1535c7783ea8829b6b0cf67704539798b4d16c39bf0bfe09494c5d9f12eee30",
+            "59d5966c96af7ecad5c9d2918d6582d102b2c67f6b765ea28ac24371ab4f93be",
+        ]
+        .into_iter()
+        .map(|h| Value::buff_from(hex::decode(h).unwrap()).unwrap())
+        .collect(),
+    )
+    .unwrap();
+
+    crosscheck_oom_with_non_literal_args(
+        snippet,
+        &[TypeSignature::list_of(TypeSignature::UIntType, 3).unwrap()],
+        Ok(Some(expected)),
+    );
+}
+
+#[test]
+fn contract_call_with_workspace_oom() {
+    let callee = as_oom_check_snippet(
+        r#"
+            (define-public (sha256sum (a (buff 1)))
+                (ok (sha256 a))
+            )
+        "#,
+        &[TypeSignature::SequenceType(SequenceSubtype::BufferType(
+            1u32.try_into().unwrap(),
+        ))],
+        TestConfig::latest_epoch(),
+        TestConfig::clarity_version(),
+    );
+
+    let caller = "(contract-call? .callee sha256sum 0x01)";
+
+    let expected = Value::okay(
+        Value::buff_from(
+            hex::decode("4bf5122f344554c53bde2ebb8cd2b7e3d1600ad631c385a5d7cce23c7785459a")
+                .unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    crosscheck_multi_contract(
+        &[("callee".into(), &callee), ("caller".into(), caller)],
+        Ok(Some(expected)),
     );
 }
 

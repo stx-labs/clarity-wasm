@@ -488,6 +488,15 @@ impl WasmGenerator {
         self.module.globals.get_mut(self.stack_pointer).kind = walrus::GlobalKind::Local(
             walrus::InitExpr::Value(walrus::ir::Value::I32(self.literal_memory_end as i32)),
         );
+        // Create a global with the amount of workspace needed in this contract
+        let workspace_global = self.module.globals.add_local(
+            ValType::I32,
+            false,
+            walrus::InitExpr::Value(walrus::ir::Value::I32(
+                self.frame_size + self.max_work_space as i32,
+            )),
+        );
+        self.module.exports.add("workspace-size", workspace_global);
 
         Ok(self.module)
     }

@@ -1,6 +1,7 @@
 use std::fmt::Write;
 
-use clar2wasm::tools::crosscheck_multi_contract;
+use clar2wasm::tools::{as_oom_check_snippet, crosscheck_multi_contract, TestConfig};
+use clar2wasm::wasm_utils::signature_from_string;
 #[cfg(not(any(
     feature = "test-clarity-v1",
     feature = "test-clarity-v2",
@@ -714,6 +715,119 @@ proptest! {
             Ok(Some(
                 Value::okay(Value::buff_from(expected.0.to_vec()).unwrap()).unwrap(),
             )),
+        );
+    }
+}
+
+proptest! {
+    #![proptest_config(super::runtime_config())]
+
+    #[test]
+    fn contract_call_no_oom_one_arg(
+        (ty, val) in prop_signature().prop_ind_flat_map2(PropValue::from_type)
+    ) {
+        let version = TestConfig::clarity_version();
+        let epoch = TestConfig::latest_epoch();
+
+        let ty_string = type_string(&ty);
+        let full_ty = signature_from_string(
+            &ty_string,
+            version,
+            epoch,
+        )
+        .unwrap();
+
+        let callee = as_oom_check_snippet(
+            &format!(
+                r#"
+                    (define-public (foo (arg {ty_string}))
+                        (ok arg)
+                    )
+                "#
+            ),
+            &[full_ty],
+            epoch,
+            version,
+        );
+
+        let caller = format!("(contract-call? .callee foo {val})");
+
+        let expected = Value::okay(val.into()).unwrap();
+
+        crosscheck_multi_contract(
+            &[("callee".into(), &callee), ("caller".into(), &caller)],
+            Ok(Some(expected)),
+        );
+    }
+
+   #[test]
+    fn contract_call_no_oom_many_arg(
+        (types, values) in
+            prop::collection::vec(
+                prop_signature().prop_ind_flat_map2(PropValue::from_type),
+                1..10,
+            )
+            .prop_map(|s| -> (Vec<_>, Vec<_>) { s.into_iter().unzip() } )
+            .no_shrink()
+    ) {
+        let version = TestConfig::clarity_version();
+        let epoch = TestConfig::latest_epoch();
+
+        let types_strings: Vec<_> = types.iter().map(type_string).collect();
+        let full_types: Vec<_> = types_strings
+            .iter()
+            .map(|s| signature_from_string(s, version, epoch).unwrap())
+            .collect();
+
+        let args: String = ('a'..='z')
+            .zip(types_strings)
+            .map(|(name, ty)| format!("({name} {ty}) "))
+            .collect();
+        let returns = ('a'..='z')
+            .take(types.len())
+            .fold("{".to_owned(), |mut acc, c| {
+                acc.push_str(&format!("{c}: {c}, "));
+                acc
+            })
+            + "}";
+
+        let callee = as_oom_check_snippet(
+            &format!(
+                r#"
+                    (define-public (foo {args})
+                        (ok {returns})
+                    )
+                "#
+            ),
+            &full_types,
+            epoch,
+            version,
+        );
+
+        let caller = values
+            .iter()
+            .fold("(contract-call? .callee foo".to_owned(), |mut acc, v| {
+                acc.push(' ');
+                acc.push_str(&v.to_string());
+                acc
+            })
+            + ")";
+
+        let expected = Value::okay(
+            TupleData::from_data(
+                ('a'..='z')
+                    .zip(values)
+                    .map(|(name, val)| (name.to_string().try_into().unwrap(), val.into()))
+                    .collect(),
+            )
+            .unwrap()
+            .into(),
+        )
+        .unwrap();
+
+        crosscheck_multi_contract(
+            &[("callee".into(), &callee), ("caller".into(), &caller)],
+            Ok(Some(expected)),
         );
     }
 }
