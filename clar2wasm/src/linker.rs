@@ -1356,8 +1356,9 @@ fn link_exit_as_contract_post_v4_fn(
 
 /// Holds the list of allowances for an `as-contract?` block.
 /// Passed through WASM as an `ExternRef` handle.
-/// Needs a `Mutex` because `ExternRef` only gives us a shared
-/// reference, but we still need to mutate the list.
+// Needs a `Mutex` because we use an old version of WasmTime that
+// doesn’t allow to use a mutable reference to the inner data.
+// TODO: After WasmTime update, remove the mutex.
 struct AllowanceContext(std::sync::Mutex<Vec<Allowance>>);
 
 impl AllowanceContext {
