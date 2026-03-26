@@ -1334,13 +1334,13 @@ fn link_exit_as_contract_post_v4_fn(
                 match check_allowances(&owner, allowances, asset_map, epoch)? {
                     None => {
                         caller.data_mut().global_context.commit()?;
-                        Ok((1i32, 0i64, 0i64)) // no violation
+                        Ok((0i64, 0i64, 1i32)) // no violation
                     }
                     Some(violation_index) => {
                         caller.data_mut().global_context.roll_back()?;
                         let lo = violation_index as i64;
                         let hi = (violation_index >> 64) as i64;
-                        Ok((0i32, lo, hi)) // violation — Wasm returns (err index)
+                        Ok((lo, hi, 0i32)) // violation — Wasm returns (err index)
                     }
                 }
             },
@@ -6276,7 +6276,7 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
         "exit_as_contract_post_v4",
         |_: Caller<'_, ()>, _allowance_ref: Option<ExternRef>| {
             println!("as-contract: exit");
-            Ok((0i32, 0i64, 0i64))
+            Ok((0i64, 0i64, 0i32))
         },
     )?;
 

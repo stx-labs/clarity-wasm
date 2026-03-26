@@ -4,13 +4,15 @@ use clarity::vm::clarity_wasm::get_type_size;
 use clarity::vm::types::signatures::CallableSubtype;
 use clarity::vm::types::{PrincipalData, TypeSignature};
 use clarity::vm::{ClarityName, SymbolicExpression, SymbolicExpressionType, Value};
-use walrus::ir::BinaryOp;
+use walrus::ir::{BinaryOp, InstrSeqType};
 use walrus::{LocalId, ValType};
 
 use super::{ComplexWord, Word};
 use crate::check_args;
 use crate::cost::WordCharge;
-use crate::wasm_generator::{clar2wasm_ty, ArgumentsExt, GeneratorError, WasmGenerator};
+use crate::wasm_generator::{
+    add_placeholder_for_clarity_type, clar2wasm_ty, ArgumentsExt, GeneratorError, WasmGenerator,
+};
 use crate::wasm_utils::ArgumentCountCheck;
 use crate::words::SimpleWord;
 
@@ -24,18 +26,16 @@ thread_local! {
     static ALLOWANCE_CONTEXT: Cell<Option<LocalId>> = const { Cell::new(None) };
 }
 
-/// Load the externref allowance context local onto the WASM stack.
-/// Called by each `With*` word before its host function call.
-fn load_allowance_context(
-    builder: &mut walrus::InstrSeqBuilder,
-    func: &str,
-) -> Result<(), GeneratorError> {
-    let msg = format!("{func} used outside of as-contract? context");
-    let local_id = ALLOWANCE_CONTEXT
-        .get()
-        .ok_or(GeneratorError::InternalError(msg))?;
-    builder.local_get(local_id);
-    Ok(())
+fn with_allowance_context<T, F>(mut f: F) -> Result<T, GeneratorError>
+where
+    F: FnMut(LocalId) -> Result<T, GeneratorError>,
+{
+    let allowance_context = ALLOWANCE_CONTEXT.take().ok_or_else(|| {
+        GeneratorError::InternalError("Uninitialized allowance context".to_owned())
+    })?;
+    let res = f(allowance_context)?;
+    ALLOWANCE_CONTEXT.set(Some(allowance_context));
+    Ok(res)
 }
 
 #[derive(Debug)]
@@ -97,13 +97,6 @@ impl ComplexWord for AsContractPostV4 {
         let allowances = args.get_list(0)?;
         let inner = args.get_expr(1)?;
 
-        let inner_ty = generator
-            .get_expr_type(inner)
-            .ok_or_else(|| {
-                GeneratorError::TypeError("as-contract? inner expression must be typed".to_owned())
-            })?
-            .clone();
-
         let return_ty = generator
             .get_expr_type(expr)
             .ok_or_else(|| {
@@ -111,13 +104,33 @@ impl ComplexWord for AsContractPostV4 {
             })?
             .clone();
 
+        let inner_ty = match &return_ty {
+            TypeSignature::ResponseType(resp) => &resp.0,
+            _ => {
+                return Err(GeneratorError::TypeError(
+                    "Invalid return type for as-contract? expression".to_owned(),
+                ))
+            }
+        };
+        // workaround on the expression type
+        generator.set_expr_type(inner, inner_ty.clone())?;
+
         // Call the host interface function, `enter_as_contract_post_v4`
         builder.call(generator.func_by_name("stdlib.enter_as_contract_post_v4"));
 
         // Stash the allowance handle so With* words can reference it.
         let allowance_ref_local = generator.borrow_local(ValType::Externref);
         builder.local_set(*allowance_ref_local);
-        let prev_allowance_context = ALLOWANCE_CONTEXT.replace(Some(*allowance_ref_local));
+
+        // Set and make sure we are not overwriting an existing allowance context local
+        if ALLOWANCE_CONTEXT
+            .replace(Some(*allowance_ref_local))
+            .is_some()
+        {
+            return Err(GeneratorError::InternalError(
+                "Allowance context is overwritten in as-contract?".to_owned(),
+            ));
+        }
 
         // Register each allowance (e.g. with-stx, with-stacking).
         for allowance in allowances {
@@ -128,59 +141,48 @@ impl ComplexWord for AsContractPostV4 {
         generator.traverse_expr(builder, inner)?;
 
         // Stash the body result before calling exit (exit pushes its own values).
-        let inner_locals = generator.save_to_locals(builder, &inner_ty, true);
+        let result_locals = generator.save_to_locals(builder, inner_ty, true);
 
         // Validate allowances and commit or abort the transaction.
         builder.local_get(*allowance_ref_local);
         builder.call(generator.func_by_name("stdlib.exit_as_contract_post_v4"));
 
-        // Support nested as-contract? by restoring the outer context.
-        ALLOWANCE_CONTEXT.set(prev_allowance_context);
+        // No more need for the allowance context at this point.
+        ALLOWANCE_CONTEXT.set(None);
 
-        // Pop the exit return values: (ok_or_err, violation_lo, violation_hi).
-        let hi_local = generator.borrow_local(ValType::I64);
-        let lo_local = generator.borrow_local(ValType::I64);
-        let indicator_local = generator.borrow_local(ValType::I32);
-        builder.local_set(*hi_local);
-        builder.local_set(*lo_local);
-        builder.local_set(*indicator_local);
-
-        // Build the response: [indicator, ok_slots..., err_slots...].
-        let result_wasm_types = clar2wasm_ty(&return_ty);
-        let result_locals: Vec<_> = result_wasm_types
-            .iter()
-            .map(|t| generator.borrow_local(*t))
-            .collect();
-
-        builder
-            .local_get(*indicator_local)
-            .local_set(*result_locals[0]);
-
-        // Fill in either the ok or err portion; the other stays zeroed.
-        builder.local_get(*indicator_local).if_else(
-            None,
+        // Now on stack, we have either (int - 0) if an error occured with int the error index, or (0int - 1) if
+        // allowances returned no error
+        let return_ty_wasm = InstrSeqType::new(
+            &mut generator.module.types,
+            &[ValType::I64, ValType::I64],
+            &clar2wasm_ty(&return_ty),
+        );
+        builder.if_else(
+            return_ty_wasm,
             |then| {
-                // Allowances passed — write the body result into the ok slots.
-                for (i, local) in inner_locals.iter().enumerate() {
-                    then.local_get(*local).local_set(*result_locals[1 + i]);
+                // if allowances all checked, we return Ok - result - 0
+
+                // we drop the 0 on the stack
+                then.drop().drop();
+
+                then.i32_const(1);
+                for l in result_locals {
+                    then.local_get(l);
                 }
+                then.i64_const(0).i64_const(0);
             },
             |else_| {
-                // Allowance violated — write the violation index into the err slots.
-                let err_offset = 1 + inner_locals.len();
-                else_
-                    .local_get(*lo_local)
-                    .local_set(*result_locals[err_offset]);
-                else_
-                    .local_get(*hi_local)
-                    .local_set(*result_locals[err_offset + 1]);
+                // otherwise we return the Err - placeholder - the number on the stack
+                let hi_local = generator.borrow_local(ValType::I64);
+                let lo_local = generator.borrow_local(ValType::I64);
+                else_.local_set(*hi_local);
+                else_.local_set(*lo_local);
+
+                else_.i32_const(0);
+                add_placeholder_for_clarity_type(else_, inner_ty);
+                else_.local_get(*lo_local).local_get(*hi_local);
             },
         );
-
-        // Push the final response onto the stack.
-        for local in &result_locals {
-            builder.local_get(**local);
-        }
 
         Ok(())
     }
@@ -207,13 +209,11 @@ impl ComplexWord for WithAllAssetsUnsafe {
 
         self.charge(generator, builder, 0)?;
 
-        // Load the externref allowance context
-        load_allowance_context(builder, "with-all-assets-unsafe")?;
-
-        // Call the host interface function, `with_all_assets_unsafe`
-        builder.call(generator.func_by_name("stdlib.with_all_assets_unsafe"));
-
-        Ok(())
+        with_allowance_context(|allowance_context| {
+            builder.local_get(allowance_context);
+            builder.call(generator.func_by_name("stdlib.with_all_assets_unsafe"));
+            Ok(())
+        })
     }
 }
 
@@ -242,22 +242,24 @@ impl ComplexWord for WithFt {
         let token_name = args.get_expr(1)?;
         let allowance = args.get_expr(2)?;
 
-        // Load the externref allowance context (first param)
-        load_allowance_context(builder, "with-ft")?;
+        with_allowance_context(|allowance_context| {
+            // Load the externref allowance context (first param)
+            builder.local_get(allowance_context);
 
-        // Traverse the contract principal
-        generator.traverse_expr(builder, token_contract)?;
+            // Traverse the contract principal
+            generator.traverse_expr(builder, token_contract)?;
 
-        // Traverse the token name
-        generator.traverse_expr(builder, token_name)?;
+            // Traverse the token name
+            generator.traverse_expr(builder, token_name)?;
 
-        // Traverse the allowance amount (uint)
-        generator.traverse_expr(builder, allowance)?;
+            // Traverse the allowance amount (uint)
+            generator.traverse_expr(builder, allowance)?;
 
-        // Call the host interface function, `with_ft`
-        builder.call(generator.func_by_name("stdlib.with_ft"));
+            // Call the host interface function, `with_ft`
+            builder.call(generator.func_by_name("stdlib.with_ft"));
 
-        Ok(())
+            Ok(())
+        })
     }
 }
 
@@ -286,22 +288,24 @@ impl ComplexWord for WithNft {
         let token_name = args.get_expr(1)?;
         let allowance = args.get_expr(2)?;
 
-        // Load the externref allowance context (first param)
-        load_allowance_context(builder, "with-nft")?;
+        with_allowance_context(|allowance_context| {
+            // Load the externref allowance context (first param)
+            builder.local_get(allowance_context);
 
-        // Traverse the contract principal
-        generator.traverse_expr(builder, token_contract)?;
+            // Traverse the contract principal
+            generator.traverse_expr(builder, token_contract)?;
 
-        // Traverse the token name
-        generator.traverse_expr(builder, token_name)?;
+            // Traverse the token name
+            generator.traverse_expr(builder, token_name)?;
 
-        // Traverse the allowances list
-        generator.traverse_expr(builder, allowance)?;
+            // Traverse the allowances list
+            generator.traverse_expr(builder, allowance)?;
 
-        // Call the host interface function, `with_nft`
-        builder.call(generator.func_by_name("stdlib.with_nft"));
+            // Call the host interface function, `with_nft`
+            builder.call(generator.func_by_name("stdlib.with_nft"));
 
-        Ok(())
+            Ok(())
+        })
     }
 }
 
@@ -328,16 +332,18 @@ impl ComplexWord for WithStacking {
 
         let allowance = args.get_expr(0)?;
 
-        // Load the externref allowance context (first param)
-        load_allowance_context(builder, "with-stacking")?;
+        with_allowance_context(|allowance_context| {
+            // Load the externref allowance context (first param)
+            builder.local_get(allowance_context);
 
-        // Traverse the allowance amount (uint)
-        generator.traverse_expr(builder, allowance)?;
+            // Traverse the allowance amount (uint)
+            generator.traverse_expr(builder, allowance)?;
 
-        // Call the host interface function, `with_stacking`
-        builder.call(generator.func_by_name("stdlib.with_stacking"));
+            // Call the host interface function, `with_stacking`
+            builder.call(generator.func_by_name("stdlib.with_stacking"));
 
-        Ok(())
+            Ok(())
+        })
     }
 }
 
@@ -364,16 +370,17 @@ impl ComplexWord for WithStx {
 
         let allowance = args.get_expr(0)?;
 
-        // Load the externref allowance context (first param)
-        load_allowance_context(builder, "with-stx")?;
+        with_allowance_context(|allowance_context| {
+            // Load the externref allowance context (first param)
+            builder.local_get(allowance_context);
 
-        // Traverse the allowance amount (uint)
-        generator.traverse_expr(builder, allowance)?;
+            // Traverse the allowance amount (uint)
+            generator.traverse_expr(builder, allowance)?;
 
-        // Call the host interface function, `with_stx`
-        builder.call(generator.func_by_name("stdlib.with_stx"));
-
-        Ok(())
+            // Call the host interface function, `with_stx`
+            builder.call(generator.func_by_name("stdlib.with_stx"));
+            Ok(())
+        })
     }
 }
 
