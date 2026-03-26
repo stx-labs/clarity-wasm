@@ -1533,6 +1533,7 @@ fn link_with_nft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
 
                 let epoch = caller.data().global_context.epoch_id;
 
+                // we cannot just read an identifier due to the '*' case.
                 let token_name = read_from_wasm(
                     memory,
                     &mut caller,
