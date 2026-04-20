@@ -1040,25 +1040,22 @@ mod word {
         epoch: StacksEpochId,
         version: ClarityVersion,
         snippet: &str,
-        expected_cost: CostMeter,
+        expected_cost: Option<CostMeter>,
     ) {
-        let mut env = TestEnvironment::new_with_cost(epoch, version);
-
-        env.init_contract_with_snippet("snippet", snippet)
-            .expect("init_contract should succeed");
-        let cost_tracker = env.cost_tracker;
-
-        let cost = CostMeter::from(cost_tracker.get_total());
-        assert_eq!(cost, expected_cost, "'cost' should match 'expected_cost'");
+        execute_snippets(epoch, version, &[("snippet", snippet)], expected_cost);
     }
 
     fn execute_snippets(
         epoch: StacksEpochId,
         version: ClarityVersion,
         snippets: &[(&str, &str)],
-        expected_cost: CostMeter,
+        expected_cost: Option<CostMeter>,
     ) {
-        let mut env = TestEnvironment::new_with_cost(epoch, version);
+        let mut env = if expected_cost.is_some() {
+            TestEnvironment::new_with_cost(epoch, version)
+        } else {
+            TestEnvironment::new(epoch, version)
+        };
 
         snippets.iter().for_each(|(contract_name, snippet)| {
             env.init_contract_with_snippet(contract_name, snippet)
@@ -1067,7 +1064,16 @@ mod word {
         let cost_tracker = env.cost_tracker;
 
         let cost = CostMeter::from(cost_tracker.get_total());
-        assert_eq!(cost, expected_cost, "'cost' should match 'expected_cost'");
+
+        if let Some(expected_cost) = expected_cost {
+            assert_eq!(cost, expected_cost, "'cost' should match 'expected_cost'");
+        } else {
+            assert_eq!(
+                cost,
+                CostMeter::ZERO,
+                "'cost' should be at zero when not used"
+            );
+        }
     }
 
     macro_rules! epoch_for_version {
@@ -1086,10 +1092,16 @@ mod word {
         ($version:literal, $name:literal, $snippet:literal, $expected_cost:expr) => {
             paste::paste! {
                 #[test]
-                fn [<$name _ v $version >]() {
+                fn [<$name _ v $version _with_cost>]() {
                     let epoch = epoch_for_version!($version);
                     let version = ClarityVersion::default_for_epoch(epoch);
-                    execute_snippet(epoch, version, $snippet, $expected_cost);
+                    execute_snippet(epoch, version, $snippet, Some($expected_cost));
+                }
+                #[test]
+               fn [<$name _ v $version _without_cost>]() {
+                    let epoch = epoch_for_version!($version);
+                    let version = ClarityVersion::default_for_epoch(epoch);
+                        execute_snippet(epoch, version, $snippet, None);
                 }
             }
         };
@@ -1107,10 +1119,16 @@ mod word {
         ($version:literal, $name:literal, ($callee_name:literal, $callee_snippet:literal), ($caller_name:literal , $caller_snippet:literal), $expected_cost:expr) => {
             paste::paste! {
                 #[test]
-                fn [<$name _ v $version >]() {
+                fn [<$name _ v $version _with_cost>]() {
                     let epoch = epoch_for_version!($version);
                     let version = ClarityVersion::default_for_epoch(epoch);
-                    execute_snippets(epoch, version, &[($callee_name, $callee_snippet), ($caller_name, $caller_snippet)], $expected_cost);
+                    execute_snippets(epoch, version, &[($callee_name, $callee_snippet), ($caller_name, $caller_snippet)], Some($expected_cost));
+                }
+                #[test]
+                fn [<$name _ v $version _without_cost>]() {
+                    let epoch = epoch_for_version!($version);
+                    let version = ClarityVersion::default_for_epoch(epoch);
+                    execute_snippets(epoch, version, &[($callee_name, $callee_snippet), ($caller_name, $caller_snippet)], None);
                 }
             }
         };
