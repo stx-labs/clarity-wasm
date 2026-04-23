@@ -4,7 +4,7 @@ use clarity::vm::clarity_wasm::get_type_size;
 use clarity::vm::types::signatures::CallableSubtype;
 use clarity::vm::types::{PrincipalData, TypeSignature};
 use clarity::vm::{ClarityName, SymbolicExpression, SymbolicExpressionType, Value};
-use walrus::ir::{BinaryOp, InstrSeqType};
+use walrus::ir::{BinaryOp, Block, InstrSeqType};
 use walrus::{LocalId, ValType};
 
 use super::{ComplexWord, Word};
@@ -103,6 +103,8 @@ impl ComplexWord for AsContractPostV4 {
                 GeneratorError::TypeError("as-contract? expression must be typed".to_owned())
             })?
             .clone();
+        let return_ty_wasm =
+            InstrSeqType::new(&mut generator.module.types, &[], &clar2wasm_ty(&return_ty));
 
         let inner_ty = match &return_ty {
             TypeSignature::ResponseType(resp) => &resp.0,
@@ -130,52 +132,104 @@ impl ComplexWord for AsContractPostV4 {
             generator.traverse_expr(builder, allowance)?;
         }
 
-        // Run the body expression.
-        generator.traverse_expr(builder, inner)?;
+        // Block that will contain the entire traversal of the inner exprssions.
+        let exprs_block_id = {
+            let mut exprs_block = builder.dangling_instr_seq(return_ty_wasm);
+            let exprs_id = exprs_block.id();
 
-        // Stash the body result before calling exit (exit pushes its own values).
-        let result_locals = generator.save_to_locals(builder, inner_ty, true);
+            // In this subblock, we traverse the inner expressions. If one of them fail, we jump to the end of it
+            // to execute a cleanup of the current context.
+            let fail_block_id = {
+                let fail_block_ty = match generator
+                    .get_current_function_return_type()
+                    .map(clar2wasm_ty)
+                {
+                    Some(return_ty) => {
+                        InstrSeqType::new(&mut generator.module.types, &[], &return_ty)
+                    }
+                    None => None.into(),
+                };
+                let mut fail_block = exprs_block.dangling_instr_seq(fail_block_ty);
+                let fail_id = fail_block.id();
 
-        // Validate allowances and commit or abort the transaction.
-        builder.local_get(*allowance_ref_local);
-        builder.call(generator.func_by_name("stdlib.exit_as_contract_post_v4"));
+                // we set the jump in case of failure to fail_id, so that a failure in an evaluated expression would jump to
+                // the failure handling and would rollback the current context.
+                let old_early_return = generator.early_return_block_id.replace(fail_id);
 
-        // We can put back the former allowance context
-        ALLOWANCE_CONTEXT.set(former_allowance_ctx);
+                // Run the body expression.
+                generator.traverse_expr(&mut fail_block, inner)?;
 
-        // Now on stack, we have either (int - 0) if an error occured with int the error index, or (0int - 1) if
-        // allowances returned no error
-        let return_ty_wasm = InstrSeqType::new(
-            &mut generator.module.types,
-            &[ValType::I64, ValType::I64],
-            &clar2wasm_ty(&return_ty),
-        );
-        builder.if_else(
-            return_ty_wasm,
-            |then| {
-                // if allowances all checked, we return Ok - result - 0
+                // Stash the body result before calling exit (exit pushes its own values).
+                let result_locals = generator.save_to_locals(&mut fail_block, inner_ty, true);
 
-                // we drop the 0 on the stack
-                then.drop().drop();
+                // Validate allowances and commit or abort the transaction.
+                fail_block.local_get(*allowance_ref_local);
+                fail_block.call(generator.func_by_name("stdlib.exit_as_contract_post_v4"));
 
-                then.i32_const(1);
-                for l in result_locals {
-                    then.local_get(l);
-                }
-                then.i64_const(0).i64_const(0);
-            },
-            |else_| {
-                // otherwise we return the Err - placeholder - the number on the stack
-                let hi_local = generator.borrow_local(ValType::I64);
-                let lo_local = generator.borrow_local(ValType::I64);
-                else_.local_set(*hi_local);
-                else_.local_set(*lo_local);
+                // We can put back the former allowance context
+                ALLOWANCE_CONTEXT.set(former_allowance_ctx);
 
-                else_.i32_const(0);
-                add_placeholder_for_clarity_type(else_, inner_ty);
-                else_.local_get(*lo_local).local_get(*hi_local);
-            },
-        );
+                // Now on stack, we have either (int - 0) if an error occured with int the error index, or (0int - 1) if
+                // allowances returned no error
+                fail_block.if_else(
+                    InstrSeqType::new(
+                        &mut generator.module.types,
+                        &[ValType::I64, ValType::I64],
+                        &clar2wasm_ty(&return_ty),
+                    ),
+                    |then| {
+                        // if allowances all checked, we return Ok - result - 0
+
+                        // we drop the 0 on the stack
+                        then.drop().drop();
+
+                        then.i32_const(1);
+                        for l in result_locals {
+                            then.local_get(l);
+                        }
+                        then.i64_const(0).i64_const(0);
+                    },
+                    |else_| {
+                        // otherwise we return the Err - placeholder - the number on the stack
+                        let hi_local = generator.borrow_local(ValType::I64);
+                        let lo_local = generator.borrow_local(ValType::I64);
+                        else_.local_set(*hi_local);
+                        else_.local_set(*lo_local);
+
+                        else_.i32_const(0);
+                        add_placeholder_for_clarity_type(else_, inner_ty);
+                        else_.local_get(*lo_local).local_get(*hi_local);
+                    },
+                );
+
+                // If we arrived here, we need to skip the cleanup and set back the early_return.
+                generator.early_return_block_id = old_early_return;
+                fail_block.br(exprs_id);
+
+                fail_id
+            };
+
+            // we insert the fail block_id
+            exprs_block.instr(Block { seq: fail_block_id });
+
+            if let Some(early_return) = generator.early_return_block_id {
+                // TODO: this will never be called if we are in top-level. This shouldn’t be a problem as
+                // the host would discard the context on trap. However, it could lead to issues in the future
+                // so a cleaner implementation should be provided here.
+                exprs_block.call(generator.func_by_name("stdlib.cleanup_as_contract_post_v4"));
+
+                exprs_block.br(early_return);
+            } else {
+                // in a top-level context, the runtime-error function would have been called already by this point.
+                exprs_block.unreachable();
+            }
+
+            exprs_id
+        };
+
+        builder.instr(Block {
+            seq: exprs_block_id,
+        });
 
         Ok(())
     }
@@ -1328,6 +1382,36 @@ mod tests {
         use crate::tools::{crosscheck, evaluate};
 
         #[test]
+        fn as_contract_post_v4_switches_sender_and_caller() {
+            crosscheck(
+                r#"
+                    (let (
+                        (original-sender tx-sender)
+                        (original-caller contract-caller)
+                    )
+                        (try! (as-contract? ()
+                            (begin
+                                (asserts! (is-eq tx-sender current-contract)
+                                    (err "tx-sender was not switched to current-contract"))
+                                (asserts! (is-eq contract-caller current-contract)
+                                    (err "contract-caller was not switched to current-contract"))
+                                (asserts! (not (is-eq tx-sender original-sender))
+                                    (err "tx-sender still equals the original sender"))
+                                (asserts! (not (is-eq contract-caller original-caller))
+                                    (err "contract-caller still equals the original caller"))
+                            )
+                        ))
+                        (asserts! (is-eq tx-sender original-sender)
+                            (err "tx-sender was not restored after as-contract?"))
+                        (asserts! (is-eq contract-caller original-caller)
+                            (err "contract-caller was not restored after as-contract?"))
+                    )
+                "#,
+                Ok(Some(Value::Bool(true))),
+            );
+        }
+
+        #[test]
         fn contract_hash_ok_returns_buff32() {
             let callee = "
 (define-read-only (something)
@@ -1587,7 +1671,7 @@ mod tests {
             "#;
             let caller = "
                 (stx-transfer? u500 tx-sender .callee)
-                (let 
+                (let
                     (
                         (result (contract-call? .callee send-stx u50 tx-sender))
                     )
@@ -1620,7 +1704,7 @@ mod tests {
             "#;
             let caller = "
                 (stx-transfer? u500 tx-sender .callee)
-                (let 
+                (let
                     (
                         (result (contract-call? .callee send-stx u50 tx-sender))
                     )
@@ -1692,7 +1776,7 @@ mod tests {
             "#;
             let caller = "
                 (contract-call? .callee mint-ft u100)
-                (let 
+                (let
                     (
                         (result (contract-call? .callee transfer-ft u50 tx-sender))
                     )
@@ -1735,7 +1819,7 @@ mod tests {
             "#;
             let caller = "
                 (contract-call? .callee mint-ft u100)
-                (let 
+                (let
                     (
                         (result (contract-call? .callee transfer-ft u50 tx-sender))
                     )
@@ -1807,7 +1891,7 @@ mod tests {
             "#;
             let caller = "
                 (contract-call? .callee mint-ft u100)
-                (let 
+                (let
                     (
                         (result (contract-call? .callee transfer-ft u50 tx-sender))
                     )
@@ -1883,7 +1967,7 @@ mod tests {
             "#;
             let caller = "
                 (contract-call? .callee mint-ft u100)
-                (let 
+                (let
                     (
                         (result (contract-call? .callee transfer-ft u50 tx-sender))
                     )
@@ -2084,7 +2168,7 @@ mod tests {
                 (contract-call? .callee mint-nft u1)
                 (let ((result (contract-call? .callee transfer-token u1)))
                     {error-code: result, owner: (contract-call? .callee get-nft-owner u1)}
-                ) 
+                )
             ";
             let callee_principal = Value::Principal(PrincipalData::Contract(
                 clarity::vm::types::QualifiedContractIdentifier::new(
@@ -2245,9 +2329,10 @@ mod tests {
                 )
             "#;
             let caller = "
-                (stx-transfer? u500 tx-sender .contract)
-                (let ((result (contract-call? .contract send-stx u40 tx-sender)))
-                    {error-code: result, balance: (stx-get-balance .contract)}
+                (stx-transfer? u500 tx-sender .callee)
+                (let ((result (contract-call? .callee send-stx u40 tx-sender)))
+                    {error-code: result, balance: (stx-get-balance .callee)}
+                )
             ";
             let expected = Value::Tuple(
                 clarity::vm::types::TupleData::from_data(vec![
@@ -2339,7 +2424,6 @@ mod tests {
         }
 
         #[test]
-        #[ignore]
         fn as_contract_nested_inner_nft_violation() {
             let callee = r#"
                 (define-non-fungible-token token uint)
@@ -2458,7 +2542,6 @@ mod tests {
         }
 
         #[test]
-        #[ignore]
         fn as_contract_nested_inner_ft_violation_rollback() {
             let callee = r#"
                 (define-fungible-token my-token)

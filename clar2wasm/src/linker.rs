@@ -61,6 +61,7 @@ pub fn link_host_functions(
     link_exit_as_contract_pre_v4_fn(linker)?;
     link_enter_as_contract_post_v4_fn(linker)?;
     link_exit_as_contract_post_v4_fn(linker)?;
+    link_cleanup_as_contract_post_v4_fn(linker)?;
     link_with_all_assets_unsafe_fn(linker)?;
     link_with_ft_fn(linker)?;
     link_with_nft_fn(linker)?;
@@ -1349,6 +1350,34 @@ fn link_exit_as_contract_post_v4_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "exit_as_contract".to_string(),
+                e,
+            ))
+        })
+}
+
+/// Link host interface function, `cleanup_as_contract_post_v4`, into the Wasm module.
+/// This function is after before processing the inner-expression of
+/// `as-contract?`, and is used to restore the caller and sender in the case where
+/// an inner-expresion failed.
+fn link_cleanup_as_contract_post_v4_fn(
+    linker: &mut Linker<ClarityWasmContext>,
+) -> Result<(), Error> {
+    linker
+        .func_wrap(
+            "clarity",
+            "cleanup_as_contract_post_v4",
+            |mut caller: Caller<'_, ClarityWasmContext>| {
+                caller.data_mut().pop_sender()?;
+                caller.data_mut().pop_caller()?;
+                caller.data_mut().global_context.roll_back()?;
+
+                Ok(())
+            },
+        )
+        .map(|_| ())
+        .map_err(|e| {
+            Error::Wasm(WasmError::UnableToLinkHostFunction(
+                "cleanup_as_contract".to_string(),
                 e,
             ))
         })
@@ -6268,7 +6297,7 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
         "clarity",
         "enter_as_contract_post_v4",
         |_: Caller<'_, ()>| -> Option<ExternRef> {
-            println!("as-contract: enter");
+            println!("as-contract?: enter");
             None
         },
     )?;
@@ -6277,8 +6306,17 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
         "clarity",
         "exit_as_contract_post_v4",
         |_: Caller<'_, ()>, _allowance_ref: Option<ExternRef>| {
-            println!("as-contract: exit");
+            println!("as-contract?: exit");
             Ok((0i64, 0i64, 0i32))
+        },
+    )?;
+
+    linker.func_wrap(
+        "clarity",
+        "cleanup_as_contract_post_v4",
+        |_: Caller<'_, ()>| {
+            println!("as-contract?: cleanup");
+            Ok(())
         },
     )?;
 
