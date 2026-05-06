@@ -91,11 +91,10 @@ impl ComplexWord for AsContractPostV4 {
         expr: &SymbolicExpression,
         args: &[SymbolicExpression],
     ) -> Result<(), GeneratorError> {
-        check_args!(generator, builder, 2, args.len(), ArgumentCountCheck::Exact);
-
         // TODO: add cost tracking #783
-        let allowances = args.get_list(0)?;
-        let inner = args.get_expr(1)?;
+        let [allowances, inners @ ..] = args else {
+            return Err(GeneratorError::ArgumentCountMismatch);
+        };
 
         let return_ty = generator
             .get_expr_type(expr)
@@ -114,8 +113,11 @@ impl ComplexWord for AsContractPostV4 {
                 ))
             }
         };
-        // workaround on the expression type
-        generator.set_expr_type(inner, inner_ty.clone())?;
+
+        // workaround on the expression type for the last inner
+        if let Some(last) = inners.last() {
+            generator.set_expr_type(last, inner_ty.clone())?;
+        }
 
         // Call the host interface function, `enter_as_contract_post_v4`
         builder.call(generator.func_by_name("stdlib.enter_as_contract_post_v4"));
@@ -128,7 +130,9 @@ impl ComplexWord for AsContractPostV4 {
         let former_allowance_ctx = ALLOWANCE_CONTEXT.replace(Some(*allowance_ref_local));
 
         // Register each allowance (e.g. with-stx, with-stacking).
-        for allowance in allowances {
+        for allowance in allowances.match_list().ok_or_else(|| {
+            GeneratorError::TypeError("as-contract?'s allowances should be a list".to_owned())
+        })? {
             generator.traverse_expr(builder, allowance)?;
         }
 
@@ -157,7 +161,7 @@ impl ComplexWord for AsContractPostV4 {
                 let old_early_return = generator.early_return_block_id.replace(fail_id);
 
                 // Run the body expression.
-                generator.traverse_expr(&mut fail_block, inner)?;
+                generator.traverse_statement_list(&mut fail_block, inners)?;
 
                 // Stash the body result before calling exit (exit pushes its own values).
                 let result_locals = generator.save_to_locals(&mut fail_block, inner_ty, true);
@@ -1390,16 +1394,14 @@ mod tests {
                         (original-caller contract-caller)
                     )
                         (try! (as-contract? ()
-                            (begin
-                                (asserts! (is-eq tx-sender current-contract)
-                                    (err "tx-sender was not switched to current-contract"))
-                                (asserts! (is-eq contract-caller current-contract)
-                                    (err "contract-caller was not switched to current-contract"))
-                                (asserts! (not (is-eq tx-sender original-sender))
-                                    (err "tx-sender still equals the original sender"))
-                                (asserts! (not (is-eq contract-caller original-caller))
-                                    (err "contract-caller still equals the original caller"))
-                            )
+                            (asserts! (is-eq tx-sender current-contract)
+                                (err "tx-sender was not switched to current-contract"))
+                            (asserts! (is-eq contract-caller current-contract)
+                                (err "contract-caller was not switched to current-contract"))
+                            (asserts! (not (is-eq tx-sender original-sender))
+                                (err "tx-sender still equals the original sender"))
+                            (asserts! (not (is-eq contract-caller original-caller))
+                                (err "contract-caller still equals the original caller"))
                         ))
                         (asserts! (is-eq tx-sender original-sender)
                             (err "tx-sender was not restored after as-contract?"))
