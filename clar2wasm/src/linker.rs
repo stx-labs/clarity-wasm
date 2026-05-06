@@ -1361,7 +1361,7 @@ fn link_exit_as_contract_post_v4_fn(
 /// an inner-expresion failed.
 fn link_cleanup_as_contract_post_v4_fn(
     linker: &mut Linker<ClarityWasmContext>,
-) -> Result<(), Error> {
+) -> Result<(), VmExecutionError> {
     linker
         .func_wrap(
             "clarity",
@@ -1376,7 +1376,7 @@ fn link_cleanup_as_contract_post_v4_fn(
         )
         .map(|_| ())
         .map_err(|e| {
-            Error::Wasm(WasmError::UnableToLinkHostFunction(
+            VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "cleanup_as_contract".to_string(),
                 e,
             ))

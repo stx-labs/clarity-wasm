@@ -1611,7 +1611,10 @@ mod tests {
                 (contract-call? .callee transfer-token u1)
             ";
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(Value::okay_true())),
             );
         }
@@ -1620,10 +1623,8 @@ mod tests {
         fn as_contract_unsafe_stx_transfer() {
             let callee = r#"
                 (define-public (send-stx (amount uint) (recipient principal))
-                    (begin
-                        (as-contract? ((with-all-assets-unsafe))
-                            (try! (stx-transfer? amount current-contract recipient))
-                        )
+                    (as-contract? ((with-all-assets-unsafe))
+                        (try! (stx-transfer? amount current-contract recipient))
                     )
                 )
             "#;
@@ -1632,7 +1633,10 @@ mod tests {
                 (contract-call? .callee send-stx u50 tx-sender)
             ";
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(Value::okay_true())),
             );
         }
@@ -1643,10 +1647,8 @@ mod tests {
         fn as_contract_stx_ok() {
             let callee = r#"
                 (define-public (send-stx (amount uint) (recipient principal))
-                    (begin
-                        (as-contract? ((with-stx u100))
-                            (try! (stx-transfer? amount current-contract recipient))
-                        )
+                    (as-contract? ((with-stx u100))
+                        (try! (stx-transfer? amount current-contract recipient))
                     )
                 )
             "#;
@@ -1655,7 +1657,10 @@ mod tests {
                 (contract-call? .callee send-stx u100 tx-sender)
             ";
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(Value::okay_true())),
             );
         }
@@ -1664,10 +1669,8 @@ mod tests {
         fn as_contract_stx_exceeds_allowance() {
             let callee = r#"
                 (define-public (send-stx (amount uint) (recipient principal))
-                    (begin
-                        (as-contract? ((with-stx u10))
-                            (try! (stx-transfer? amount current-contract recipient))
-                        )
+                    (as-contract? ((with-stx u10))
+                        (try! (stx-transfer? amount current-contract recipient))
                     )
                 )
             "#;
@@ -1683,12 +1686,18 @@ mod tests {
             let expected = Value::Tuple(
                 clarity::vm::types::TupleData::from_data(vec![
                     (ClarityName::from_literal("balance"), Value::UInt(500)),
-                    (ClarityName::from_literal("error-code"), Value::error(Value::UInt(0)).unwrap()),
+                    (
+                        ClarityName::from_literal("error-code"),
+                        Value::error(Value::UInt(0)).unwrap(),
+                    ),
                 ])
                 .unwrap(),
             );
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(expected)),
             );
         }
@@ -1697,10 +1706,8 @@ mod tests {
         fn as_contract_stx_no_allowance() {
             let callee = r#"
                 (define-public (send-stx (amount uint) (recipient principal))
-                    (begin
-                        (as-contract? ()
-                            (try! (stx-transfer? amount current-contract recipient))
-                        )
+                    (as-contract? ()
+                        (try! (stx-transfer? amount current-contract recipient))
                     )
                 )
             "#;
@@ -1716,12 +1723,18 @@ mod tests {
             let expected = Value::Tuple(
                 clarity::vm::types::TupleData::from_data(vec![
                     (ClarityName::from_literal("balance"), Value::UInt(500)),
-                    (ClarityName::from_literal("error-code"), Value::error(Value::UInt(128)).unwrap()),
+                    (
+                        ClarityName::from_literal("error-code"),
+                        Value::error(Value::UInt(128)).unwrap(),
+                    ),
                 ])
                 .unwrap(),
             );
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(expected)),
             );
         }
@@ -1738,10 +1751,8 @@ mod tests {
                 )
 
                 (define-public (transfer-ft (amount uint) (recipient principal))
-                    (begin
-                        (as-contract? ((with-ft current-contract "my-token" u100))
-                            (try! (ft-transfer? my-token amount current-contract recipient))
-                        )
+                    (as-contract? ((with-ft current-contract "my-token" u100))
+                        (try! (ft-transfer? my-token amount current-contract recipient))
                     )
                 )
             "#;
@@ -1750,7 +1761,10 @@ mod tests {
                 (contract-call? .callee transfer-ft u100 tx-sender)
             ";
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(Value::okay_true())),
             );
         }
@@ -1765,10 +1779,8 @@ mod tests {
                 )
 
                 (define-public (transfer-ft (amount uint) (recipient principal))
-                    (begin
-                        (as-contract? ((with-ft current-contract "my-token" u10))
-                            (try! (ft-transfer? my-token amount current-contract recipient))
-                        )
+                    (as-contract? ((with-ft current-contract "my-token" u10))
+                        (try! (ft-transfer? my-token amount current-contract recipient))
                     )
                 )
 
@@ -1788,12 +1800,18 @@ mod tests {
             let expected = Value::Tuple(
                 clarity::vm::types::TupleData::from_data(vec![
                     (ClarityName::from_literal("balance"), Value::UInt(100)),
-                    (ClarityName::from_literal("error-code"), Value::error(Value::UInt(0)).unwrap()),
+                    (
+                        ClarityName::from_literal("error-code"),
+                        Value::error(Value::UInt(0)).unwrap(),
+                    ),
                 ])
                 .unwrap(),
             );
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(expected)),
             );
         }
@@ -1808,10 +1826,8 @@ mod tests {
                 )
 
                 (define-public (transfer-ft (amount uint) (recipient principal))
-                    (begin
-                        (as-contract? ()
-                            (try! (ft-transfer? my-token amount current-contract recipient))
-                        )
+                    (as-contract? ()
+                        (try! (ft-transfer? my-token amount current-contract recipient))
                     )
                 )
 
@@ -1831,12 +1847,18 @@ mod tests {
             let expected = Value::Tuple(
                 clarity::vm::types::TupleData::from_data(vec![
                     (ClarityName::from_literal("balance"), Value::UInt(100)),
-                    (ClarityName::from_literal("error-code"), Value::error(Value::UInt(128)).unwrap()),
+                    (
+                        ClarityName::from_literal("error-code"),
+                        Value::error(Value::UInt(128)).unwrap(),
+                    ),
                 ])
                 .unwrap(),
             );
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(expected)),
             );
         }
@@ -1853,10 +1875,8 @@ mod tests {
                 )
 
                 (define-public (transfer-ft (amount uint) (recipient principal))
-                    (begin
-                        (as-contract? ((with-ft current-contract "*" u100))
-                            (try! (ft-transfer? my-token amount current-contract recipient))
-                        )
+                    (as-contract? ((with-ft current-contract "*" u100))
+                        (try! (ft-transfer? my-token amount current-contract recipient))
                     )
                 )
             "#;
@@ -1865,7 +1885,10 @@ mod tests {
                 (contract-call? .callee transfer-ft u100 tx-sender)
             ";
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(Value::okay_true())),
             );
         }
@@ -1880,10 +1903,8 @@ mod tests {
                 )
 
                 (define-public (transfer-ft (amount uint) (recipient principal))
-                    (begin
-                        (as-contract? ((with-ft current-contract "*" u10))
-                            (try! (ft-transfer? my-token amount current-contract recipient))
-                        )
+                    (as-contract? ((with-ft current-contract "*" u10))
+                        (try! (ft-transfer? my-token amount current-contract recipient))
                     )
                 )
 
@@ -1903,12 +1924,18 @@ mod tests {
             let expected = Value::Tuple(
                 clarity::vm::types::TupleData::from_data(vec![
                     (ClarityName::from_literal("balance"), Value::UInt(100)),
-                    (ClarityName::from_literal("error-code"), Value::error(Value::UInt(0)).unwrap()),
+                    (
+                        ClarityName::from_literal("error-code"),
+                        Value::error(Value::UInt(0)).unwrap(),
+                    ),
                 ])
                 .unwrap(),
             );
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(expected)),
             );
         }
@@ -1923,13 +1950,11 @@ mod tests {
                 )
 
                 (define-public (transfer-ft (amount uint) (recipient principal))
-                    (begin
-                        (as-contract? (
-                                (with-ft current-contract "*" u100)
-                                (with-ft current-contract "my-token" u100)
-                            )
-                            (try! (ft-transfer? my-token amount current-contract recipient))
+                    (as-contract? (
+                            (with-ft current-contract "*" u100)
+                            (with-ft current-contract "my-token" u100)
                         )
+                        (try! (ft-transfer? my-token amount current-contract recipient))
                     )
                 )
             "#;
@@ -1938,7 +1963,10 @@ mod tests {
                 (contract-call? .callee transfer-ft u50 tx-sender)
             ";
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(Value::okay_true())),
             );
         }
@@ -1953,13 +1981,11 @@ mod tests {
                 )
 
                 (define-public (transfer-ft (amount uint) (recipient principal))
-                    (begin
-                        (as-contract? (
-                                (with-ft current-contract "*" u20)
-                                (with-ft current-contract "my-token" u100)
-                            )
-                            (try! (ft-transfer? my-token amount current-contract recipient))
+                    (as-contract? (
+                            (with-ft current-contract "*" u20)
+                            (with-ft current-contract "my-token" u100)
                         )
+                        (try! (ft-transfer? my-token amount current-contract recipient))
                     )
                 )
 
@@ -1979,12 +2005,18 @@ mod tests {
             let expected = Value::Tuple(
                 clarity::vm::types::TupleData::from_data(vec![
                     (ClarityName::from_literal("balance"), Value::UInt(100)),
-                    (ClarityName::from_literal("error-code"), Value::error(Value::UInt(0)).unwrap()),
+                    (
+                        ClarityName::from_literal("error-code"),
+                        Value::error(Value::UInt(0)).unwrap(),
+                    ),
                 ])
                 .unwrap(),
             );
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(expected)),
             );
         }
@@ -1997,10 +2029,7 @@ mod tests {
                 (define-non-fungible-token token uint)
 
                 (define-public (mint-nft (asset uint))
-                    (begin
-                        (try! (nft-mint? token asset current-contract))
-                        (ok true)
-                    )
+                    (nft-mint? token asset current-contract)
                 )
 
                 (define-public (transfer-token (asset uint))
@@ -2016,7 +2045,10 @@ mod tests {
                 (contract-call? .callee transfer-token u1)
             ";
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(Value::okay_true())),
             );
         }
@@ -2056,13 +2088,22 @@ mod tests {
             ));
             let expected = Value::Tuple(
                 clarity::vm::types::TupleData::from_data(vec![
-                    (ClarityName::from_literal("error-code"), Value::error(Value::UInt(0)).unwrap()),
-                    (ClarityName::from_literal("owner"), Value::some(callee_principal).unwrap()),
+                    (
+                        ClarityName::from_literal("error-code"),
+                        Value::error(Value::UInt(0)).unwrap(),
+                    ),
+                    (
+                        ClarityName::from_literal("owner"),
+                        Value::some(callee_principal).unwrap(),
+                    ),
                 ])
                 .unwrap(),
             );
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(expected)),
             );
         }
@@ -2073,10 +2114,7 @@ mod tests {
                 (define-non-fungible-token token uint)
 
                 (define-public (mint-nft (asset uint))
-                    (begin
-                        (try! (nft-mint? token asset current-contract))
-                        (ok true)
-                    )
+                    (nft-mint? token asset current-contract)
                 )
 
                 (define-public (transfer-token (asset uint))
@@ -2105,13 +2143,22 @@ mod tests {
             ));
             let expected = Value::Tuple(
                 clarity::vm::types::TupleData::from_data(vec![
-                    (ClarityName::from_literal("error-code"), Value::error(Value::UInt(128)).unwrap()),
-                    (ClarityName::from_literal("owner"), Value::some(callee_principal).unwrap()),
+                    (
+                        ClarityName::from_literal("error-code"),
+                        Value::error(Value::UInt(128)).unwrap(),
+                    ),
+                    (
+                        ClarityName::from_literal("owner"),
+                        Value::some(callee_principal).unwrap(),
+                    ),
                 ])
                 .unwrap(),
             );
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(expected)),
             );
         }
@@ -2140,7 +2187,10 @@ mod tests {
                 (contract-call? .callee transfer-token u1)
             ";
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(Value::okay_true())),
             );
         }
@@ -2180,13 +2230,22 @@ mod tests {
             ));
             let expected = Value::Tuple(
                 clarity::vm::types::TupleData::from_data(vec![
-                    (ClarityName::from_literal("error-code"), Value::error(Value::UInt(0)).unwrap()),
-                    (ClarityName::from_literal("owner"), Value::some(callee_principal).unwrap()),
+                    (
+                        ClarityName::from_literal("error-code"),
+                        Value::error(Value::UInt(0)).unwrap(),
+                    ),
+                    (
+                        ClarityName::from_literal("owner"),
+                        Value::some(callee_principal).unwrap(),
+                    ),
                 ])
                 .unwrap(),
             );
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(expected)),
             );
         }
@@ -2264,14 +2323,10 @@ mod tests {
                 std::fs::read_to_string("tests/contracts/boot-contracts/pox-4.clar").unwrap();
             let wrapper = r#"
                 (define-public (delegate-and-send-stx (delegate-amount uint) (stx-amount uint) (recipient principal))
-                    (begin
-                        (as-contract? ((with-stacking u1000000) (with-stx u500))
-                            (begin
-                                (unwrap-panic (contract-call? .pox-4 delegate-stx
-                                    delegate-amount recipient none none))
-                                (try! (stx-transfer? stx-amount current-contract recipient))
-                            )
-                        )
+                    (as-contract? ((with-stacking u1000000) (with-stx u500))
+                        (unwrap-panic (contract-call? .pox-4 delegate-stx
+                            delegate-amount recipient none none))
+                        (try! (stx-transfer? stx-amount current-contract recipient))
                     )
                 )
             "#;
@@ -2281,8 +2336,10 @@ mod tests {
                     (ContractName::from_literal("wrapper"), wrapper),
                     (
                         ContractName::from_literal("test"),
-                        "(stx-transfer? u1000 tx-sender .wrapper)
-                (contract-call? .wrapper delegate-and-send-stx u5000 u200 tx-sender)",
+                        "
+                            (stx-transfer? u1000 tx-sender .wrapper)
+                            (contract-call? .wrapper delegate-and-send-stx u5000 u200 tx-sender)
+                        ",
                     ),
                 ],
                 Ok(Some(Value::okay_true())),
@@ -2311,12 +2368,18 @@ mod tests {
             let expected = Value::Tuple(
                 clarity::vm::types::TupleData::from_data(vec![
                     (ClarityName::from_literal("balance"), Value::UInt(500)),
-                    (ClarityName::from_literal("error-code"), Value::error(Value::UInt(128)).unwrap()),
+                    (
+                        ClarityName::from_literal("error-code"),
+                        Value::error(Value::UInt(128)).unwrap(),
+                    ),
                 ])
                 .unwrap(),
             );
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(expected)),
             );
         }
@@ -2339,12 +2402,18 @@ mod tests {
             let expected = Value::Tuple(
                 clarity::vm::types::TupleData::from_data(vec![
                     (ClarityName::from_literal("balance"), Value::UInt(500)),
-                    (ClarityName::from_literal("error-code"), Value::error(Value::UInt(1)).unwrap()),
+                    (
+                        ClarityName::from_literal("error-code"),
+                        Value::error(Value::UInt(1)).unwrap(),
+                    ),
                 ])
                 .unwrap(),
             );
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(expected)),
             );
         }
@@ -2371,11 +2440,9 @@ mod tests {
                                 (with-ft current-contract "my-token" u200)
                                 (with-nft current-contract "my-nft" (list u1 u2))
                             )
-                            (begin
-                                (try! (stx-transfer? stx-amount current-contract recipient))
-                                (try! (ft-transfer? my-token ft-amount current-contract recipient))
-                                (try! (nft-transfer? my-nft nft-id current-contract recipient))
-                            )
+                            (try! (stx-transfer? stx-amount current-contract recipient))
+                            (try! (ft-transfer? my-token ft-amount current-contract recipient))
+                            (try! (nft-transfer? my-nft nft-id current-contract recipient))
                         )
                     )
                 )
@@ -2387,7 +2454,10 @@ mod tests {
                 (contract-call? .callee transfer-all u100 u1 u200)
             ";
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(Value::okay_true())),
             );
         }
@@ -2420,7 +2490,10 @@ mod tests {
                 (contract-call? .callee transfer-token u1)
             ";
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(Value::okay_true())),
             );
         }
@@ -2451,7 +2524,10 @@ mod tests {
                 (contract-call? .callee transfer-token u1)
             ";
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(Value::err_uint(0))),
             );
         }
@@ -2502,15 +2578,11 @@ mod tests {
                 )
 
                 (define-public (transfer-both (stx-amount uint) (ft-amount uint) (recipient principal))
-                    (begin
-                        (as-contract? ((with-stx u200) (with-ft current-contract "my-token" u100))
-                            (begin
-                                (try! (stx-transfer? stx-amount current-contract recipient))
-                                (try!
-                                    (as-contract? ((with-ft current-contract "my-token" u100))
-                                        (try! (ft-transfer? my-token ft-amount current-contract recipient))
-                                    )
-                                )
+                    (as-contract? ((with-stx u200) (with-ft current-contract "my-token" u100))
+                        (try! (stx-transfer? stx-amount current-contract recipient))
+                        (try!
+                            (as-contract? ((with-ft current-contract "my-token" u100))
+                                (try! (ft-transfer? my-token ft-amount current-contract recipient))
                             )
                         )
                     )
@@ -2538,7 +2610,10 @@ mod tests {
                 .unwrap(),
             );
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(expected)),
             );
         }
@@ -2582,7 +2657,10 @@ mod tests {
             ";
             let expected = Value::Tuple(
                 clarity::vm::types::TupleData::from_data(vec![
-                    (ClarityName::from_literal("error-code"), Value::error(Value::UInt(0)).unwrap()),
+                    (
+                        ClarityName::from_literal("error-code"),
+                        Value::error(Value::UInt(0)).unwrap(),
+                    ),
                     (ClarityName::from_literal("stx-balance"), Value::UInt(500)),
                     (ClarityName::from_literal("ft-balance"), Value::UInt(200)),
                 ])
@@ -2591,7 +2669,10 @@ mod tests {
             // Inner FT allowance u10 is too low for u50 transfer.
             // The inner violation (err u0) propagates via try!, causing full rollback.
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(expected)),
             );
         }
@@ -2608,12 +2689,10 @@ mod tests {
                 (define-public (transfer-nft-and-stx (asset uint) (stx-amount uint))
                     (let ((recipient tx-sender))
                         (as-contract? ((with-nft current-contract "token" (list u1)) (with-stx u200))
-                            (begin
-                                (try! (nft-transfer? token asset current-contract recipient))
-                                (try!
-                                    (as-contract? ((with-stx u200))
-                                        (try! (stx-transfer? stx-amount current-contract recipient))
-                                    )
+                            (try! (nft-transfer? token asset current-contract recipient))
+                            (try!
+                                (as-contract? ((with-stx u200))
+                                    (try! (stx-transfer? stx-amount current-contract recipient))
                                 )
                             )
                         )
@@ -2626,7 +2705,10 @@ mod tests {
                 (contract-call? .callee transfer-nft-and-stx u1 u100)
             ";
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(Value::okay_true())),
             );
         }
