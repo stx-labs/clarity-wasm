@@ -77,6 +77,7 @@ pub(crate) static COMPLEX_WORDS: &[&'static dyn ComplexWord] = &[
     &constants::DefineConstant,
     &contract::AsContractPreV4,
     &contract::AsContractPostV4,
+    &contract::RestrictAssets,
     &contract::ContractCall,
     &contract::WithAllAssetsUnsafe,
     &contract::WithFt,

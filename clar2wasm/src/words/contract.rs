@@ -91,9 +91,17 @@ impl ComplexWord for AsContractPostV4 {
         expr: &SymbolicExpression,
         args: &[SymbolicExpression],
     ) -> Result<(), GeneratorError> {
+        check_args!(
+            generator,
+            builder,
+            2,
+            args.len(),
+            ArgumentCountCheck::AtLeast
+        );
+
         // TODO: add cost tracking #783
         let [allowances, inners @ ..] = args else {
-            return Err(GeneratorError::ArgumentCountMismatch);
+            unreachable!()
         };
 
         let return_ty = generator
@@ -102,8 +110,6 @@ impl ComplexWord for AsContractPostV4 {
                 GeneratorError::TypeError("as-contract? expression must be typed".to_owned())
             })?
             .clone();
-        let return_ty_wasm =
-            InstrSeqType::new(&mut generator.module.types, &[], &clar2wasm_ty(&return_ty));
 
         let inner_ty = match &return_ty {
             TypeSignature::ResponseType(resp) => &resp.0,
@@ -138,7 +144,11 @@ impl ComplexWord for AsContractPostV4 {
 
         // Block that will contain the entire traversal of the inner exprssions.
         let exprs_block_id = {
-            let mut exprs_block = builder.dangling_instr_seq(return_ty_wasm);
+            let mut exprs_block = builder.dangling_instr_seq(InstrSeqType::new(
+                &mut generator.module.types,
+                &[],
+                &clar2wasm_ty(&return_ty),
+            ));
             let exprs_id = exprs_block.id();
 
             // In this subblock, we traverse the inner expressions. If one of them fail, we jump to the end of it
@@ -221,6 +231,187 @@ impl ComplexWord for AsContractPostV4 {
                 // the host would discard the context on trap. However, it could lead to issues in the future
                 // so a cleaner implementation should be provided here.
                 exprs_block.call(generator.func_by_name("stdlib.cleanup_as_contract_post_v4"));
+
+                exprs_block.br(early_return);
+            } else {
+                // in a top-level context, the runtime-error function would have been called already by this point.
+                exprs_block.unreachable();
+            }
+
+            exprs_id
+        };
+
+        builder.instr(Block {
+            seq: exprs_block_id,
+        });
+
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct RestrictAssets;
+
+impl Word for RestrictAssets {
+    fn name(&self) -> ClarityName {
+        ClarityName::from_literal("restrict-assets?")
+    }
+}
+
+impl ComplexWord for RestrictAssets {
+    fn traverse(
+        &self,
+        generator: &mut WasmGenerator,
+        builder: &mut walrus::InstrSeqBuilder,
+        expr: &SymbolicExpression,
+        args: &[SymbolicExpression],
+    ) -> Result<(), GeneratorError> {
+        check_args!(
+            generator,
+            builder,
+            3,
+            args.len(),
+            ArgumentCountCheck::AtLeast
+        );
+
+        let [asset_owner, allowances, inners @ ..] = args else {
+            unreachable!()
+        };
+
+        let return_ty = generator
+            .get_expr_type(expr)
+            .ok_or_else(|| {
+                GeneratorError::TypeError("restrict-access? expression must be typed".to_owned())
+            })?
+            .clone();
+
+        let inner_ty = match &return_ty {
+            TypeSignature::ResponseType(resp) => &resp.0,
+            _ => {
+                return Err(GeneratorError::TypeError(
+                    "Invalid return type for restrict-access? expression".to_owned(),
+                ))
+            }
+        };
+
+        // workaround on the expression type for the last inner
+        if let Some(last) = inners.last() {
+            generator.set_expr_type(last, inner_ty.clone())?;
+        }
+
+        // evaluate the asset owner and save it to locals
+        generator.traverse_expr(builder, asset_owner)?;
+        let asset_owner_locals =
+            generator.save_to_locals(builder, &TypeSignature::PrincipalType, true);
+
+        builder.call(generator.func_by_name("stdlib.enter_restrict_assets"));
+
+        // Stash the allowance handle so With* words can reference it.
+        let allowance_ref_local = generator.borrow_local(ValType::Externref);
+        builder.local_set(*allowance_ref_local);
+
+        // Set and make sure we are not overwriting an existing allowance context local
+        let former_allowance_ctx = ALLOWANCE_CONTEXT.replace(Some(*allowance_ref_local));
+
+        // Register each allowance (e.g. with-stx, with-stacking).
+        for allowance in allowances.match_list().ok_or_else(|| {
+            GeneratorError::TypeError("restrict-assets?'s allowances should be a list".to_owned())
+        })? {
+            generator.traverse_expr(builder, allowance)?;
+        }
+
+        // Block that will contain the entire traversal of the inner exprssions.
+        let exprs_block_id = {
+            let mut exprs_block = builder.dangling_instr_seq(InstrSeqType::new(
+                &mut generator.module.types,
+                &[],
+                &clar2wasm_ty(&return_ty),
+            ));
+            let exprs_id = exprs_block.id();
+
+            // In this subblock, we traverse the inner expressions. If one of them fail, we jump to the end of it
+            // to execute a cleanup of the current context.
+            let fail_block_id = {
+                let fail_block_ty = match generator
+                    .get_current_function_return_type()
+                    .map(clar2wasm_ty)
+                {
+                    Some(return_ty) => {
+                        InstrSeqType::new(&mut generator.module.types, &[], &return_ty)
+                    }
+                    None => None.into(),
+                };
+                let mut fail_block = exprs_block.dangling_instr_seq(fail_block_ty);
+                let fail_id = fail_block.id();
+
+                // we set the jump in case of failure to fail_id, so that a failure in an evaluated expression would jump to
+                // the failure handling and would rollback the current context.
+                let old_early_return = generator.early_return_block_id.replace(fail_id);
+
+                // Run the body expression.
+                generator.traverse_statement_list(&mut fail_block, inners)?;
+
+                // Stash the body result before calling exit (exit pushes its own values).
+                let result_locals = generator.save_to_locals(&mut fail_block, inner_ty, true);
+
+                // Validate allowances and commit or abort the transaction.
+                for l in asset_owner_locals {
+                    fail_block.local_get(l);
+                }
+                fail_block.local_get(*allowance_ref_local);
+                fail_block.call(generator.func_by_name("stdlib.exit_restrict_assets"));
+
+                // We can put back the former allowance context
+                ALLOWANCE_CONTEXT.set(former_allowance_ctx);
+
+                // Now on stack, we have either (int - 0) if an error occured with int the error index, or (0int - 1) if
+                // allowances returned no error
+                fail_block.if_else(
+                    InstrSeqType::new(
+                        &mut generator.module.types,
+                        &[ValType::I64, ValType::I64],
+                        &clar2wasm_ty(&return_ty),
+                    ),
+                    |then| {
+                        // if allowances all checked, we return Ok - result - 0
+
+                        // we drop the 0 on the stack
+                        then.drop().drop();
+
+                        then.i32_const(1);
+                        for l in result_locals {
+                            then.local_get(l);
+                        }
+                        then.i64_const(0).i64_const(0);
+                    },
+                    |else_| {
+                        // otherwise we return the Err - placeholder - the number on the stack
+                        let hi_local = generator.borrow_local(ValType::I64);
+                        let lo_local = generator.borrow_local(ValType::I64);
+                        else_.local_set(*hi_local);
+                        else_.local_set(*lo_local);
+
+                        else_.i32_const(0);
+                        add_placeholder_for_clarity_type(else_, inner_ty);
+                        else_.local_get(*lo_local).local_get(*hi_local);
+                    },
+                );
+
+                // If we arrived here, we need to skip the cleanup and set back the early_return.
+                generator.early_return_block_id = old_early_return;
+                fail_block.br(exprs_id);
+
+                fail_id
+            };
+
+            // we insert the fail block_id
+            exprs_block.instr(Block { seq: fail_block_id });
+
+            if let Some(early_return) = generator.early_return_block_id {
+                // TODO: this will never be called if we are in top-level. This shouldn’t be a problem as
+                // the host would discard the context on trap. However, it could lead to issues in the future
+                // so a cleaner implementation should be provided here.
+                exprs_block.call(generator.func_by_name("stdlib.cleanup_restrict_assets"));
 
                 exprs_block.br(early_return);
             } else {
