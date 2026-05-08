@@ -52,6 +52,10 @@
     (import "clarity" "enter_as_contract_post_v4" (func $stdlib.enter_as_contract_post_v4 (result externref)))
     (import "clarity" "exit_as_contract_post_v4" (func $stdlib.exit_as_contract_post_v4 (param externref) (result i64 i64 i32)))
     (import "clarity" "cleanup_as_contract_post_v4" (func $stdlib.cleanup_as_contract_post_v4))
+    (import "clarity" "enter_restrict_assets" (func $stdlib.enter_restrict_assets (result externref)))
+    (import "clarity" "exit_restrict_assets" (func $stdlib.exit_restrict_assets (param i32) (param i32) (param externref) (result i64 i64 i32)))
+    (import "clarity" "cleanup_restrict_assets" (func $stdlib.cleanup_restrict_assets))
+
     (import "clarity" "with_all_assets_unsafe" (func $stdlib.with_all_assets_unsafe (param externref)))
     (import "clarity" "with_ft" (func $stdlib.with_ft (param externref)
                                                       (param $contract_id_offset i32)
