@@ -2903,5 +2903,322 @@ mod tests {
                 Ok(Some(Value::okay_true())),
             );
         }
+
+        // ==================== restrict-assets? ====================
+
+        #[test]
+        fn restrict_assets_no_args() {
+            let result = evaluate("(restrict-assets?)");
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("expecting >= 3 arguments, got 0"));
+        }
+
+        #[test]
+        fn restrict_assets_one_arg() {
+            let result = evaluate("(restrict-assets? tx-sender)");
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("expecting >= 3 arguments, got 1"));
+        }
+
+        #[test]
+        fn restrict_assets_two_args() {
+            let result = evaluate("(restrict-assets? tx-sender ())");
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("expecting >= 3 arguments, got 2"));
+        }
+
+        #[test]
+        fn restrict_assets_no_transfer_no_allowance_returns_ok_value() {
+            // Body does not touch any asset and final expr returns u3.
+            // restrict-assets? should wrap the result as (ok u3).
+            crosscheck(
+                "(restrict-assets? tx-sender () (+ u1 u2))",
+                Ok(Some(Value::okay(Value::UInt(3)).unwrap())),
+            );
+        }
+
+        #[test]
+        fn restrict_assets_returns_final_body_value() {
+            // Last body expression value is what's wrapped in (ok ...).
+            crosscheck(
+                "(restrict-assets? tx-sender () u1 u2 u42)",
+                Ok(Some(Value::okay(Value::UInt(42)).unwrap())),
+            );
+        }
+
+        // ---------- with-stx ----------
+
+        #[test]
+        fn restrict_assets_stx_ok() {
+            let callee = r#"
+                (define-public (send-stx (amount uint) (recipient principal))
+                    (restrict-assets? tx-sender ((with-stx u100))
+                        (try! (stx-transfer? amount tx-sender recipient))
+                    )
+                )
+            "#;
+            let caller = "(contract-call? .callee send-stx u100 .callee)";
+            crosscheck_multi_contract(
+                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                Ok(Some(Value::okay_true())),
+            );
+        }
+
+        #[test]
+        fn restrict_assets_stx_exceeds_allowance() {
+            let callee = r#"
+                (define-public (send-stx (amount uint) (recipient principal))
+                    (restrict-assets? tx-sender ((with-stx u10))
+                        (try! (stx-transfer? amount tx-sender recipient))
+                    )
+                )
+
+                (define-read-only (callee-balance)
+                    (stx-get-balance .callee)
+                )
+            "#;
+            let caller = "
+                (let ((result (contract-call? .callee send-stx u50 .callee)))
+                    {error-code: result, callee-balance: (contract-call? .callee callee-balance)}
+                )
+            ";
+            let expected = Value::Tuple(
+                clarity::vm::types::TupleData::from_data(vec![
+                    (ClarityName::from_literal("callee-balance"), Value::UInt(0)),
+                    (ClarityName::from_literal("error-code"), Value::error(Value::UInt(0)).unwrap()),
+                ])
+                .unwrap(),
+            );
+            crosscheck_multi_contract(
+                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                Ok(Some(expected)),
+            );
+        }
+
+        #[test]
+        fn restrict_assets_stx_no_allowance() {
+            // No allowance granted but the body transfers STX from
+            // asset-owner — expect (err u128).
+            let callee = r#"
+                (define-public (send-stx (amount uint) (recipient principal))
+                    (restrict-assets? tx-sender ()
+                        (try! (stx-transfer? amount tx-sender recipient))
+                    )
+                )
+
+                (define-read-only (callee-balance)
+                    (stx-get-balance .callee)
+                )
+            "#;
+            let caller = "
+                (let ((result (contract-call? .callee send-stx u50 .callee)))
+                    {error-code: result, callee-balance: (contract-call? .callee callee-balance)}
+                )
+            ";
+            let expected = Value::Tuple(
+                clarity::vm::types::TupleData::from_data(vec![
+                    (ClarityName::from_literal("callee-balance"), Value::UInt(0)),
+                    (ClarityName::from_literal("error-code"), Value::error(Value::UInt(128)).unwrap()),
+                ])
+                .unwrap(),
+            );
+            crosscheck_multi_contract(
+                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                Ok(Some(expected)),
+            );
+        }
+
+        // ---------- mixed / multiple allowances ----------
+
+        #[test]
+        fn restrict_assets_wrong_allowance_type() {
+            // An FT allowance does not authorize STX outflow → (err u128).
+            let callee = r#"
+                (define-fungible-token token)
+
+                (define-public (send-stx (amount uint) (recipient principal))
+                    (restrict-assets? tx-sender ((with-ft current-contract "token" u100))
+                        (try! (stx-transfer? amount tx-sender recipient))
+                    )
+                )
+
+                (define-read-only (callee-balance)
+                    (stx-get-balance .callee)
+                )
+            "#;
+            let caller = "
+                (let ((result (contract-call? .callee send-stx u50 .callee)))
+                    {error-code: result, callee-balance: (contract-call? .callee callee-balance)}
+                )
+            ";
+            let expected = Value::Tuple(
+                clarity::vm::types::TupleData::from_data(vec![
+                    (ClarityName::from_literal("callee-balance"), Value::UInt(0)),
+                    (ClarityName::from_literal("error-code"), Value::error(Value::UInt(128)).unwrap()),
+                ])
+                .unwrap(),
+            );
+            crosscheck_multi_contract(
+                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                Ok(Some(expected)),
+            );
+        }
+
+        #[test]
+        fn restrict_assets_multiple_stx_second_violation() {
+            // Two stx allowances; first is large enough, second is not →
+            // (err u1) for the 0-based index of the second allowance.
+            let callee = r#"
+                (define-public (send-stx (amount uint) (recipient principal))
+                    (restrict-assets? tx-sender ((with-stx u100) (with-stx u20))
+                        (try! (stx-transfer? amount tx-sender recipient))
+                    )
+                )
+
+                (define-read-only (callee-balance)
+                    (stx-get-balance .callee)
+                )
+            "#;
+            let caller = "
+                (let ((result (contract-call? .callee send-stx u40 .callee)))
+                    {error-code: result, callee-balance: (contract-call? .callee callee-balance)}
+                )
+            ";
+            let expected = Value::Tuple(
+                clarity::vm::types::TupleData::from_data(vec![
+                    (ClarityName::from_literal("callee-balance"), Value::UInt(0)),
+                    (ClarityName::from_literal("error-code"), Value::error(Value::UInt(1)).unwrap()),
+                ])
+                .unwrap(),
+            );
+            crosscheck_multi_contract(
+                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                Ok(Some(expected)),
+            );
+        }
+
+        #[test]
+        fn restrict_assets_mixed_stx_ft_nft() {
+            let callee = r#"
+                (define-fungible-token my-token)
+                (define-non-fungible-token my-nft uint)
+
+                (define-public (mint-ft (amount uint))
+                    (ft-mint? my-token amount tx-sender)
+                )
+
+                (define-public (mint-nft (asset uint))
+                    (nft-mint? my-nft asset tx-sender)
+                )
+
+                (define-public (transfer-all (ft-amount uint) (nft-id uint) (stx-amount uint) (recipient principal))
+                    (restrict-assets? tx-sender
+                        (
+                            (with-stx u500)
+                            (with-ft current-contract "my-token" u200)
+                            (with-nft current-contract "my-nft" (list u1 u2))
+                        )
+                        (try! (stx-transfer? stx-amount tx-sender recipient))
+                        (try! (ft-transfer? my-token ft-amount tx-sender recipient))
+                        (try! (nft-transfer? my-nft nft-id tx-sender recipient))
+                    )
+                )
+            "#;
+            let caller = "
+                (contract-call? .callee mint-ft u500)
+                (contract-call? .callee mint-nft u1)
+                (contract-call? .callee transfer-all u100 u1 u200 .callee)
+            ";
+            crosscheck_multi_contract(
+                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                Ok(Some(Value::okay_true())),
+            );
+        }
+
+        // ---------- nested restrict-assets? ----------
+
+        #[test]
+        fn restrict_assets_nested_inner_violation_rolls_back() {
+            // Inner allowance violation must propagate via try! and roll
+            // back the outer STX transfer.
+            let callee = r#"
+                (define-fungible-token my-token)
+
+                (define-public (mint-ft (amount uint))
+                    (ft-mint? my-token amount tx-sender)
+                )
+
+                (define-public (transfer-both (stx-amount uint) (ft-amount uint) (recipient principal))
+                    (restrict-assets? tx-sender ((with-stx u200))
+                        (try! (stx-transfer? stx-amount tx-sender recipient))
+                        (try!
+                            (restrict-assets? tx-sender ((with-ft current-contract "my-token" u10))
+                                (try! (ft-transfer? my-token ft-amount tx-sender recipient))
+                            )
+                        )
+                    )
+                )
+
+                (define-read-only (callee-balance)
+                    (stx-get-balance .callee)
+                )
+
+                (define-read-only (sender-ft-balance (who principal))
+                    (ft-get-balance my-token who)
+                )
+            "#;
+            let caller = "
+                (contract-call? .callee mint-ft u200)
+                (let ((result (contract-call? .callee transfer-both u100 u50 .callee)))
+                    {error-code: result,
+                     callee-stx: (contract-call? .callee callee-balance),
+                     sender-ft: (contract-call? .callee sender-ft-balance tx-sender)}
+                )
+            ";
+            let expected = Value::Tuple(
+                clarity::vm::types::TupleData::from_data(vec![
+                    (ClarityName::from_literal("callee-stx"), Value::UInt(0)),
+                    (ClarityName::from_literal("error-code"), Value::error(Value::UInt(0)).unwrap()),
+                    (ClarityName::from_literal("sender-ft"), Value::UInt(200)),
+                ])
+                .unwrap(),
+            );
+            crosscheck_multi_contract(
+                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                Ok(Some(expected)),
+            );
+        }
+
+        #[test]
+        fn restrict_assets_nested_outer_stx_inner_stx_both_ok() {
+            // Both allowances are respected; outer + inner outflow each
+            // satisfy their own limits → (ok true).
+            let callee = r#"
+                (define-public (send-twice (a uint) (b uint) (recipient principal))
+                    (restrict-assets? tx-sender ((with-stx u200))
+                        (try! (stx-transfer? a tx-sender recipient))
+                        (try!
+                            (restrict-assets? tx-sender ((with-stx u100))
+                                (try! (stx-transfer? b tx-sender recipient))
+                            )
+                        )
+                    )
+                )
+            "#;
+            let caller = "(contract-call? .callee send-twice u50 u30 .callee)";
+            crosscheck_multi_contract(
+                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                Ok(Some(Value::okay_true())),
+            );
+        }
     }
 }
