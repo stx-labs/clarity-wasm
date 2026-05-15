@@ -393,6 +393,24 @@ mod tests {
 
             crosscheck(snippet, Ok(Some(Value::err_uint(42))));
         }
+
+        #[test]
+        fn at_block_needs_cleanup_top_level() {
+            let snippet = "
+                (at-block 0x0000000000000000000000000000000000000000000000000000000000000000
+                    (ok (try! (if false (ok true) (err u42))))
+                )
+            ";
+
+            crosscheck(
+                snippet,
+                Err(clarity_types::Error::ShortReturn(
+                    clarity_types::errors::ShortReturnType::ExpectedValue(Box::new(
+                        Value::err_uint(42),
+                    )),
+                )),
+            );
+        }
     }
 
     //
