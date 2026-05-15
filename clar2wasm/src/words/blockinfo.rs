@@ -369,6 +369,32 @@ mod tests {
 
     use crate::tools::{evaluate, TestEnvironment};
 
+    #[cfg(any(
+        feature = "test-clarity-v1",
+        feature = "test-clarity-v2",
+        feature = "test-clarity-v3"
+    ))]
+    #[cfg(test)]
+    mod clarity_v1_v2_v3 {
+        use clarity_types::Value;
+
+        use crate::tools::crosscheck;
+
+        #[test]
+        fn at_block_needs_cleanup() {
+            let snippet = "
+                (define-private (foo)
+                    (at-block 0x0000000000000000000000000000000000000000000000000000000000000000
+                        (ok (try! (if false (ok true) (err u42))))
+                    )
+                )
+                (foo)
+            ";
+
+            crosscheck(snippet, Ok(Some(Value::err_uint(42))));
+        }
+    }
+
     //
     // Module with tests that should only be executed
     // when running Clarity::V1 or Clarity::V2.
