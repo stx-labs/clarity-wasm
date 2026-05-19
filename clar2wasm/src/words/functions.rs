@@ -498,6 +498,24 @@ mod tests {
     }
 
     #[test]
+    fn define_after_define_same_name() {
+        let def_type = ["read_only", "public", "private"];
+        for (def1, def2) in def_type.iter().zip(def_type) {
+            crosscheck(
+                &format!(
+                    r#"
+                        (define-{def1} (dup) (ok u1))
+                        (define-{def2} (dup) (ok u2))
+                    "#
+                ),
+                Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
+                    "dup".to_string(),
+                ))),
+            )
+        }
+    }
+
+    #[test]
     fn private_function_direct_call() {
         crosscheck(
             r#"
