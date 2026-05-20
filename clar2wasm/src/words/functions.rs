@@ -516,6 +516,84 @@ mod tests {
     }
 
     #[test]
+    fn define_constant_after_read_only_same_name() {
+        crosscheck(
+            r#"
+                (define-constant dup u2)
+                (define-read-only (dup) (ok u1))
+            "#,
+            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
+                "dup".to_string(),
+            ))),
+        )
+    }
+
+    #[test]
+    fn define_data_var_after_read_only_same_name() {
+        crosscheck(
+            r#"
+                (define-data-var dup uint u2)
+                (define-read-only (dup) (ok u1))
+            "#,
+            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
+                "dup".to_string(),
+            ))),
+        )
+    }
+
+    #[test]
+    fn define_map_after_read_only_same_name() {
+        crosscheck(
+            r#"
+                (define-map dup uint uint)
+                (define-read-only (dup) (ok u1))
+            "#,
+            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
+                "dup".to_string(),
+            ))),
+        )
+    }
+
+    #[test]
+    fn define_ft_after_read_only_same_name() {
+        crosscheck(
+            r#"
+                (define-fungible-token dup)
+                (define-read-only (dup) (ok u1))
+            "#,
+            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
+                "dup".to_string(),
+            ))),
+        )
+    }
+
+    #[test]
+    fn define_nft_after_read_only_same_name() {
+        crosscheck(
+            r#"
+                (define-read-only (dup) (ok u1))
+                (define-non-fungible-token dup uint)
+            "#,
+            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
+                "dup".to_string(),
+            ))),
+        )
+    }
+
+    #[test]
+    fn define_trait_after_read_only_same_name() {
+        crosscheck(
+            r#"
+                (define-trait dup ((f () (response uint uint))))
+                (define-read-only (dup) (ok u1))
+            "#,
+            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
+                "dup".to_string(),
+            ))),
+        )
+    }
+
+    #[test]
     fn private_function_direct_call() {
         crosscheck(
             r#"
