@@ -2147,6 +2147,60 @@ impl WasmGenerator {
                     .find_map(|arg| (&arg.name == arg_name).then_some(&arg.signature))
             })
     }
+
+    pub(crate) fn is_already_used_name(
+        &self,
+        name: &ClarityName,
+        current_define: &dyn HasClarityName,
+    ) -> Result<bool, GeneratorError> {
+        let ca = &self.contract_analysis;
+        let mut define_maps: Vec<&dyn HasClarityName> = vec![
+            &ca.private_function_types,
+            &ca.public_function_types,
+            &ca.read_only_function_types,
+            &ca.variable_types,
+            &ca.persisted_variable_types,
+            &ca.map_types,
+            &ca.fungible_tokens,
+            &ca.non_fungible_tokens,
+            &ca.defined_traits,
+        ];
+        match define_maps.iter().position(|&hk| {
+            std::ptr::eq(
+                hk as *const dyn HasClarityName as *const (),
+                current_define as *const dyn HasClarityName as *const (),
+            )
+        }) {
+            Some(p) => {
+                define_maps.swap_remove(p);
+            }
+            None => {
+                return Err(GeneratorError::InternalError(
+                    "Invalid HasKey collection used in is_already_used_name".to_owned(),
+                ))
+            }
+        }
+
+        Ok(self.is_reserved_name(name)
+            || self.defined_functions.contains(name.as_str())
+            || define_maps.into_iter().any(|hk| hk.has_key(name)))
+    }
+}
+
+pub(crate) trait HasClarityName {
+    fn has_key(&self, name: &ClarityName) -> bool;
+}
+
+impl<V> HasClarityName for BTreeMap<ClarityName, V> {
+    fn has_key(&self, name: &ClarityName) -> bool {
+        self.contains_key(name)
+    }
+}
+
+impl HasClarityName for std::collections::BTreeSet<ClarityName> {
+    fn has_key(&self, name: &ClarityName) -> bool {
+        self.contains(name)
+    }
 }
 
 /// Returns true if a composed type has an inner in-memory type.

@@ -3,10 +3,15 @@ use clarity::vm::costs::CostErrors;
 use clarity::vm::errors::{CheckErrors, Error, RuntimeErrorType, ShortReturnType, WasmError};
 use clarity::vm::types::ResponseData;
 use clarity::vm::{ClarityVersion, Value};
+use clarity_types::types::{ASCIIData, CharType};
+use clarity_types::ClarityName;
+use walrus::InstrSeqBuilder;
 use wasmtime::{AsContextMut, Instance, Trap};
 
+use crate::wasm_generator::{GeneratorError, WasmGenerator};
 use crate::wasm_utils::{
-    read_bytes_from_wasm, read_from_wasm_indirect, read_identifier_from_wasm, signature_from_string,
+    get_global, read_bytes_from_wasm, read_from_wasm_indirect, read_identifier_from_wasm,
+    signature_from_string,
 };
 
 const LOG2_ERROR_MESSAGE: &str = "log2 must be passed a positive integer";
@@ -420,4 +425,25 @@ fn get_runtime_error_arg_lengths(
     .unwrap_or_else(|e| panic!("Could not recover arg_lengths: {e}"));
 
     extract_expected_and_got(&arg_lengths)
+}
+
+pub(crate) fn generate_name_already_used_error(
+    generator: &mut WasmGenerator,
+    builder: &mut InstrSeqBuilder,
+    name: &ClarityName,
+) -> Result<(), GeneratorError> {
+    let (arg_name_offset, arg_name_len) =
+        generator.add_clarity_string_literal(&CharType::ASCII(ASCIIData {
+            data: name.as_bytes().to_vec(),
+        }))?;
+
+    builder
+        .i32_const(arg_name_offset as i32)
+        .global_set(get_global(&generator.module, "runtime-error-arg-offset")?)
+        .i32_const(arg_name_len as i32)
+        .global_set(get_global(&generator.module, "runtime-error-arg-len")?)
+        .i32_const(ErrorMap::NameAlreadyUsed as i32)
+        .call(generator.func_by_name("stdlib.runtime-error"));
+
+    Ok(())
 }
