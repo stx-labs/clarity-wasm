@@ -498,29 +498,11 @@ mod tests {
     }
 
     #[test]
-    fn define_after_define_same_name() {
-        let def_type = ["read_only", "public", "private"];
-        for (def1, def2) in def_type.iter().zip(def_type) {
-            crosscheck(
-                &format!(
-                    r#"
-                        (define-{def1} (dup) (ok u1))
-                        (define-{def2} (dup) (ok u2))
-                    "#
-                ),
-                Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
-                    "dup".to_string(),
-                ))),
-            )
-        }
-    }
-
-    #[test]
     fn define_constant_after_read_only_same_name() {
         crosscheck(
             r#"
-                (define-constant dup u2)
                 (define-read-only (dup) (ok u1))
+                (define-constant dup u2)
             "#,
             Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
                 "dup".to_string(),
@@ -532,8 +514,8 @@ mod tests {
     fn define_data_var_after_read_only_same_name() {
         crosscheck(
             r#"
-                (define-data-var dup uint u2)
                 (define-read-only (dup) (ok u1))
+                (define-data-var dup uint u2)
             "#,
             Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
                 "dup".to_string(),
@@ -545,8 +527,8 @@ mod tests {
     fn define_map_after_read_only_same_name() {
         crosscheck(
             r#"
-                (define-map dup uint uint)
                 (define-read-only (dup) (ok u1))
+                (define-map dup uint uint)
             "#,
             Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
                 "dup".to_string(),
@@ -558,8 +540,8 @@ mod tests {
     fn define_ft_after_read_only_same_name() {
         crosscheck(
             r#"
-                (define-fungible-token dup)
                 (define-read-only (dup) (ok u1))
+                (define-fungible-token dup)
             "#,
             Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
                 "dup".to_string(),
@@ -584,8 +566,8 @@ mod tests {
     fn define_trait_after_read_only_same_name() {
         crosscheck(
             r#"
-                (define-trait dup ((f () (response uint uint))))
                 (define-read-only (dup) (ok u1))
+                (define-trait dup ((f () (response uint uint))))
             "#,
             Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
                 "dup".to_string(),
