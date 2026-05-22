@@ -41,7 +41,7 @@ impl ComplexWord for Let {
             let value = pair.get_expr(1)?;
             // make sure name does not collide with builtin symbols
             if generator.is_already_used_name(name) {
-                error_mapping::generate_name_already_used_error(generator, builder, name)?;
+                return error_mapping::generate_name_already_used_error(generator, builder, name);
             }
 
             // Traverse the value
