@@ -1,13 +1,9 @@
-use clarity::vm::types::{ASCIIData, CharType};
 use clarity::vm::{ClarityName, SymbolicExpression};
 
 use super::{ComplexWord, Word};
-use crate::check_args;
-use crate::error_mapping::ErrorMap;
-use crate::wasm_generator::{
-    get_global, ArgumentsExt, FunctionKind, GeneratorError, WasmGenerator,
-};
+use crate::wasm_generator::{ArgumentsExt, FunctionKind, GeneratorError, WasmGenerator};
 use crate::wasm_utils::ArgumentCountCheck;
+use crate::{check_args, error_mapping};
 
 #[derive(Debug)]
 pub struct DefinePrivateFunction;
@@ -32,11 +28,12 @@ impl ComplexWord for DefinePrivateFunction {
             return Err(GeneratorError::NotImplemented);
         };
         let name = signature.get_name(0)?;
-        // Making sure name is not reserved
-        if generator.is_reserved_name(name) {
-            return Err(GeneratorError::InternalError(format!(
-                "Name already used {name:?}"
-            )));
+
+        // Handling function name collision.
+        // Detects duplicate names and generates
+        // appropriate WebAssembly instructions to report the error.
+        if generator.is_already_used_name(name) {
+            return error_mapping::generate_name_already_used_error(generator, builder, name);
         }
 
         let body = args.get_expr(1)?;
@@ -86,21 +83,8 @@ impl ComplexWord for DefineReadonlyFunction {
         // Handling function name collision.
         // Detects duplicate names and generates
         // appropriate WebAssembly instructions to report the error.
-        if generator.defined_functions.contains(&name.to_string()) {
-            let (arg_name_offset, arg_name_len) =
-                generator.add_clarity_string_literal(&CharType::ASCII(ASCIIData {
-                    data: name.as_bytes().to_vec(),
-                }))?;
-
-            builder
-                .i32_const(arg_name_offset as i32)
-                .global_set(get_global(&generator.module, "runtime-error-arg-offset")?)
-                .i32_const(arg_name_len as i32)
-                .global_set(get_global(&generator.module, "runtime-error-arg-len")?)
-                .i32_const(ErrorMap::NameAlreadyUsed as i32)
-                .call(generator.func_by_name("stdlib.runtime-error"));
-
-            return Ok(());
+        if generator.is_already_used_name(name) {
+            return error_mapping::generate_name_already_used_error(generator, builder, name);
         }
 
         let body = args.get_expr(1)?;
@@ -136,11 +120,12 @@ impl ComplexWord for DefinePublicFunction {
             return Err(GeneratorError::NotImplemented);
         };
         let name = signature.get_name(0)?;
-        // Making sure name is not reserved
-        if generator.is_reserved_name(name) {
-            return Err(GeneratorError::InternalError(format!(
-                "Name already used {name:?}"
-            )));
+
+        // Handling function name collision.
+        // Detects duplicate names and generates
+        // appropriate WebAssembly instructions to report the error.
+        if generator.is_already_used_name(name) {
+            return error_mapping::generate_name_already_used_error(generator, builder, name);
         }
 
         let body = args.get_expr(1)?;
@@ -493,6 +478,110 @@ mod tests {
             "#,
             Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
                 "get-symbol".to_string(),
+            ))),
+        )
+    }
+
+    #[test]
+    fn define_constant_after_read_only_same_name() {
+        crosscheck(
+            r#"
+                (define-read-only (dup) (ok u1))
+                (define-constant dup u2)
+            "#,
+            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
+                "dup".to_string(),
+            ))),
+        )
+    }
+
+    #[test]
+    fn define_data_var_after_read_only_same_name() {
+        crosscheck(
+            r#"
+                (define-read-only (dup) (ok u1))
+                (define-data-var dup uint u2)
+            "#,
+            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
+                "dup".to_string(),
+            ))),
+        )
+    }
+
+    #[test]
+    fn define_map_after_read_only_same_name() {
+        crosscheck(
+            r#"
+                (define-read-only (dup) (ok u1))
+                (define-map dup uint uint)
+            "#,
+            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
+                "dup".to_string(),
+            ))),
+        )
+    }
+
+    #[test]
+    fn define_ft_after_read_only_same_name() {
+        crosscheck(
+            r#"
+                (define-read-only (dup) (ok u1))
+                (define-fungible-token dup)
+            "#,
+            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
+                "dup".to_string(),
+            ))),
+        )
+    }
+
+    #[test]
+    fn define_nft_after_read_only_same_name() {
+        crosscheck(
+            r#"
+                (define-read-only (dup) (ok u1))
+                (define-non-fungible-token dup uint)
+            "#,
+            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
+                "dup".to_string(),
+            ))),
+        )
+    }
+
+    #[test]
+    fn define_trait_after_read_only_same_name() {
+        crosscheck(
+            r#"
+                (define-read-only (dup) (ok u1))
+                (define-trait dup ((f () (response uint uint))))
+            "#,
+            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
+                "dup".to_string(),
+            ))),
+        )
+    }
+
+    #[test]
+    fn define_private_after_read_only_same_name() {
+        crosscheck(
+            r#"
+                (define-read-only (dup) (ok u1))
+                (define-private (dup) u2)
+            "#,
+            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
+                "dup".to_string(),
+            ))),
+        )
+    }
+
+    #[test]
+    fn define_public_after_read_only_same_name() {
+        crosscheck(
+            r#"
+                (define-read-only (dup) (ok u1))
+                (define-public (dup) (ok u2))
+            "#,
+            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
+                "dup".to_string(),
             ))),
         )
     }

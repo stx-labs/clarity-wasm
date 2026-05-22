@@ -1,10 +1,10 @@
 use clarity::vm::{ClarityName, SymbolicExpression};
 
-use crate::check_args;
 use crate::cost::WordCharge;
 use crate::wasm_generator::{ArgumentsExt, GeneratorError, WasmGenerator};
 use crate::wasm_utils::ArgumentCountCheck;
 use crate::words::{ComplexWord, Word};
+use crate::{check_args, error_mapping};
 
 #[derive(Debug)]
 pub struct Let;
@@ -40,10 +40,8 @@ impl ComplexWord for Let {
             let name = pair.get_name(0)?;
             let value = pair.get_expr(1)?;
             // make sure name does not collide with builtin symbols
-            if generator.is_reserved_name(name) {
-                return Err(GeneratorError::InternalError(format!(
-                    "Name already used {name:?}"
-                )));
+            if generator.is_already_used_name(name) {
+                return error_mapping::generate_name_already_used_error(generator, builder, name);
             }
 
             // Traverse the value
@@ -89,7 +87,7 @@ impl ComplexWord for Let {
 
 #[cfg(test)]
 mod tests {
-    use clarity::vm::errors::{Error, ShortReturnType};
+    use clarity::vm::errors::{CheckErrors, Error, ShortReturnType};
     use clarity::vm::Value;
 
     use crate::tools::{crosscheck, crosscheck_compare_only, crosscheck_expect_failure, evaluate};
@@ -142,6 +140,56 @@ mod tests {
     test))";
 
         crosscheck_expect_failure(&format!("{ERR} (test)"));
+    }
+
+    #[test]
+    fn let_binding_collides_with_readonly_defined_later() {
+        crosscheck(
+            "
+                (define-public (caller) (let ((dup u0)) (ok dup)))
+                (define-read-only (dup) (ok u1))
+                (caller)
+            ",
+            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
+                "dup".to_owned(),
+            ))),
+        );
+    }
+
+    #[test]
+    fn let_binding_collides_with_readonly_defined_before() {
+        crosscheck(
+            "
+                (define-read-only (dup) (ok u1))
+                (define-public (caller) (let ((dup u0)) (ok dup)))
+                (caller)
+            ",
+            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
+                "dup".to_owned(),
+            ))),
+        );
+    }
+
+    #[test]
+    fn let_binding_colliding_with_readonly_deploys_when_uninvoked_later() {
+        crosscheck(
+            "
+                (define-public (caller) (let ((dup u0)) (ok dup)))
+                (define-read-only (dup) (ok u1))
+            ",
+            Ok(None),
+        );
+    }
+
+    #[test]
+    fn let_binding_colliding_with_readonly_deploys_when_uninvoked_before() {
+        crosscheck(
+            "
+                (define-read-only (dup) (ok u1))
+                (define-public (caller) (let ((dup u0)) (ok dup)))
+            ",
+            Ok(None),
+        );
     }
 
     #[test]

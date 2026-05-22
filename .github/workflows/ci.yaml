@@ -124,10 +124,13 @@ jobs:
       - name: Run tests and output coverage
         shell: bash
         run: |
+          # --extract-overwrite: tolerate target/llvm-cov-target/target pre-existing
+          # (created during cargo-llvm-cov's clean/metadata phase before nextest extracts).
           cargo llvm-cov nextest \
             --archive-file nextest-archive-v${{ matrix.clarity_version }}.tar.zst \
             --codecov \
-            --output-path codecov-v${{ matrix.clarity_version }}.json
+            --output-path codecov-v${{ matrix.clarity_version }}.json \
+            --extract-overwrite
 
       - name: Upload codecov.json
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
