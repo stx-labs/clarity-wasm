@@ -1,10 +1,10 @@
 use clarity::vm::{ClarityName, SymbolicExpression};
 
-use crate::check_args;
 use crate::cost::WordCharge;
 use crate::wasm_generator::{ArgumentsExt, GeneratorError, WasmGenerator};
 use crate::wasm_utils::ArgumentCountCheck;
 use crate::words::{ComplexWord, Word};
+use crate::{check_args, error_mapping};
 
 #[derive(Debug)]
 pub struct Let;
@@ -40,10 +40,8 @@ impl ComplexWord for Let {
             let name = pair.get_name(0)?;
             let value = pair.get_expr(1)?;
             // make sure name does not collide with builtin symbols
-            if generator.is_reserved_name(name) {
-                return Err(GeneratorError::InternalError(format!(
-                    "Name already used {name:?}"
-                )));
+            if generator.is_already_used_name(name) {
+                error_mapping::generate_name_already_used_error(generator, builder, name)?;
             }
 
             // Traverse the value
