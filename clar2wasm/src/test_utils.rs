@@ -173,9 +173,9 @@ impl WasmGenerator {
         let top_level = top_level.finish(vec![], &mut self.module.funcs);
         self.module.exports.add(".top-level", top_level);
 
-        // TODO: remove magic number 20000
-        self.module.globals.get_mut(self.stack_pointer).kind =
-            walrus::GlobalKind::Local(walrus::InitExpr::Value(walrus::ir::Value::I32(20000)));
+        self.module.globals.get_mut(self.stack_pointer).kind = walrus::GlobalKind::Local(
+            walrus::InitExpr::Value(walrus::ir::Value::I32(self.literal_memory_end as i32)),
+        );
     }
 
     /// Compiles and executes the current module and returns the value on top of the stack.
