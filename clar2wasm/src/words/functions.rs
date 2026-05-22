@@ -560,6 +560,32 @@ mod tests {
     }
 
     #[test]
+    fn define_private_after_read_only_same_name() {
+        crosscheck(
+            r#"
+                (define-read-only (dup) (ok u1))
+                (define-private (dup) u2)
+            "#,
+            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
+                "dup".to_string(),
+            ))),
+        )
+    }
+
+    #[test]
+    fn define_public_after_read_only_same_name() {
+        crosscheck(
+            r#"
+                (define-read-only (dup) (ok u1))
+                (define-public (dup) (ok u2))
+            "#,
+            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
+                "dup".to_string(),
+            ))),
+        )
+    }
+
+    #[test]
     fn private_function_direct_call() {
         crosscheck(
             r#"
