@@ -2148,16 +2148,9 @@ impl WasmGenerator {
             })
     }
 
-    pub(crate) fn is_already_used_name(
-        &self,
-        name: &ClarityName,
-        current_define: &dyn HasClarityName,
-    ) -> Result<bool, GeneratorError> {
+    pub(crate) fn is_already_used_name(&self, name: &ClarityName) -> bool {
         let ca = &self.contract_analysis;
-        let mut define_maps: Vec<&dyn HasClarityName> = vec![
-            &ca.private_function_types,
-            &ca.public_function_types,
-            &ca.read_only_function_types,
+        let define_maps: [&dyn HasClarityName; _] = [
             &ca.variable_types,
             &ca.persisted_variable_types,
             &ca.map_types,
@@ -2165,25 +2158,10 @@ impl WasmGenerator {
             &ca.non_fungible_tokens,
             &ca.defined_traits,
         ];
-        match define_maps.iter().position(|&hk| {
-            std::ptr::eq(
-                hk as *const dyn HasClarityName as *const (),
-                current_define as *const dyn HasClarityName as *const (),
-            )
-        }) {
-            Some(p) => {
-                define_maps.swap_remove(p);
-            }
-            None => {
-                return Err(GeneratorError::InternalError(
-                    "Invalid HasKey collection used in is_already_used_name".to_owned(),
-                ))
-            }
-        }
 
-        Ok(self.is_reserved_name(name)
+        self.is_reserved_name(name)
             || self.defined_functions.contains(name.as_str())
-            || define_maps.into_iter().any(|hk| hk.has_key(name)))
+            || define_maps.into_iter().any(|hk| hk.has_key(name))
     }
 }
 

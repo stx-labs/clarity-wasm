@@ -31,9 +31,7 @@ impl ComplexWord for DefinePrivateFunction {
         // Handling function name collision.
         // Detects duplicate names and generates
         // appropriate WebAssembly instructions to report the error.
-        if generator
-            .is_already_used_name(name, &generator.contract_analysis.private_function_types)?
-        {
+        if generator.is_already_used_name(name) {
             return error_mapping::generate_name_already_used_error(generator, builder, name);
         }
 
@@ -84,9 +82,7 @@ impl ComplexWord for DefineReadonlyFunction {
         // Handling function name collision.
         // Detects duplicate names and generates
         // appropriate WebAssembly instructions to report the error.
-        if generator
-            .is_already_used_name(name, &generator.contract_analysis.read_only_function_types)?
-        {
+        if generator.is_already_used_name(name) {
             return error_mapping::generate_name_already_used_error(generator, builder, name);
         }
 
@@ -127,9 +123,7 @@ impl ComplexWord for DefinePublicFunction {
         // Handling function name collision.
         // Detects duplicate names and generates
         // appropriate WebAssembly instructions to report the error.
-        if generator
-            .is_already_used_name(name, &generator.contract_analysis.public_function_types)?
-        {
+        if generator.is_already_used_name(name) {
             return error_mapping::generate_name_already_used_error(generator, builder, name);
         }
 
