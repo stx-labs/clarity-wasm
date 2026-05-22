@@ -452,6 +452,10 @@ pub(crate) fn generate_name_already_used_error(
 }
 
 impl WasmGenerator {
+    /// Returns `true` if `name` is already claimed by another contract-level definition.
+    ///
+    /// Mirrors the interpreter's `ContractContext::is_name_used` so the compiler can emit a
+    /// `NameAlreadyUsed` runtime error for collisions the analyzer's `check_name_used` misses.
     pub(crate) fn is_already_used_name(&self, name: &ClarityName) -> bool {
         trait HasClarityName {
             fn has_key(&self, name: &ClarityName) -> bool;
