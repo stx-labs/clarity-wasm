@@ -445,6 +445,9 @@ pub(crate) fn generate_name_already_used_error(
         .i32_const(ErrorMap::NameAlreadyUsed as i32)
         .call(generator.func_by_name("stdlib.runtime-error"));
 
+    // prevents type errors in the generated binary
+    builder.unreachable();
+
     Ok(())
 }
 
