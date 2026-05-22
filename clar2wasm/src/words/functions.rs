@@ -1,8 +1,9 @@
+use clarity::vm::{ClarityName, SymbolicExpression};
+
 use super::{ComplexWord, Word};
 use crate::wasm_generator::{ArgumentsExt, FunctionKind, GeneratorError, WasmGenerator};
 use crate::wasm_utils::ArgumentCountCheck;
 use crate::{check_args, error_mapping};
-use clarity::vm::{ClarityName, SymbolicExpression};
 
 #[derive(Debug)]
 pub struct DefinePrivateFunction;
