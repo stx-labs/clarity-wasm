@@ -2147,38 +2147,6 @@ impl WasmGenerator {
                     .find_map(|arg| (&arg.name == arg_name).then_some(&arg.signature))
             })
     }
-
-    pub(crate) fn is_already_used_name(&self, name: &ClarityName) -> bool {
-        let ca = &self.contract_analysis;
-        let define_maps: [&dyn HasClarityName; _] = [
-            &ca.variable_types,
-            &ca.persisted_variable_types,
-            &ca.map_types,
-            &ca.fungible_tokens,
-            &ca.non_fungible_tokens,
-            &ca.defined_traits,
-        ];
-
-        self.is_reserved_name(name)
-            || self.defined_functions.contains(name.as_str())
-            || define_maps.into_iter().any(|hk| hk.has_key(name))
-    }
-}
-
-pub(crate) trait HasClarityName {
-    fn has_key(&self, name: &ClarityName) -> bool;
-}
-
-impl<V> HasClarityName for BTreeMap<ClarityName, V> {
-    fn has_key(&self, name: &ClarityName) -> bool {
-        self.contains_key(name)
-    }
-}
-
-impl HasClarityName for std::collections::BTreeSet<ClarityName> {
-    fn has_key(&self, name: &ClarityName) -> bool {
-        self.contains(name)
-    }
 }
 
 /// Returns true if a composed type has an inner in-memory type.
