@@ -1,9 +1,10 @@
 use clarity::vm::{ClarityName, SymbolicExpression};
+use walrus::ir::{Block, InstrSeqType};
 
 use super::{ComplexWord, Word};
 use crate::check_args;
 use crate::cost::WordCharge;
-use crate::wasm_generator::{ArgumentsExt, GeneratorError, WasmGenerator};
+use crate::wasm_generator::{clar2wasm_ty, ArgumentsExt, GeneratorError, WasmGenerator};
 use crate::wasm_utils::ArgumentCountCheck;
 
 #[derive(Debug)]
@@ -179,27 +180,75 @@ impl ComplexWord for AtBlock {
         &self,
         generator: &mut WasmGenerator,
         builder: &mut walrus::InstrSeqBuilder,
-        _expr: &SymbolicExpression,
+        expr: &SymbolicExpression,
         args: &[SymbolicExpression],
     ) -> Result<(), GeneratorError> {
         check_args!(generator, builder, 2, args.len(), ArgumentCountCheck::Exact);
+
+        let ty = generator.get_expr_type(expr).cloned().ok_or_else(|| {
+            GeneratorError::TypeError("at-block expression should be typed".to_owned())
+        })?;
+        let wasm_ty = InstrSeqType::new(&mut generator.module.types, &[], &clar2wasm_ty(&ty));
 
         self.charge(generator, builder, 0)?;
 
         let block_hash = args.get_expr(0)?;
         let e = args.get_expr(1)?;
+        generator.set_expr_type(e, ty)?;
 
-        // Traverse the block_hash, leaving it on the top of the stack
-        generator.traverse_expr(builder, block_hash)?;
+        let e_block_id = {
+            let mut e_block = builder.dangling_instr_seq(wasm_ty);
+            let e_block_id = e_block.id();
 
-        // Call the host interface function, `enter_at_block`
-        builder.call(generator.func_by_name("stdlib.enter_at_block"));
+            let fail_block_ty = match generator
+                .get_current_function_return_type()
+                .map(clar2wasm_ty)
+            {
+                Some(wasm_ty) => InstrSeqType::new(&mut generator.module.types, &[], &wasm_ty),
+                None => None.into(),
+            };
+            let fail_block_id = {
+                let mut fail_block = e_block.dangling_instr_seq(fail_block_ty);
+                let fail_block_id = fail_block.id();
 
-        // Traverse the inner expression
-        generator.traverse_expr(builder, e)?;
+                let former_early_return = generator.early_return_block_id.replace(fail_block_id);
 
-        // Call the host interface function, `exit_at_block`
-        builder.call(generator.func_by_name("stdlib.exit_at_block"));
+                // Traverse the block_hash, leaving it on the top of the stack
+                generator.traverse_expr(&mut fail_block, block_hash)?;
+
+                // Call the host interface function, `enter_at_block`
+                fail_block.call(generator.func_by_name("stdlib.enter_at_block"));
+
+                // Traverse the inner expression
+                generator.traverse_expr(&mut fail_block, e)?;
+
+                // we can restore the original early return block now
+                generator.early_return_block_id = former_early_return;
+
+                // Everytihing went well:
+                // - Call the host interface function, `exit_at_block`
+                // - Branch to the outer block
+                fail_block.call(generator.func_by_name("stdlib.exit_at_block"));
+                fail_block.br(e_block_id);
+
+                fail_block_id
+            };
+
+            e_block.instr(Block { seq: fail_block_id });
+
+            // If we are here, a shortcut was triggered, we need to cleanup then jump to the original shortcut.
+            if let Some(early_return) = generator.early_return_block_id {
+                e_block.call(generator.func_by_name("stdlib.exit_at_block"));
+                e_block.br(early_return);
+            } else {
+                // if we are in top-level, this will never happen
+                e_block.unreachable();
+            }
+
+            e_block_id
+        };
+
+        builder.instr(Block { seq: e_block_id });
 
         Ok(())
     }
@@ -368,6 +417,50 @@ mod tests {
     use clarity::vm::{ClarityVersion, Value};
 
     use crate::tools::{evaluate, TestEnvironment};
+
+    #[cfg(any(
+        feature = "test-clarity-v1",
+        feature = "test-clarity-v2",
+        feature = "test-clarity-v3"
+    ))]
+    #[cfg(test)]
+    mod clarity_v1_v2_v3 {
+        use clarity_types::Value;
+
+        use crate::tools::crosscheck;
+
+        #[test]
+        fn at_block_needs_cleanup() {
+            let snippet = "
+                (define-private (foo)
+                    (at-block 0x0000000000000000000000000000000000000000000000000000000000000000
+                        (ok (try! (if false (ok true) (err u42))))
+                    )
+                )
+                (foo)
+            ";
+
+            crosscheck(snippet, Ok(Some(Value::err_uint(42))));
+        }
+
+        #[test]
+        fn at_block_needs_cleanup_top_level() {
+            let snippet = "
+                (at-block 0x0000000000000000000000000000000000000000000000000000000000000000
+                    (ok (try! (if false (ok true) (err u42))))
+                )
+            ";
+
+            crosscheck(
+                snippet,
+                Err(clarity_types::Error::ShortReturn(
+                    clarity_types::errors::ShortReturnType::ExpectedValue(Box::new(
+                        Value::err_uint(42),
+                    )),
+                )),
+            );
+        }
+    }
 
     //
     // Module with tests that should only be executed
