@@ -2212,7 +2212,7 @@ mod tests {
     use clarity::vm::types::{QualifiedContractIdentifier, StandardPrincipalData, TupleData};
     use clarity::vm::{ClarityVersion, Value};
     use clarity_types::{ClarityName, ContractName};
-use walrus::Module;
+    use walrus::Module;
 
     // Tests that don't relate to specific words
     use crate::{
@@ -2404,7 +2404,10 @@ use walrus::Module;
                     )
                     .unwrap(),
                 ),
-                (ClarityName::from_literal("mymap"), Value::some(Value::Int(99)).unwrap()),
+                (
+                    ClarityName::from_literal("mymap"),
+                    Value::some(Value::Int(99)).unwrap(),
+                ),
             ])
             .unwrap(),
         );

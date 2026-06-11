@@ -1,6 +1,9 @@
 use clarity::types::StacksEpochId;
 use clarity::vm::costs::CostErrors;
-use clarity::vm::errors::{CommonCheckErrorKind, EarlyReturnError, RuntimeCheckErrorKind, RuntimeError, VmExecutionError, WasmError};
+use clarity::vm::errors::{
+    CommonCheckErrorKind, EarlyReturnError, RuntimeCheckErrorKind, RuntimeError, VmExecutionError,
+    WasmError,
+};
 use clarity::vm::types::ResponseData;
 use clarity::vm::{ClarityVersion, Value};
 use clarity_types::types::{ASCIIData, CharType};

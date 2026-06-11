@@ -124,7 +124,10 @@ fn height_to_block(height: u32, genesis_time: Option<u64>) -> BlockInfo {
                 ClarityName::from_literal("hashbytes"),
                 Value::buff_from([0; 32].to_vec()).unwrap(),
             ),
-            (ClarityName::from_literal("version"), Value::buff_from_byte(0)),
+            (
+                ClarityName::from_literal("version"),
+                Value::buff_from_byte(0),
+            ),
         ])
         .unwrap()],
         0_u128,
@@ -355,7 +358,10 @@ impl BurnDatastore {
                         ClarityName::from_literal("hashbytes"),
                         Value::buff_from([0; 32].to_vec()).unwrap(),
                     ),
-                    (ClarityName::from_literal("version"), Value::buff_from_byte(0)),
+                    (
+                        ClarityName::from_literal("version"),
+                        Value::buff_from_byte(0),
+                    ),
                 ])
                 .unwrap()],
                 0_u128,
