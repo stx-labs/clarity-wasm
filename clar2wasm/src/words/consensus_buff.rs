@@ -188,7 +188,6 @@ mod tests {
     #[cfg(any(feature = "test-clarity-v2", feature = "test-clarity-v3"))]
     #[cfg(test)]
     mod clarity_v2_v3 {
-
         use std::collections::BTreeSet;
         use std::fmt::Write as _;
 

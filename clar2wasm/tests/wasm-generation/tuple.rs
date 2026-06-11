@@ -1,7 +1,6 @@
 use clar2wasm::tools::crosscheck;
 use clarity::vm::types::{SequenceSubtype, StringSubtype, TupleData, TypeSignature};
-use clarity::vm::Value;
-use clarity_types::ClarityName;
+use clarity::vm::{ClarityName, Value};
 use proptest::prelude::prop;
 use proptest::strategy::{Just, Strategy};
 use proptest::{prop_oneof, proptest};

@@ -5401,7 +5401,7 @@ fn link_save_constant_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
                 // Get constant name from the memory.
                 let const_name =
                     read_identifier_from_wasm(memory, &mut caller, name_offset, name_length)?;
-                let cname = ClarityName::try_from(const_name.as_str())?;
+                let cname = ClarityName::try_from(const_name.clone())?;
 
                 // Get constant value type.
                 let value_ty = caller

@@ -74,9 +74,7 @@ macro_rules! test_multi_contract_init {
                             false,
                         )
                         .map_err(|e| {
-                            StaticCheckErrorKind::Unreachable(format!(
-                                "Compilation failure {e:?}"
-                            ))
+                            StaticCheckErrorKind::Unreachable(format!("Compilation failure {e:?}"))
                         })
                     })
                     .map_err(|e| {
