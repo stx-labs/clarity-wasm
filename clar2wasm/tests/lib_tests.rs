@@ -8,7 +8,6 @@ use clarity::consts::CHAIN_ID_TESTNET;
 use clarity::types::StacksEpochId;
 use clarity::vm::callables::DefineType;
 use clarity::vm::contexts::{CallStack, EventBatch, GlobalContext};
-use clarity::vm::contracts::Contract;
 use clarity::vm::costs::LimitedCostTracker;
 use clarity::vm::database::{ClarityDatabase, MemoryBackingStore};
 use clarity::vm::errors::{RuntimeError, StaticCheckErrorKind, VmExecutionError};
@@ -74,9 +73,16 @@ macro_rules! test_multi_contract_init {
                             analysis_db,
                             false,
                         )
-                        .map_err(|_| {
-                            StaticCheckErrorKind::Expects("Compilation failure".to_string())
+                        .map_err(|e| {
+                            StaticCheckErrorKind::Unreachable(format!(
+                                "Compilation failure {e:?}"
+                            ))
                         })
+                    })
+                    .map_err(|e| {
+                        clarity::vm::errors::VmExecutionError::Wasm(
+                            clarity::vm::errors::WasmError::WasmGeneratorError(format!("{e:?}")),
+                        )
                     })
                     .expect("Failed to compile contract.");
 
@@ -116,12 +122,7 @@ macro_rules! test_multi_contract_init {
                 let data_size = contract_context.data_size;
                 global_context
                     .database
-                    .insert_contract(
-                        &contract_id,
-                        Contract {
-                            contract_context: contract_context.clone().into(),
-                        },
-                    )
+                    .insert_contract(&contract_id, contract_context.clone().into())
                     .expect("Failed to insert contract.");
                 global_context
                     .database

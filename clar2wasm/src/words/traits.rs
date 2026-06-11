@@ -147,8 +147,7 @@ mod tests {
     use clarity::vm::types::{
         CallableData, QualifiedContractIdentifier, StandardPrincipalData, TraitIdentifier,
     };
-    use clarity::vm::Value;
-    use clarity::vm::{ClarityName, ContractName};
+    use clarity::vm::{ClarityName, ContractName, Value};
 
     use crate::tools::{
         crosscheck, crosscheck_expect_failure, crosscheck_multi_contract, TestEnvironment,

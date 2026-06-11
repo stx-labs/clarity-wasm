@@ -119,7 +119,7 @@ mod tests {
         ASCIIData, CharType, ListData, ListTypeData, PrincipalData, SequenceData, TupleData,
     };
     use clarity::vm::Value;
-use clarity_types::ClarityName;
+    use clarity_types::ClarityName;
 
     use crate::tools::{crosscheck, crosscheck_expect_failure, evaluate, TestEnvironment};
 

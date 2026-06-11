@@ -12,8 +12,7 @@ mod clarity_v2_v3 {
         ASCIIData, BuffData, CharType, OptionalData, PrincipalData, QualifiedContractIdentifier,
         SequenceData, StandardPrincipalData, TupleData,
     };
-    use clarity::vm::Value;
-    use clarity::vm::{ClarityName, ContractName};
+    use clarity::vm::{ClarityName, ContractName, Value};
     use clarity::{C32_ADDRESS_VERSION_MAINNET_SINGLESIG, C32_ADDRESS_VERSION_TESTNET_SINGLESIG};
     use proptest::prelude::{any, Just, Strategy};
     use proptest::string::string_regex;

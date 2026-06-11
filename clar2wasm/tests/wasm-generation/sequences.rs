@@ -1,10 +1,10 @@
 use clar2wasm::tools::{crosscheck, crosscheck_compare_only, TestConfig};
+use clarity::vm::errors::{StaticCheckError, StaticCheckErrorKind};
 use clarity::vm::types::{
     ListData, ListTypeData, SequenceData, SequenceSubtype, SequencedValue, TypeSignature,
     MAX_VALUE_SIZE,
 };
 use clarity::vm::Value;
-use clarity_types::errors::{StaticCheckError, StaticCheckErrorKind};
 use proptest::prelude::*;
 
 use crate::{bool, buffer, int, list, prop_signature, prop_value, type_string, PropValue};

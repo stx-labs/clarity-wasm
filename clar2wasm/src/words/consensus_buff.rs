@@ -193,9 +193,8 @@ mod tests {
         use std::fmt::Write as _;
 
         use clarity::vm::types::{BuffData, PrincipalData, SequenceData, TupleData};
-        use clarity::vm::Value;
+        use clarity::vm::{ClarityName, Value};
         use hex::FromHex as _;
-        use clarity::vm::ClarityName;
 
         use crate::tools::{crosscheck, evaluate};
 
@@ -1098,7 +1097,11 @@ mod tests {
                 r#"(from-consensus-buff? {n: int} 0x0c00000001016e000000000000000000000000000000002a)"#,
                 Ok(Some(
                     Value::some(Value::Tuple(
-                        TupleData::from_data(vec![(ClarityName::from_literal("n"), Value::Int(42))]).unwrap(),
+                        TupleData::from_data(vec![(
+                            ClarityName::from_literal("n"),
+                            Value::Int(42),
+                        )])
+                        .unwrap(),
                     ))
                     .unwrap(),
                 )),
@@ -1172,7 +1175,11 @@ mod tests {
                 r#"(from-consensus-buff? {n: int} 0x0c000000020565787472610100000000000000000000000000000020016e000000000000000000000000000000002a)"#,
                 Ok(Some(
                     Value::some(Value::Tuple(
-                        TupleData::from_data(vec![(ClarityName::from_literal("n"), Value::Int(42))]).unwrap(),
+                        TupleData::from_data(vec![(
+                            ClarityName::from_literal("n"),
+                            Value::Int(42),
+                        )])
+                        .unwrap(),
                     ))
                     .unwrap(),
                 )),
@@ -1186,7 +1193,11 @@ mod tests {
                 r#"(from-consensus-buff? {n: int} 0x0c000000030565787472610100000000000000000000000000000020016e000000000000000000000000000000002a0565787472610100000000000000000000000000000021)"#,
                 Ok(Some(
                     Value::some(Value::Tuple(
-                        TupleData::from_data(vec![(ClarityName::from_literal("n"), Value::Int(42))]).unwrap(),
+                        TupleData::from_data(vec![(
+                            ClarityName::from_literal("n"),
+                            Value::Int(42),
+                        )])
+                        .unwrap(),
                     ))
                     .unwrap(),
                 )),

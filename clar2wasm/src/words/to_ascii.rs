@@ -1,6 +1,6 @@
-use clarity_types::ClarityName;
 use clarity_types::representations::MAX_STRING_LEN;
 use clarity_types::types::{SequenceSubtype, StringSubtype, TypeSignature};
+use clarity_types::ClarityName;
 use walrus::ir::{BinaryOp, ExtendedLoad, LoadKind, MemArg, StoreKind, UnaryOp};
 use walrus::LocalId;
 

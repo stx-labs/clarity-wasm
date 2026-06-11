@@ -407,8 +407,11 @@ fn standard_principal() -> impl Strategy<Value = Value> {
 }
 
 fn contract_name() -> impl Strategy<Value = ContractName> {
-    ("^{^[a-zA-Z]([a-zA-Z0-9]|[-_!?+<>=/*])*$|^[-+=/*]$|^[<>]=?$}$|^__transient$")
-        .prop_map(|name| ContractName::try_from(name).unwrap())
+    // We forbid the contract name to start with a u due to stacks-core issues#7100
+    (r#"([a-tw-zA-Z](([a-zA-Z0-9]|[-_])){0,39})"#).prop_map(|name| {
+        ContractName::try_from(name.clone())
+            .unwrap_or_else(|e| panic!("{name} is not a valid contract name, {e}"))
+    })
 }
 
 fn qualified_principal() -> impl Strategy<Value = Value> {

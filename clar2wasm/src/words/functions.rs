@@ -141,9 +141,9 @@ impl ComplexWord for DefinePublicFunction {
 #[cfg(test)]
 mod tests {
     use clarity::types::StacksEpochId;
+    use clarity::vm::errors::RuntimeCheckErrorKind::NameAlreadyUsed;
     use clarity::vm::errors::{RuntimeCheckErrorKind, VmExecutionError};
-    use clarity::vm::ContractName;
-    use clarity::vm::{ClarityVersion, Value};
+    use clarity::vm::{ClarityVersion, ContractName, Value};
 
     use crate::tools::{
         crosscheck, crosscheck_expect_failure, crosscheck_multi_contract, evaluate, TestEnvironment,
@@ -490,8 +490,8 @@ mod tests {
                 (define-read-only (dup) (ok u1))
                 (define-constant dup u2)
             "#,
-            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
-                "dup".to_string(),
+            Err(VmExecutionError::RuntimeCheck(NameAlreadyUsed(
+                "dup".into(),
             ))),
         )
     }
@@ -503,8 +503,8 @@ mod tests {
                 (define-read-only (dup) (ok u1))
                 (define-data-var dup uint u2)
             "#,
-            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
-                "dup".to_string(),
+            Err(VmExecutionError::RuntimeCheck(NameAlreadyUsed(
+                "dup".into(),
             ))),
         )
     }
@@ -516,8 +516,8 @@ mod tests {
                 (define-read-only (dup) (ok u1))
                 (define-map dup uint uint)
             "#,
-            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
-                "dup".to_string(),
+            Err(VmExecutionError::RuntimeCheck(NameAlreadyUsed(
+                "dup".into(),
             ))),
         )
     }
@@ -529,8 +529,8 @@ mod tests {
                 (define-read-only (dup) (ok u1))
                 (define-fungible-token dup)
             "#,
-            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
-                "dup".to_string(),
+            Err(VmExecutionError::RuntimeCheck(NameAlreadyUsed(
+                "dup".into(),
             ))),
         )
     }
@@ -542,8 +542,8 @@ mod tests {
                 (define-read-only (dup) (ok u1))
                 (define-non-fungible-token dup uint)
             "#,
-            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
-                "dup".to_string(),
+            Err(VmExecutionError::RuntimeCheck(NameAlreadyUsed(
+                "dup".into(),
             ))),
         )
     }
@@ -555,8 +555,8 @@ mod tests {
                 (define-read-only (dup) (ok u1))
                 (define-trait dup ((f () (response uint uint))))
             "#,
-            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
-                "dup".to_string(),
+            Err(VmExecutionError::RuntimeCheck(NameAlreadyUsed(
+                "dup".into(),
             ))),
         )
     }
@@ -568,8 +568,8 @@ mod tests {
                 (define-read-only (dup) (ok u1))
                 (define-private (dup) u2)
             "#,
-            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
-                "dup".to_string(),
+            Err(VmExecutionError::RuntimeCheck(NameAlreadyUsed(
+                "dup".into(),
             ))),
         )
     }
@@ -581,8 +581,8 @@ mod tests {
                 (define-read-only (dup) (ok u1))
                 (define-public (dup) (ok u2))
             "#,
-            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
-                "dup".to_string(),
+            Err(VmExecutionError::RuntimeCheck(NameAlreadyUsed(
+                "dup".into(),
             ))),
         )
     }

@@ -95,8 +95,7 @@ mod tests {
     use clarity::vm::types::{
         ASCIIData, CharType, ListTypeData, SequenceData, TupleData, UTF8Data,
     };
-    use clarity::vm::Value;
-    use clarity::vm::{ClarityName, ContractName};
+    use clarity::vm::{ClarityName, ContractName, Value};
 
     use crate::tools::{crosscheck, evaluate};
 

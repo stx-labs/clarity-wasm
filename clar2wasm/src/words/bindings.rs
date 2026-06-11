@@ -87,6 +87,7 @@ impl ComplexWord for Let {
 
 #[cfg(test)]
 mod tests {
+    use clarity::vm::errors::RuntimeCheckErrorKind::NameAlreadyUsed;
     use clarity::vm::errors::{EarlyReturnError, VmExecutionError};
     use clarity::vm::Value;
 
@@ -150,8 +151,8 @@ mod tests {
                 (define-read-only (dup) (ok u1))
                 (caller)
             ",
-            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
-                "dup".to_owned(),
+            Err(VmExecutionError::RuntimeCheck(NameAlreadyUsed(
+                "dup".into(),
             ))),
         );
     }
@@ -164,8 +165,8 @@ mod tests {
                 (define-public (caller) (let ((dup u0)) (ok dup)))
                 (caller)
             ",
-            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
-                "dup".to_owned(),
+            Err(VmExecutionError::RuntimeCheck(NameAlreadyUsed(
+                "dup".into(),
             ))),
         );
     }

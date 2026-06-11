@@ -2727,7 +2727,7 @@ mod tests {
     #[cfg(not(feature = "test-clarity-v1"))]
     #[cfg(test)]
     mod clarity_v2_v3 {
-        use clarity::vm::errors::{RuntimeError, VmExecutionError};
+        use clarity::vm::errors::VmExecutionError;
         use clarity_types::ClarityTypeError;
 
         use super::*;

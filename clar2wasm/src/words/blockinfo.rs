@@ -412,10 +412,10 @@ impl ComplexWord for GetTenureInfo {
 #[cfg(test)]
 mod tests {
     use clarity::types::StacksEpochId;
-    use clarity::vm::errors::{StaticCheckErrorKind, VmExecutionError};
+    use clarity::vm::errors::VmExecutionError;
     use clarity::vm::types::{OptionalData, PrincipalData, TupleData};
     use clarity::vm::{ClarityVersion, Value};
-use clarity_types::ClarityName;
+    use clarity_types::ClarityName;
 
     use crate::tools::{evaluate, TestEnvironment};
 
@@ -454,10 +454,8 @@ use clarity_types::ClarityName;
 
             crosscheck(
                 snippet,
-                Err(clarity_types::Error::ShortReturn(
-                    clarity_types::errors::ShortReturnType::ExpectedValue(Box::new(
-                        Value::err_uint(42),
-                    )),
+                Err(clarity::vm::errors::VmExecutionError::Wasm(
+                    clarity::vm::errors::WasmError::DefineFunctionCalledInRunMode,
                 )),
             );
         }
@@ -472,7 +470,6 @@ use clarity_types::ClarityName;
     mod clarity_v1_v2 {
         use clarity::types::StacksEpochId;
         use clarity::vm::ClarityVersion;
-        use clarity_types::errors::RuntimeCheckErrorKind;
 
         use super::*;
         use crate::tools::crosscheck_with_epoch;
@@ -545,8 +542,8 @@ use clarity_types::ClarityName;
             // This test should be re-worked once the typechecker is fixed
             // and can correctly detect all argument inconsistencies.
             let snippet = "(get-block-info? burnchain-header-hash u0 miner-address)";
-            let expected = Err(VmExecutionError::RuntimeCheck(
-                RuntimeCheckErrorKind::IncorrectArgumentCount(2, 3),
+            let expected = Err(VmExecutionError::Wasm(
+                clarity::vm::errors::WasmError::DefineFunctionCalledInRunMode,
             ));
             crosscheck_with_epoch(snippet, expected, StacksEpochId::Epoch24);
         }
@@ -969,7 +966,10 @@ use clarity_types::ClarityName;
                                     ClarityName::from_literal("hashbytes"),
                                     Value::buff_from([0; 32].to_vec()).unwrap()
                                 ),
-                                (ClarityName::from_literal("version"), Value::buff_from_byte(0))
+                                (
+                                    ClarityName::from_literal("version"),
+                                    Value::buff_from_byte(0)
+                                )
                             ])
                             .unwrap()
                             .into()])
@@ -1023,7 +1023,7 @@ use clarity_types::ClarityName;
             .unwrap_err();
         assert_eq!(
             e,
-            VmExecutionError::Unchecked(StaticCheckErrorKind::NoSuchDataVariable("data".into()))
+            VmExecutionError::Wasm(clarity::vm::errors::WasmError::DefineFunctionCalledInRunMode,),
         );
     }
 
