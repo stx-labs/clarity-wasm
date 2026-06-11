@@ -1,4 +1,5 @@
 use clarity::vm::types::{TypeSignature, MAX_VALUE_SIZE};
+use clarity_types::ClarityName;
 use walrus::ir::{BinaryOp, InstrSeqType};
 
 use super::{ComplexWord, Word};
@@ -15,7 +16,7 @@ pub struct ToConsensusBuff;
 
 impl Word for ToConsensusBuff {
     fn name(&self) -> clarity::vm::ClarityName {
-        "to-consensus-buff?".into()
+        ClarityName::from_literal("to-consensus-buff?")
     }
 }
 
@@ -99,7 +100,7 @@ pub struct FromConsensusBuff;
 
 impl Word for FromConsensusBuff {
     fn name(&self) -> clarity::vm::ClarityName {
-        "from-consensus-buff?".into()
+        ClarityName::from_literal("from-consensus-buff?")
     }
 }
 
@@ -194,6 +195,7 @@ mod tests {
         use clarity::vm::types::{BuffData, PrincipalData, SequenceData, TupleData};
         use clarity::vm::Value;
         use hex::FromHex as _;
+        use clarity::vm::ClarityName;
 
         use crate::tools::{crosscheck, evaluate};
 
@@ -1096,7 +1098,7 @@ mod tests {
                 r#"(from-consensus-buff? {n: int} 0x0c00000001016e000000000000000000000000000000002a)"#,
                 Ok(Some(
                     Value::some(Value::Tuple(
-                        TupleData::from_data(vec![("n".into(), Value::Int(42))]).unwrap(),
+                        TupleData::from_data(vec![(ClarityName::from_literal("n"), Value::Int(42))]).unwrap(),
                     ))
                     .unwrap(),
                 )),
@@ -1111,15 +1113,15 @@ mod tests {
                     Value::some(Value::Tuple(
                         // {my-number: -123, a-string: "yup, it is", an-optional: none}
                         TupleData::from_data(vec![
-                            ("my-number".into(), Value::Int(-123)),
+                            (ClarityName::from_literal("my-number"), Value::Int(-123)),
                             (
-                                "a-string".into(),
+                                ClarityName::from_literal("a-string"),
                                 Value::string_ascii_from_bytes(
                                     "yup, it is".to_string().into_bytes(),
                                 )
                                 .unwrap(),
                             ),
-                            ("an-optional".into(), Value::none()),
+                            (ClarityName::from_literal("an-optional"), Value::none()),
                         ])
                         .unwrap(),
                     ))
@@ -1137,15 +1139,15 @@ mod tests {
                     Value::some(Value::Tuple(
                         // {my-number: -123, a-string: "yup, it is", an-optional: none}
                         TupleData::from_data(vec![
-                            ("my-number".into(), Value::Int(-123)),
+                            (ClarityName::from_literal("my-number"), Value::Int(-123)),
                             (
-                                "a-string".into(),
+                                ClarityName::from_literal("a-string"),
                                 Value::string_ascii_from_bytes(
                                     "yup, it is".to_string().into_bytes(),
                                 )
                                 .unwrap(),
                             ),
-                            ("an-optional".into(), Value::none()),
+                            (ClarityName::from_literal("an-optional"), Value::none()),
                         ])
                         .unwrap(),
                     ))
@@ -1170,7 +1172,7 @@ mod tests {
                 r#"(from-consensus-buff? {n: int} 0x0c000000020565787472610100000000000000000000000000000020016e000000000000000000000000000000002a)"#,
                 Ok(Some(
                     Value::some(Value::Tuple(
-                        TupleData::from_data(vec![("n".into(), Value::Int(42))]).unwrap(),
+                        TupleData::from_data(vec![(ClarityName::from_literal("n"), Value::Int(42))]).unwrap(),
                     ))
                     .unwrap(),
                 )),
@@ -1184,7 +1186,7 @@ mod tests {
                 r#"(from-consensus-buff? {n: int} 0x0c000000030565787472610100000000000000000000000000000020016e000000000000000000000000000000002a0565787472610100000000000000000000000000000021)"#,
                 Ok(Some(
                     Value::some(Value::Tuple(
-                        TupleData::from_data(vec![("n".into(), Value::Int(42))]).unwrap(),
+                        TupleData::from_data(vec![(ClarityName::from_literal("n"), Value::Int(42))]).unwrap(),
                     ))
                     .unwrap(),
                 )),

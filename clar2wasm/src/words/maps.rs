@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use clarity::types::StacksEpochId;
 use clarity::vm::types::{TypeSignature, TypeSignatureExt};
 use clarity::vm::{ClarityName, SymbolicExpression};
-use clarity_types::errors::CheckErrors;
+use clarity_types::ClarityTypeError;
 use walrus::ir::{BinaryOp, IfElse, InstrSeqType};
 use walrus::ValType;
 
@@ -21,7 +21,7 @@ pub struct MapDefinition;
 
 impl Word for MapDefinition {
     fn name(&self) -> ClarityName {
-        "define-map".into()
+        ClarityName::from_literal("define-map")
     }
 }
 
@@ -76,7 +76,7 @@ pub struct MapGet;
 
 impl Word for MapGet {
     fn name(&self) -> ClarityName {
-        "map-get?".into()
+        ClarityName::from_literal("map-get?")
     }
 }
 
@@ -234,7 +234,7 @@ pub struct MapSet;
 
 impl Word for MapSet {
     fn name(&self) -> ClarityName {
-        "map-set".into()
+        ClarityName::from_literal("map-set")
     }
 }
 
@@ -380,7 +380,7 @@ pub struct MapInsert;
 
 impl Word for MapInsert {
     fn name(&self) -> ClarityName {
-        "map-insert".into()
+        ClarityName::from_literal("map-insert")
     }
 }
 
@@ -549,7 +549,7 @@ pub struct MapDelete;
 
 impl Word for MapDelete {
     fn name(&self) -> ClarityName {
-        "map-delete".into()
+        ClarityName::from_literal("map-delete")
     }
 }
 
@@ -692,7 +692,7 @@ impl ComplexWord for MapDelete {
 /// 1) for cost computation in epoch < 2.05
 /// 2) for cost computation in case of an interpreter error in epoch >= 2.05
 fn charge_default_cost_value_and_key_size(
-    cost: &Result<u32, CheckErrors>,
+    cost: &Result<u32, ClarityTypeError>,
     generator: &mut WasmGenerator,
     builder: &mut walrus::InstrSeqBuilder,
     word: &dyn ComplexWord,
@@ -723,7 +723,7 @@ fn get_original_types(
 mod tests {
     // use clarity::vm::errors::{CheckErrors, Error};
 
-    use clarity::vm::errors::{CheckErrors, Error};
+    use clarity::vm::errors::{RuntimeCheckErrorKind, VmExecutionError};
     use clarity::vm::Value;
 
     use crate::tools::{crosscheck, crosscheck_expect_failure, evaluate};
@@ -879,7 +879,9 @@ mod tests {
         // and can correctly detect all argument inconsistencies.
         let snippet = "(define-map some-map int {x: int})
         (map-set some-map 21 {x: 21} {x: 21})";
-        let expected = Err(Error::Unchecked(CheckErrors::IncorrectArgumentCount(3, 4)));
+        let expected = Err(VmExecutionError::RuntimeCheck(
+            RuntimeCheckErrorKind::IncorrectArgumentCount(3, 4),
+        ));
         crosscheck(snippet, expected);
     }
 
@@ -894,7 +896,9 @@ mod tests {
         let snippet = "
         (define-map some-map int {x: int})
         (map-insert some-map 21 {x: 21} {x: 21})";
-        let expected = Err(Error::Unchecked(CheckErrors::IncorrectArgumentCount(3, 4)));
+        let expected = Err(VmExecutionError::RuntimeCheck(
+            RuntimeCheckErrorKind::IncorrectArgumentCount(3, 4),
+        ));
         crosscheck(snippet, expected);
     }
 
@@ -910,7 +914,9 @@ mod tests {
         (define-map some-map int {x: int})
         (map-insert some-map 21 {x: 21})
         (map-delete some-map 21 21)";
-        let expected = Err(Error::Unchecked(CheckErrors::IncorrectArgumentCount(2, 3)));
+        let expected = Err(VmExecutionError::RuntimeCheck(
+            RuntimeCheckErrorKind::IncorrectArgumentCount(2, 3),
+        ));
         crosscheck(snippet, expected);
     }
 }

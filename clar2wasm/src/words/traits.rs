@@ -10,7 +10,7 @@ pub struct DefineTrait;
 
 impl Word for DefineTrait {
     fn name(&self) -> ClarityName {
-        "define-trait".into()
+        ClarityName::from_literal("define-trait")
     }
 }
 
@@ -58,7 +58,7 @@ pub struct UseTrait;
 
 impl Word for UseTrait {
     fn name(&self) -> ClarityName {
-        "use-trait".into()
+        ClarityName::from_literal("use-trait")
     }
 }
 
@@ -96,7 +96,7 @@ pub struct ImplTrait;
 
 impl Word for ImplTrait {
     fn name(&self) -> ClarityName {
-        "impl-trait".into()
+        ClarityName::from_literal("impl-trait")
     }
 }
 
@@ -148,6 +148,7 @@ mod tests {
         CallableData, QualifiedContractIdentifier, StandardPrincipalData, TraitIdentifier,
     };
     use clarity::vm::Value;
+    use clarity::vm::{ClarityName, ContractName};
 
     use crate::tools::{
         crosscheck, crosscheck_expect_failure, crosscheck_multi_contract, TestEnvironment,
@@ -281,15 +282,15 @@ mod tests {
             .implemented_traits
             .contains(&TraitIdentifier::new(
                 StandardPrincipalData::transient(),
-                "my-trait".into(),
-                "my-trait".into(),
+                ContractName::from_literal("my-trait"),
+                ClarityName::from_literal("my-trait"),
             )));
     }
 
     #[test]
     fn trait_list() {
         // NOTE: this also tests `print` of `Callable`
-        let first_contract_name = "my-trait-contract".into();
+        let first_contract_name = ContractName::from_literal("my-trait-contract");
         let first_snippet = r#"
 (define-trait my-trait
   ((add (int int) (response int int))))
@@ -298,7 +299,7 @@ mod tests {
 )
             "#;
 
-        let second_contract_name = "use-trait".into();
+        let second_contract_name = ContractName::from_literal("use-trait");
         let second_snippet = r#"
 (use-trait the-trait .my-trait-contract.my-trait)
 (define-private (foo (adder <the-trait>))
@@ -309,7 +310,7 @@ mod tests {
 
         let contract_id = QualifiedContractIdentifier {
             issuer: StandardPrincipalData::transient(),
-            name: "my-trait-contract".into(),
+            name: ContractName::from_literal("my-trait-contract"),
         };
         crosscheck_multi_contract(
             &[
@@ -323,7 +324,7 @@ mod tests {
                             Value::CallableContract(CallableData {
                                 contract_identifier: contract_id.clone(),
                                 trait_identifier: Some(TraitIdentifier {
-                                    name: "my-trait".into(),
+                                    name: ClarityName::from_literal("my-trait"),
                                     contract_identifier: contract_id.clone(),
                                 }),
                             })

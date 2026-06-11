@@ -1,5 +1,6 @@
 use clar2wasm::tools::{crosscheck, crosscheck_multi_contract};
 use clarity::vm::Value;
+use clarity_types::ContractName;
 use proptest::prelude::{Just, Strategy};
 use proptest::proptest;
 
@@ -28,13 +29,13 @@ proptest! {
     ) {
         let ty_str = type_string(&ty);
 
-        let callee = "callee".into();
+        let callee = ContractName::from_literal("callee");
         let callee_snippet = format!(
             r#"(define-read-only (print-param (par {ty_str}))
                 (print par))"#
         );
 
-        let caller = "caller".into();
+        let caller = ContractName::from_literal("caller");
         let caller_snippet = format!(r#"(contract-call? .{callee} print-param {val})"#);
 
         let expected = Some(Value::from(val.clone()));

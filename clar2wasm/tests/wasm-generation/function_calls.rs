@@ -1,6 +1,6 @@
 use clar2wasm::tools::crosscheck;
 use clarity::vm::types::TupleData;
-use clarity::vm::Value;
+use clarity::vm::{ClarityName, Value};
 use proptest::prelude::*;
 
 use crate::PropValue;
@@ -24,8 +24,8 @@ proptest! {
 
         let expected = Value::from(
             TupleData::from_data(vec![
-                ("foo".into(), result1.into()),
-                ("bar".into(), result2.into()),
+                (ClarityName::from_literal("foo"), result1.into()),
+                (ClarityName::from_literal("bar"), result2.into()),
             ])
             .unwrap(),
         );

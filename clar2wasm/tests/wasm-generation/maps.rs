@@ -103,11 +103,11 @@ proptest! {
         let expected = Value::from(
             TupleData::from_data(vec![
                 (
-                    ClarityName::from("a"),
+                    ClarityName::from_literal("a"),
                     map_insert_result
                 ),
                 (
-                    ClarityName::from("b"),
+                    ClarityName::from_literal("b"),
                     map_get_result
                 ),
             ])
@@ -182,11 +182,11 @@ proptest! {
         let expected = Value::from(
             TupleData::from_data(vec![
                 (
-                    ClarityName::from("a"),
+                    ClarityName::from_literal("a"),
                     expected_set,
                 ),
                 (
-                    ClarityName::from("b"),
+                    ClarityName::from_literal("b"),
                     expected_get,
                 ),
             ])
@@ -237,15 +237,15 @@ proptest! {
         let expected = Value::from(
             TupleData::from_data(vec![
                 (
-                    ClarityName::from("a"),
+                    ClarityName::from_literal("a"),
                     Value::cons_list_unsanitized(expected_set).unwrap(),
                 ),
                 (
-                    ClarityName::from("b"),
+                    ClarityName::from_literal("b"),
                     Value::cons_list_unsanitized(expected_delete).unwrap(),
                 ),
                 (
-                    ClarityName::from("c"),
+                    ClarityName::from_literal("c"),
                     Value::cons_list_unsanitized(expected_get).unwrap(),
                 ),
             ])

@@ -4,7 +4,7 @@ use clarity::vm::types::{
     BuffData, PrincipalData, QualifiedContractIdentifier, ResponseData, SequenceData,
     StandardPrincipalData, TupleData,
 };
-use clarity::vm::Value;
+use clarity::vm::{ClarityName, ContractName, Value};
 use hex::FromHex;
 use wasmtime::Val;
 
@@ -4335,7 +4335,7 @@ fn skip_functions() {
     check(Value::Principal(PrincipalData::Contract(
         QualifiedContractIdentifier {
             issuer: StandardPrincipalData::new(0, [0; 20]).unwrap(),
-            name: "abcd".into(),
+            name: ContractName::from_literal("abcd"),
         },
     )));
 
@@ -4357,8 +4357,8 @@ fn skip_functions() {
 
     check(Value::from(
         TupleData::from_data(vec![
-            ("abcd".into(), Value::Int(42)),
-            ("defg".into(), Value::Bool(true)),
+            (ClarityName::from_literal("abcd"), Value::Int(42)),
+            (ClarityName::from_literal("defg"), Value::Bool(true)),
         ])
         .unwrap(),
     ));

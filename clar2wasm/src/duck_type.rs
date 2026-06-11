@@ -369,7 +369,8 @@ mod tests {
     use clarity::vm::types::{
         ListTypeData, ResponseData, SequenceSubtype, TupleData, TupleTypeSignature, TypeSignature,
     };
-    use clarity::vm::Value;
+    use clarity::vm::{ClarityName, Value};
+    use clarity_types::ContractName;
 
     use crate::tools::crosscheck_multi_contract;
     use crate::wasm_generator::WasmGenerator;
@@ -471,11 +472,14 @@ mod tests {
     fn duck_type_tuple() {
         let value = Value::from(
             TupleData::from_data(vec![
-                ("a".into(), Value::Int(42)),
-                ("b".into(), Value::none()),
-                ("c".into(), Value::buff_from(vec![1, 2, 3, 4, 5]).unwrap()),
+                (ClarityName::from_literal("a"), Value::Int(42)),
+                (ClarityName::from_literal("b"), Value::none()),
                 (
-                    "d".into(),
+                    ClarityName::from_literal("c"),
+                    Value::buff_from(vec![1, 2, 3, 4, 5]).unwrap(),
+                ),
+                (
+                    ClarityName::from_literal("d"),
                     Value::Response(ResponseData {
                         committed: true,
                         data: Box::new(Value::none()),
@@ -486,19 +490,19 @@ mod tests {
         );
         let og_ty = TypeSignature::TupleType(
             TupleTypeSignature::try_from(vec![
-                ("a".into(), TypeSignature::IntType),
+                (ClarityName::from_literal("a"), TypeSignature::IntType),
                 (
-                    "b".into(),
+                    ClarityName::from_literal("b"),
                     TypeSignature::OptionalType(Box::new(TypeSignature::NoType)),
                 ),
                 (
-                    "c".into(),
+                    ClarityName::from_literal("c"),
                     TypeSignature::SequenceType(clarity::vm::types::SequenceSubtype::BufferType(
                         500u32.try_into().unwrap(),
                     )),
                 ),
                 (
-                    "d".into(),
+                    ClarityName::from_literal("d"),
                     TypeSignature::ResponseType(Box::new((
                         TypeSignature::OptionalType(Box::new(TypeSignature::NoType)),
                         TypeSignature::NoType,
@@ -509,19 +513,19 @@ mod tests {
         );
         let target_ty = TypeSignature::TupleType(
             TupleTypeSignature::try_from(vec![
-                ("a".into(), TypeSignature::IntType),
+                (ClarityName::from_literal("a"), TypeSignature::IntType),
                 (
-                    "b".into(),
+                    ClarityName::from_literal("b"),
                     TypeSignature::OptionalType(Box::new(TypeSignature::UIntType)),
                 ),
                 (
-                    "c".into(),
+                    ClarityName::from_literal("c"),
                     TypeSignature::SequenceType(clarity::vm::types::SequenceSubtype::BufferType(
                         500u32.try_into().unwrap(),
                     )),
                 ),
                 (
-                    "d".into(),
+                    ClarityName::from_literal("d"),
                     TypeSignature::ResponseType(Box::new((
                         TypeSignature::OptionalType(Box::new(TypeSignature::IntType)),
                         TypeSignature::BoolType,
@@ -640,7 +644,10 @@ mod tests {
         "#;
 
         crosscheck_multi_contract(
-            &[("foo".into(), foo), ("bar".into(), bar)],
+            &[
+                (ContractName::from_literal("foo"), foo),
+                (ContractName::from_literal("bar"), bar),
+            ],
             Ok(Some(Value::okay_true())),
         );
     }

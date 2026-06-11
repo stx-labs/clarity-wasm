@@ -1,6 +1,7 @@
 use clar2wasm::tools::crosscheck;
 use clarity::vm::types::{SequenceSubtype, StringSubtype, TupleData, TypeSignature};
 use clarity::vm::Value;
+use clarity_types::ClarityName;
 use proptest::prelude::prop;
 use proptest::strategy::{Just, Strategy};
 use proptest::{prop_oneof, proptest};
@@ -55,7 +56,7 @@ proptest! {
         let merged = clarity::vm::functions::tuples::tuple_merge(
             t.clone(),
             Value::Tuple(
-                TupleData::from_data(vec![("new".into(), v.clone().into())]).unwrap()
+                TupleData::from_data(vec![(ClarityName::from_literal("new"), v.clone().into())]).unwrap()
             ))
             .unwrap();
 

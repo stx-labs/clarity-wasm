@@ -59,7 +59,7 @@ pub struct CmpLess;
 
 impl Word for CmpLess {
     fn name(&self) -> ClarityName {
-        "<".into()
+        ClarityName::from_literal("<")
     }
 }
 
@@ -86,7 +86,7 @@ pub struct CmpLeq;
 
 impl Word for CmpLeq {
     fn name(&self) -> ClarityName {
-        "<=".into()
+        ClarityName::from_literal("<=")
     }
 }
 
@@ -113,7 +113,7 @@ pub struct CmpGreater;
 
 impl Word for CmpGreater {
     fn name(&self) -> ClarityName {
-        ">".into()
+        ClarityName::from_literal(">")
     }
 }
 
@@ -140,7 +140,7 @@ pub struct CmpGeq;
 
 impl Word for CmpGeq {
     fn name(&self) -> ClarityName {
-        ">=".into()
+        ClarityName::from_literal(">=")
     }
 }
 

@@ -10,7 +10,7 @@ pub struct Not;
 
 impl Word for Not {
     fn name(&self) -> ClarityName {
-        "not".into()
+        ClarityName::from_literal("not")
     }
 }
 

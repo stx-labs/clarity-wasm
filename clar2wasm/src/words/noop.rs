@@ -16,7 +16,7 @@ pub struct ToInt;
 
 impl Word for ToInt {
     fn name(&self) -> ClarityName {
-        "to-int".into()
+        ClarityName::from_literal("to-int")
     }
 }
 
@@ -42,7 +42,7 @@ pub struct ToUint;
 
 impl Word for ToUint {
     fn name(&self) -> ClarityName {
-        "to-uint".into()
+        ClarityName::from_literal("to-uint")
     }
 }
 
@@ -68,7 +68,7 @@ pub struct ContractOf;
 
 impl Word for ContractOf {
     fn name(&self) -> ClarityName {
-        "contract-of".into()
+        ClarityName::from_literal("contract-of")
     }
 }
 
@@ -92,7 +92,7 @@ impl ComplexWord for ContractOf {
 
 #[cfg(test)]
 mod tests {
-    use clarity::vm::errors::{Error, RuntimeErrorType};
+    use clarity::vm::errors::{RuntimeError, VmExecutionError};
     use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier};
     use clarity::vm::Value;
 
@@ -102,8 +102,8 @@ mod tests {
     fn to_int_out_of_range() {
         crosscheck(
             "(to-int u170141183460469231731687303715884105728)",
-            Err(Error::Runtime(
-                RuntimeErrorType::ArithmeticOverflow,
+            Err(VmExecutionError::Runtime(
+                RuntimeError::ArithmeticOverflow,
                 Some(Vec::new()),
             )),
         )
@@ -131,8 +131,8 @@ mod tests {
     fn to_uint_negative() {
         crosscheck(
             "(to-uint -31)",
-            Err(Error::Runtime(
-                RuntimeErrorType::ArithmeticUnderflow,
+            Err(VmExecutionError::Runtime(
+                RuntimeError::ArithmeticUnderflow,
                 Some(Vec::new()),
             )),
         )
@@ -193,8 +193,8 @@ mod tests {
   (ok (to-int u170141183460469231731687303715884105728)))
 (test-to-int-out-of-boundary)
     ",
-            Err(Error::Runtime(
-                RuntimeErrorType::ArithmeticOverflow,
+            Err(VmExecutionError::Runtime(
+                RuntimeError::ArithmeticOverflow,
                 Some(Vec::new()),
             )),
         );
@@ -208,8 +208,8 @@ mod tests {
     (ok (to-uint -47)))
 (test-to-uint-error)
     ",
-            Err(Error::Runtime(
-                RuntimeErrorType::ArithmeticUnderflow,
+            Err(VmExecutionError::Runtime(
+                RuntimeError::ArithmeticUnderflow,
                 Some(Vec::new()),
             )),
         );

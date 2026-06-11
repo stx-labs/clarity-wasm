@@ -10,7 +10,7 @@ use clarity::vm::contexts::{CallStack, GlobalContext};
 use clarity::vm::contracts::Contract;
 use clarity::vm::costs::LimitedCostTracker;
 use clarity::vm::database::{ClarityDatabase, MemoryBackingStore};
-use clarity::vm::errors::{CheckErrors, Error};
+use clarity::vm::errors::{StaticCheckErrorKind, VmExecutionError};
 use clarity::vm::types::{
     PrincipalData, QualifiedContractIdentifier, ResponseData, StandardPrincipalData,
 };

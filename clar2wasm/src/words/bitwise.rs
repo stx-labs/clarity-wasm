@@ -11,7 +11,7 @@ pub struct BitwiseNot;
 
 impl Word for BitwiseNot {
     fn name(&self) -> ClarityName {
-        "bit-not".into()
+        ClarityName::from_literal("bit-not")
     }
 }
 
@@ -56,7 +56,7 @@ pub struct BitwiseOr;
 
 impl Word for BitwiseOr {
     fn name(&self) -> ClarityName {
-        "bit-or".into()
+        ClarityName::from_literal("bit-or")
     }
 }
 
@@ -77,7 +77,7 @@ pub struct BitwiseAnd;
 
 impl Word for BitwiseAnd {
     fn name(&self) -> ClarityName {
-        "bit-and".into()
+        ClarityName::from_literal("bit-and")
     }
 }
 
@@ -98,7 +98,7 @@ pub struct BitwiseXor;
 
 impl Word for BitwiseXor {
     fn name(&self) -> ClarityName {
-        "bit-xor".into()
+        ClarityName::from_literal("bit-xor")
     }
 }
 
@@ -119,7 +119,7 @@ pub struct BitwiseLShift;
 
 impl Word for BitwiseLShift {
     fn name(&self) -> ClarityName {
-        "bit-shift-left".into()
+        ClarityName::from_literal("bit-shift-left")
     }
 }
 
@@ -144,7 +144,7 @@ pub struct BitwiseRShift;
 
 impl Word for BitwiseRShift {
     fn name(&self) -> ClarityName {
-        "bit-shift-right".into()
+        ClarityName::from_literal("bit-shift-right")
     }
 }
 
@@ -181,7 +181,7 @@ pub struct Xor;
 
 impl Word for Xor {
     fn name(&self) -> ClarityName {
-        "xor".into()
+        ClarityName::from_literal("xor")
     }
 }
 

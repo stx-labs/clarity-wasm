@@ -16,7 +16,7 @@ pub struct IsEq;
 
 impl Word for IsEq {
     fn name(&self) -> ClarityName {
-        "is-eq".into()
+        ClarityName::from_literal("is-eq")
     }
 }
 

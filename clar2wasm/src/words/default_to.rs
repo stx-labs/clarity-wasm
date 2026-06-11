@@ -15,7 +15,7 @@ pub struct DefaultTo;
 
 impl Word for DefaultTo {
     fn name(&self) -> ClarityName {
-        "default-to".into()
+        ClarityName::from_literal("default-to")
     }
 }
 

@@ -271,7 +271,7 @@ pub struct If;
 
 impl Word for If {
     fn name(&self) -> ClarityName {
-        "if".into()
+        ClarityName::from_literal("if")
     }
 }
 
@@ -318,7 +318,7 @@ pub struct Match;
 
 impl Word for Match {
     fn name(&self) -> ClarityName {
-        "match".into()
+        ClarityName::from_literal("match")
     }
 }
 
@@ -443,7 +443,7 @@ pub struct Filter;
 
 impl Word for Filter {
     fn name(&self) -> ClarityName {
-        "filter".into()
+        ClarityName::from_literal("filter")
     }
 }
 
@@ -599,7 +599,7 @@ pub struct And;
 
 impl Word for And {
     fn name(&self) -> ClarityName {
-        "and".into()
+        ClarityName::from_literal("and")
     }
 }
 
@@ -652,7 +652,7 @@ pub struct SimpleAnd;
 
 impl Word for SimpleAnd {
     fn name(&self) -> ClarityName {
-        "and".into()
+        ClarityName::from_literal("and")
     }
 }
 
@@ -678,7 +678,7 @@ pub struct Or;
 
 impl Word for Or {
     fn name(&self) -> ClarityName {
-        "or".into()
+        ClarityName::from_literal("or")
     }
 }
 
@@ -731,7 +731,7 @@ pub struct SimpleOr;
 
 impl Word for SimpleOr {
     fn name(&self) -> ClarityName {
-        "or".into()
+        ClarityName::from_literal("or")
     }
 }
 
@@ -756,7 +756,7 @@ pub struct Unwrap;
 
 impl Word for Unwrap {
     fn name(&self) -> ClarityName {
-        "unwrap!".into()
+        ClarityName::from_literal("unwrap!")
     }
 }
 
@@ -843,7 +843,7 @@ pub struct UnwrapErr;
 
 impl Word for UnwrapErr {
     fn name(&self) -> ClarityName {
-        "unwrap-err!".into()
+        ClarityName::from_literal("unwrap-err!")
     }
 }
 
@@ -929,7 +929,7 @@ pub struct Asserts;
 
 impl Word for Asserts {
     fn name(&self) -> ClarityName {
-        "asserts!".into()
+        ClarityName::from_literal("asserts!")
     }
 }
 
@@ -987,7 +987,7 @@ pub struct Try;
 
 impl Word for Try {
     fn name(&self) -> ClarityName {
-        "try!".into()
+        ClarityName::from_literal("try!")
     }
 }
 
@@ -1028,7 +1028,7 @@ impl ComplexWord for Try {
 
 #[cfg(test)]
 mod tests {
-    use clarity::vm::errors::{Error, ShortReturnType};
+    use clarity::vm::errors::{EarlyReturnError, VmExecutionError};
     use clarity::vm::types::ResponseData;
     use clarity::vm::Value;
 
@@ -1597,12 +1597,12 @@ mod tests {
     fn asserts_top_level_false() {
         crosscheck(
             "(asserts! false (err u1))",
-            Err(Error::ShortReturn(ShortReturnType::AssertionFailed(
-                Box::new(Value::Response(ResponseData {
+            Err(VmExecutionError::EarlyReturn(
+                EarlyReturnError::AssertionFailed(Box::new(Value::Response(ResponseData {
                     committed: false,
                     data: Box::new(Value::UInt(1)),
-                })),
-            ))),
+                }))),
+            )),
         )
     }
 
@@ -1630,12 +1630,12 @@ mod tests {
     fn try_response_false() {
         crosscheck(
             "(try! (if false (ok u1) (err u42)))",
-            Err(Error::ShortReturn(ShortReturnType::ExpectedValue(
-                Box::new(Value::Response(ResponseData {
+            Err(VmExecutionError::EarlyReturn(
+                EarlyReturnError::UnwrapFailed(Box::new(Value::Response(ResponseData {
                     committed: false,
                     data: Box::new(Value::UInt(42)),
-                })),
-            ))),
+                }))),
+            )),
         )
     }
 
@@ -1643,11 +1643,11 @@ mod tests {
     fn try_optional_false() {
         crosscheck(
             "(try! (if false (some u1) none))",
-            Err(Error::ShortReturn(ShortReturnType::ExpectedValue(
-                Box::new(Value::Optional(clarity::vm::types::OptionalData {
-                    data: None,
-                })),
-            ))),
+            Err(VmExecutionError::EarlyReturn(
+                EarlyReturnError::UnwrapFailed(Box::new(Value::Optional(
+                    clarity::vm::types::OptionalData { data: None },
+                ))),
+            )),
         )
     }
 

@@ -1,4 +1,5 @@
 use clarity::vm::types::{SequenceSubtype, StringSubtype, TypeSignature};
+use clarity_types::ClarityName;
 
 use super::{SimpleWord, Word};
 use crate::cost::WordCharge;
@@ -9,7 +10,7 @@ pub struct StringToInt;
 
 impl Word for StringToInt {
     fn name(&self) -> clarity::vm::ClarityName {
-        "string-to-int?".into()
+        ClarityName::from_literal("string-to-int?")
     }
 }
 
@@ -49,7 +50,7 @@ pub struct StringToUint;
 
 impl Word for StringToUint {
     fn name(&self) -> clarity::vm::ClarityName {
-        "string-to-uint?".into()
+        ClarityName::from_literal("string-to-uint?")
     }
 }
 
@@ -90,7 +91,7 @@ pub struct IntToAscii;
 
 impl Word for IntToAscii {
     fn name(&self) -> clarity::vm::ClarityName {
-        "int-to-ascii".into()
+        ClarityName::from_literal("int-to-ascii")
     }
 }
 
@@ -131,7 +132,7 @@ pub struct IntToUtf8;
 
 impl Word for IntToUtf8 {
     fn name(&self) -> clarity::vm::ClarityName {
-        "int-to-utf8".into()
+        ClarityName::from_literal("int-to-utf8")
     }
 }
 

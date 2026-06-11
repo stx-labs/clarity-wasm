@@ -13,6 +13,7 @@ mod clarity_v2_v3 {
         SequenceData, StandardPrincipalData, TupleData,
     };
     use clarity::vm::Value;
+    use clarity::vm::{ClarityName, ContractName};
     use clarity::{C32_ADDRESS_VERSION_MAINNET_SINGLESIG, C32_ADDRESS_VERSION_TESTNET_SINGLESIG};
     use proptest::prelude::{any, Just, Strategy};
     use proptest::string::string_regex;
@@ -39,7 +40,7 @@ mod clarity_v2_v3 {
             Some(contract_name) => {
                 Value::Principal(PrincipalData::Contract(QualifiedContractIdentifier::new(
                     StandardPrincipalData::new(version, principal_data).unwrap(),
-                    contract_name.into(),
+                    ContractName::try_from(contract_name).unwrap(),
                 )))
             }
             None => Value::Principal(PrincipalData::Standard(
@@ -51,9 +52,12 @@ mod clarity_v2_v3 {
     fn create_error_construct(error_code: u8, principal_data: Option<Value>) -> Value {
         Value::error(
             TupleData::from_data(vec![
-                ("error_code".into(), Value::UInt(error_code.into())),
                 (
-                    "value".into(),
+                    ClarityName::from_literal("error_code"),
+                    Value::UInt(error_code.into()),
+                ),
+                (
+                    ClarityName::from_literal("value"),
                     Value::Optional(OptionalData {
                         data: principal_data.map(Box::new),
                     }),
@@ -72,10 +76,13 @@ mod clarity_v2_v3 {
     ) -> Value {
         Value::error(
             TupleData::from_data(vec![
-                ("hash-bytes".into(), hash_bytes),
-                ("name".into(), Value::Optional(OptionalData { data })),
+                (ClarityName::from_literal("hash-bytes"), hash_bytes),
                 (
-                    "version".into(),
+                    ClarityName::from_literal("name"),
+                    Value::Optional(OptionalData { data }),
+                ),
+                (
+                    ClarityName::from_literal("version"),
                     Value::Sequence(SequenceData::Buffer(BuffData {
                         data: vec![version_byte],
                     })),
@@ -192,10 +199,10 @@ mod clarity_v2_v3 {
 
             let expected_valid = Value::okay(
                 TupleData::from_data(vec![
-                    ("hash-bytes".into(), hash_bytes.clone()),
-                    ("name".into(), Value::Optional(OptionalData { data: data.clone() })),
+                    (ClarityName::from_literal("hash-bytes"), hash_bytes.clone()),
+                    (ClarityName::from_literal("name"), Value::Optional(OptionalData { data: data.clone() })),
                     (
-                        "version".into(),
+                        ClarityName::from_literal("version"),
                         Value::Sequence(SequenceData::Buffer(BuffData {
                             data: vec![version_byte as u8],
                         })),

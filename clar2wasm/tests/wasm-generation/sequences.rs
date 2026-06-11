@@ -4,7 +4,7 @@ use clarity::vm::types::{
     MAX_VALUE_SIZE,
 };
 use clarity::vm::Value;
-use clarity_types::errors::{CheckError, CheckErrors};
+use clarity_types::errors::{StaticCheckError, StaticCheckErrorKind};
 use proptest::prelude::*;
 
 use crate::{bool, buffer, int, list, prop_signature, prop_value, type_string, PropValue};
@@ -248,7 +248,7 @@ proptest! {
             r#"
                 (define-private (foo (a (list 10 {t})) (b {t}))
                     (append a b)
-                ) 
+                )
 
                 (map foo {seq} {elem})
             "#,
@@ -258,7 +258,7 @@ proptest! {
         // Since `type_string` changes the inner types in lists fron NoType to Int,
         // the test could fail at analysis due to a too large size. We will skip those
         // tests.
-        if let Err(CheckError { err: e, .. }) = clarity::vm::analysis::mem_type_check(
+        if let Err(StaticCheckError{ err: e, .. }) = clarity::vm::analysis::mem_type_check(
             &snippet,
             TestConfig::clarity_version(),
             TestConfig::latest_epoch(),
@@ -266,7 +266,7 @@ proptest! {
             prop_assume!(
                 !matches!(
                     e.as_ref(),
-                    CheckErrors::ValueTooLarge | CheckErrors::ConstructedListTooLarge
+                    StaticCheckErrorKind::ValueTooLarge | StaticCheckErrorKind::ConstructedListTooLarge
                 ),
                 "contract returns a value too large"
             );

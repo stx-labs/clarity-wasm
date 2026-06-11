@@ -39,7 +39,7 @@ pub struct Add;
 
 impl Word for Add {
     fn name(&self) -> ClarityName {
-        "+".into()
+        ClarityName::from_literal("+")
     }
 }
 
@@ -73,7 +73,7 @@ pub struct Sub;
 
 impl Word for Sub {
     fn name(&self) -> ClarityName {
-        "-".into()
+        ClarityName::from_literal("-")
     }
 }
 
@@ -131,7 +131,7 @@ pub struct Mul;
 
 impl Word for Mul {
     fn name(&self) -> ClarityName {
-        "*".into()
+        ClarityName::from_literal("*")
     }
 }
 
@@ -165,7 +165,7 @@ pub struct Div;
 
 impl Word for Div {
     fn name(&self) -> ClarityName {
-        "/".into()
+        ClarityName::from_literal("/")
     }
 }
 
@@ -199,7 +199,7 @@ pub struct Modulo;
 
 impl Word for Modulo {
     fn name(&self) -> ClarityName {
-        "mod".into()
+        ClarityName::from_literal("mod")
     }
 }
 
@@ -220,7 +220,7 @@ pub struct Log2;
 
 impl Word for Log2 {
     fn name(&self) -> ClarityName {
-        "log2".into()
+        ClarityName::from_literal("log2")
     }
 }
 
@@ -241,7 +241,7 @@ pub struct Power;
 
 impl Word for Power {
     fn name(&self) -> ClarityName {
-        "pow".into()
+        ClarityName::from_literal("pow")
     }
 }
 
@@ -262,7 +262,7 @@ pub struct Sqrti;
 
 impl Word for Sqrti {
     fn name(&self) -> ClarityName {
-        "sqrti".into()
+        ClarityName::from_literal("sqrti")
     }
 }
 
@@ -280,7 +280,7 @@ impl SimpleWord for Sqrti {
 
 #[cfg(test)]
 mod tests {
-    use clarity::vm::errors::{Error, RuntimeErrorType};
+    use clarity::vm::errors::{RuntimeError, VmExecutionError};
     use clarity::vm::Value;
 
     use crate::tools::{crosscheck, crosscheck_expect_failure, evaluate};
@@ -289,8 +289,8 @@ mod tests {
     fn test_overflow() {
         crosscheck(
             "(+ u340282366920938463463374607431768211455 u1)",
-            Err(Error::Runtime(
-                RuntimeErrorType::ArithmeticOverflow,
+            Err(VmExecutionError::Runtime(
+                RuntimeError::ArithmeticOverflow,
                 Some(Vec::new()),
             )),
         );
@@ -300,8 +300,8 @@ mod tests {
     fn test_underflow() {
         crosscheck(
             "(- u0 u1)",
-            Err(Error::Runtime(
-                RuntimeErrorType::ArithmeticUnderflow,
+            Err(VmExecutionError::Runtime(
+                RuntimeError::ArithmeticUnderflow,
                 Some(Vec::new()),
             )),
         )
@@ -373,8 +373,8 @@ mod tests {
     fn test_log2_runtime_error() {
         crosscheck(
             "(log2 -1)",
-            Err(Error::Runtime(
-                RuntimeErrorType::Arithmetic("log2 must be passed a positive integer".to_string()),
+            Err(VmExecutionError::Runtime(
+                RuntimeError::Arithmetic("log2 must be passed a positive integer".to_string()),
                 Some(Vec::new()),
             )),
         );
@@ -389,8 +389,8 @@ mod tests {
     fn test_pow_negative_exponent() {
         crosscheck(
             "(pow 2 -3)",
-            Err(Error::Runtime(
-                RuntimeErrorType::Arithmetic(
+            Err(VmExecutionError::Runtime(
+                RuntimeError::Arithmetic(
                     "Power argument to (pow ...) must be a u32 integer".to_string(),
                 ),
                 Some(Vec::new()),
@@ -407,8 +407,8 @@ mod tests {
     fn test_sqrti_runtime_error() {
         crosscheck(
             "(sqrti -1)",
-            Err(Error::Runtime(
-                RuntimeErrorType::Arithmetic("sqrti must be passed a positive integer".to_string()),
+            Err(VmExecutionError::Runtime(
+                RuntimeError::Arithmetic("sqrti must be passed a positive integer".to_string()),
                 Some(Vec::new()),
             )),
         );
@@ -475,8 +475,8 @@ mod tests {
     fn test_regress_sub_unary_uint() {
         crosscheck(
             "(- u5)",
-            Err(Error::Runtime(
-                RuntimeErrorType::ArithmeticUnderflow,
+            Err(VmExecutionError::Runtime(
+                RuntimeError::ArithmeticUnderflow,
                 Some(Vec::new()),
             )),
         );

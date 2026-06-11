@@ -11,13 +11,12 @@ use clarity::util::hash::Keccak256Hash;
 use clarity::util::secp256k1::{Secp256k1PrivateKey, Secp256k1PublicKey};
 use clarity::vm::analysis::{run_analysis, AnalysisDatabase};
 use clarity::vm::ast::build_ast_with_diagnostics;
-use clarity::vm::contexts::GlobalContext;
+use clarity::vm::contexts::{ExecutionState, GlobalContext, InvocationContext};
 use clarity::vm::costs::LimitedCostTracker;
 use clarity::vm::database::{ClarityDatabase, MemoryBackingStore};
 use clarity::vm::types::{QualifiedContractIdentifier, StandardPrincipalData, TupleData};
 use clarity::vm::{
-    eval_all, CallStack, ClarityName, ClarityVersion, ContractContext, ContractName, Environment,
-    Value,
+    eval_all, CallStack, ClarityName, ClarityVersion, ContractContext, ContractName, Value,
 };
 use criterion::measurement::Measurement;
 use criterion::{criterion_group, criterion_main, Bencher, BenchmarkId, Criterion};
@@ -27,11 +26,12 @@ use pprof::criterion::{Output, PProfProfiler};
 fn interpreter<M, F>(b: &mut Bencher<M>, fn_name: &str, clarity: &str, init: F)
 where
     M: 'static + Measurement,
-    F: FnOnce(&mut Environment) -> Vec<Value>,
+    F: FnOnce(&mut ExecutionState, &mut InvocationContext) -> Vec<Value>,
 {
     let contract_id = QualifiedContractIdentifier::new(
         StandardPrincipalData::transient(),
-        ContractName::from(format!("clarity-{fn_name}").as_str()),
+        ContractName::try_from(format!("clarity-{fn_name}").as_str())
+            .unwrap_or_else(|_| panic!("Failed to create contract name from clarity-{}", fn_name)),
     );
     let mut datastore = Datastore::new();
     let constants = StacksConstants::default();
@@ -101,19 +101,23 @@ where
         .expect("failed to lookup function");
 
     let mut call_stack = CallStack::new();
-    let mut env = Environment::new(
-        &mut global_context,
-        &contract_context,
-        &mut call_stack,
-        Some(StandardPrincipalData::transient().into()),
-        Some(StandardPrincipalData::transient().into()),
-        None,
-    );
+    let mut exec_state = ExecutionState {
+        global_context: &mut global_context,
+        call_stack: &mut call_stack,
+    };
 
-    let args = init(&mut env);
+    let mut invoke_ctx = InvocationContext {
+        contract_context: &contract_context,
+        sender: Some(StandardPrincipalData::transient().into()),
+        caller: Some(StandardPrincipalData::transient().into()),
+        sponsor: None,
+    };
+
+    let args = init(&mut exec_state, &mut invoke_ctx);
 
     b.iter(|| {
-        env.execute_function_as_transaction(&func, &args, None, false)
+        exec_state
+            .execute_function_as_transaction(&invoke_ctx, &func, &args, None, false)
             .expect("Function call failed");
     });
 
@@ -123,11 +127,12 @@ where
 fn webassembly<M, F>(b: &mut Bencher<M>, fn_name: &str, clarity: &str, init: F)
 where
     M: 'static + Measurement,
-    F: FnOnce(&mut Environment) -> Vec<Value>,
+    F: FnOnce(&mut ExecutionState, &mut InvocationContext) -> Vec<Value>,
 {
     let contract_id = QualifiedContractIdentifier::new(
         StandardPrincipalData::transient(),
-        ContractName::from(format!("clarity-{fn_name}").as_str()),
+        ContractName::try_from(format!("clarity-{fn_name}").as_str())
+            .unwrap_or_else(|_| panic!("Failed to create contract name from clarity-{}", fn_name)),
     );
     let mut datastore = Datastore::new();
     let constants = StacksConstants::default();
@@ -182,19 +187,24 @@ where
         .expect("failed to lookup function");
 
     let mut call_stack = CallStack::new();
-    let mut env = Environment::new(
-        &mut global_context,
-        &contract_context,
-        &mut call_stack,
-        Some(StandardPrincipalData::transient().into()),
-        Some(StandardPrincipalData::transient().into()),
-        None,
-    );
 
-    let args = init(&mut env);
+    let mut exec_state = ExecutionState {
+        global_context: &mut global_context,
+        call_stack: &mut call_stack,
+    };
+
+    let mut invoke_ctx = InvocationContext {
+        contract_context: &contract_context,
+        sender: Some(StandardPrincipalData::transient().into()),
+        caller: Some(StandardPrincipalData::transient().into()),
+        sponsor: None,
+    };
+
+    let args = init(&mut exec_state, &mut invoke_ctx);
 
     b.iter(|| {
-        env.execute_function_as_transaction(&func, &args, None, false)
+        exec_state
+            .execute_function_as_transaction(&invoke_ctx, &func, &args, None, false)
             .expect("Function call failed");
     });
 
@@ -228,7 +238,7 @@ macro_rules! decl_benches {
                             b,
                             black_box($fn_name),
                             black_box($clarity),
-                            |_| vec![$(black_box($arg)),*]
+                            |_, _| vec![$(black_box($arg)),*]
                         );
                     });
                     group.bench_function("webassembly", |b| {
@@ -236,7 +246,7 @@ macro_rules! decl_benches {
                             b,
                             black_box($fn_name),
                             black_box($clarity),
-                            |_| vec![$(black_box($arg)),*]
+                            |_, _| vec![$(black_box($arg)),*]
                         );
                     });
                 }
@@ -266,7 +276,7 @@ macro_rules! decl_benches {
                                 b,
                                 black_box($fn_name),
                                 black_box(&clarity),
-                                |env| { $init(i, env) }
+                                |exec_state, invoke_ctx| { $init(i, exec_state, invoke_ctx) }
                             )
                         });
                         group.bench_with_input(BenchmarkId::new("webassembly", i), &i, |b, _| {
@@ -274,7 +284,7 @@ macro_rules! decl_benches {
                                 b,
                                 black_box($fn_name),
                                 black_box(&clarity),
-                                |env| { $init(i, env) }
+                                |exec_state, invoke_ctx| { $init(i, exec_state, invoke_ctx) }
                             )
                         });
                     }
@@ -315,7 +325,7 @@ decl_benches! {
             (ok (fold add_square l init))
         )
         "#),
-        |i, _: &mut Environment| vec![Value::cons_list_unsanitized((1..=i).map(Value::Int).collect()).unwrap(), Value::Int(0)]
+        |i, _, _| vec![Value::cons_list_unsanitized((1..=i).map(Value::Int).collect()).unwrap(), Value::Int(0)]
     ),
     (
         "map_set_entries",
@@ -334,7 +344,7 @@ decl_benches! {
             (map-set mymap entry entry)
         )
         "#),
-        |i, _: &mut Environment| vec![Value::cons_list_unsanitized((1..=i).map(Value::Int).collect()).unwrap()]
+        |i, _: &mut ExecutionState, _: &mut InvocationContext| vec![Value::cons_list_unsanitized((1..=i).map(Value::Int).collect()).unwrap()]
     ),
     (
         "add_prices",
@@ -410,7 +420,7 @@ decl_benches! {
             )
         )
         ".to_string(),
-        |i, env: &mut Environment| vec![add_prices_init(i, env)]
+        |i, execution_state: &mut ExecutionState, invoke_ctx: &mut InvocationContext| vec![add_prices_init(i, execution_state, invoke_ctx)]
     ),
     (
         "poc2",
@@ -424,11 +434,15 @@ decl_benches! {
             )"#,
             " a".repeat(i)
         ),
-        |_, _: &mut Environment| vec![Value::Int(42)]
+        |_, _, _| vec![Value::Int(42)]
     ),
 }
 
-fn add_prices_init(n: usize, env: &mut Environment) -> Value {
+fn add_prices_init(
+    n: usize,
+    execution_state: &mut ExecutionState,
+    invocation_context: &mut InvocationContext,
+) -> Value {
     let mut prices = Vec::with_capacity(n);
 
     let sk = Secp256k1PrivateKey::from_hex(
@@ -461,11 +475,11 @@ fn add_prices_init(n: usize, env: &mut Environment) -> Value {
         prices.push(Value::Tuple(
             TupleData::from_data(vec![
                 (
-                    ClarityName::from("msg"),
+                    ClarityName::from_literal("msg"),
                     Value::buff_from(msg.to_vec()).unwrap(),
                 ),
                 (
-                    ClarityName::from("sig"),
+                    ClarityName::from_literal("sig"),
                     Value::buff_from(sig_bytes.to_vec()).unwrap(),
                 ),
             ])
@@ -473,21 +487,23 @@ fn add_prices_init(n: usize, env: &mut Environment) -> Value {
         ));
     }
 
-    let func = env
+    let func = invocation_context
         .contract_context
         .lookup_function("add_source")
         .expect("failed to lookup function");
 
-    env.execute_function_as_transaction(
-        &func,
-        &[
-            Value::UInt(source),
-            Value::buff_from(pk.to_bytes_compressed()).unwrap(),
-        ],
-        None,
-        false,
-    )
-    .expect("Adding source should succeed");
+    execution_state
+        .execute_function_as_transaction(
+            invocation_context,
+            &func,
+            &[
+                Value::UInt(source),
+                Value::buff_from(pk.to_bytes_compressed()).unwrap(),
+            ],
+            None,
+            false,
+        )
+        .expect("Adding source should succeed");
 
     Value::cons_list_unsanitized(prices).unwrap()
 }

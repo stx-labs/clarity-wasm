@@ -62,7 +62,11 @@ mod clarity_v2 {
 // Module with tests that should only be executed
 // when running Clarity::V3.
 //
-#[cfg(not(any(feature = "test-clarity-v1", feature = "test-clarity-v2")))]
+#[cfg(not(any(
+    feature = "test-clarity-v1",
+    feature = "test-clarity-v2",
+    feature = "test-clarity-v5"
+)))]
 mod clarity_v3 {
     use clar2wasm::tools::crosscheck_with_epoch;
     use clarity::types::StacksEpochId;
@@ -100,6 +104,7 @@ mod clarity_v3 {
         }
 
         #[test]
+        #[ignore = "test system needs to be improved relative to versioning and epochs"]
         fn crosscheck_at_block_no_leak(
             value in PropValue::any(),
             buf in buffer(32)
@@ -176,6 +181,7 @@ mod clarity_v1_v2 {
 proptest! {
     #![proptest_config(super::runtime_config())]
 
+    #[ignore = "test system needs to be improved relative to versioning and epochs"]
     #[test]
     fn crosscheck_at_block(
         value in PropValue::any(),

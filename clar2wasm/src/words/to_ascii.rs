@@ -1,3 +1,4 @@
+use clarity_types::ClarityName;
 use clarity_types::representations::MAX_STRING_LEN;
 use clarity_types::types::{SequenceSubtype, StringSubtype, TypeSignature};
 use walrus::ir::{BinaryOp, ExtendedLoad, LoadKind, MemArg, StoreKind, UnaryOp};
@@ -13,7 +14,7 @@ pub struct ToAscii;
 
 impl Word for ToAscii {
     fn name(&self) -> clarity_types::ClarityName {
-        "to-ascii?".into()
+        ClarityName::from_literal("to-ascii?")
     }
 }
 

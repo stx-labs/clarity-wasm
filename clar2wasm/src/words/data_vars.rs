@@ -13,7 +13,7 @@ pub struct DefineDataVar;
 
 impl Word for DefineDataVar {
     fn name(&self) -> ClarityName {
-        "define-data-var".into()
+        ClarityName::from_literal("define-data-var")
     }
 }
 
@@ -104,7 +104,7 @@ pub struct SetDataVar;
 
 impl Word for SetDataVar {
     fn name(&self) -> ClarityName {
-        "var-set".into()
+        ClarityName::from_literal("var-set")
     }
 }
 
@@ -181,7 +181,7 @@ pub struct GetDataVar;
 
 impl Word for GetDataVar {
     fn name(&self) -> ClarityName {
-        "var-get".into()
+        ClarityName::from_literal("var-get")
     }
 }
 
@@ -244,7 +244,7 @@ impl ComplexWord for GetDataVar {
 
 #[cfg(test)]
 mod tests {
-    use clarity::vm::errors::{CheckErrors, Error};
+    use clarity::vm::errors::{RuntimeCheckErrorKind, VmExecutionError};
     use clarity::vm::Value;
 
     use crate::tools::{
@@ -310,7 +310,9 @@ mod tests {
         // This test should be re-worked once the typechecker is fixed
         // and can correctly detect all argument inconsistencies.
         let snippet = "(define-data-var something int 1) (var-set something 1 2)";
-        let expected = Err(Error::Unchecked(CheckErrors::IncorrectArgumentCount(2, 3)));
+        let expected = Err(VmExecutionError::RuntimeCheck(
+            RuntimeCheckErrorKind::IncorrectArgumentCount(2, 3),
+        ));
         crosscheck(snippet, expected);
     }
 

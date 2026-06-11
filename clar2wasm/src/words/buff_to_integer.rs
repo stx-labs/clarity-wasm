@@ -1,4 +1,5 @@
 use clarity::vm::types::TypeSignature;
+use clarity_types::ClarityName;
 
 use crate::cost::WordCharge;
 use crate::wasm_generator::{GeneratorError, WasmGenerator};
@@ -24,7 +25,7 @@ pub struct BuffToUintBe;
 
 impl Word for BuffToUintBe {
     fn name(&self) -> clarity::vm::ClarityName {
-        "buff-to-uint-be".into()
+        ClarityName::from_literal("buff-to-uint-be")
     }
 }
 
@@ -45,7 +46,7 @@ pub struct BuffToIntBe;
 
 impl Word for BuffToIntBe {
     fn name(&self) -> clarity::vm::ClarityName {
-        "buff-to-int-be".into()
+        ClarityName::from_literal("buff-to-int-be")
     }
 }
 
@@ -68,7 +69,7 @@ pub struct BuffToUintLe;
 
 impl Word for BuffToUintLe {
     fn name(&self) -> clarity::vm::ClarityName {
-        "buff-to-uint-le".into()
+        ClarityName::from_literal("buff-to-uint-le")
     }
 }
 
@@ -89,7 +90,7 @@ pub struct BuffToIntLe;
 
 impl Word for BuffToIntLe {
     fn name(&self) -> clarity::vm::ClarityName {
-        "buff-to-int-le".into()
+        ClarityName::from_literal("buff-to-int-le")
     }
 }
 

@@ -238,11 +238,13 @@ impl PropValue {
 }
 
 impl TryFrom<Vec<PropValue>> for PropValue {
-    type Error = clarity::vm::errors::Error;
+    type Error = clarity::vm::errors::VmExecutionError;
 
     fn try_from(values: Vec<PropValue>) -> Result<Self, Self::Error> {
         let values = values.into_iter().map(Value::from).collect();
-        Value::cons_list_unsanitized(values).map(PropValue::from)
+        Value::cons_list_unsanitized(values)
+            .map(PropValue::from)
+            .map_err(|e| e.into())
     }
 }
 
@@ -404,12 +406,16 @@ fn standard_principal() -> impl Strategy<Value = Value> {
         .no_shrink()
 }
 
+fn contract_name() -> impl Strategy<Value = ContractName> {
+    ("^{^[a-zA-Z]([a-zA-Z0-9]|[-_!?+<>=/*])*$|^[-+=/*]$|^[<>]=?$}$|^__transient$")
+        .prop_map(|name| ContractName::try_from(name).unwrap())
+}
+
 fn qualified_principal() -> impl Strategy<Value = Value> {
-    (standard_principal(), "[a-zA-Z]{1,40}").prop_map(|(issuer_value, name)| {
+    (standard_principal(), contract_name()).prop_map(|(issuer_value, name)| {
         let Value::Principal(PrincipalData::Standard(issuer)) = issuer_value else {
             unreachable!()
         };
-        let name = ContractName::from(&*name);
         Value::Principal(PrincipalData::Contract(QualifiedContractIdentifier {
             issuer,
             name,
@@ -555,6 +561,7 @@ pub fn type_string(ty: &TypeSignature) -> String {
 #[cfg(test)]
 mod tests {
     use clarity::vm::types::{PrincipalData, UTF8Data};
+    use clarity_types::ClarityName;
 
     use super::*;
 
@@ -648,9 +655,9 @@ mod tests {
         assert_eq!(
             Value::Tuple(
                 TupleData::from_data(vec![
-                    ("a".into(), Value::Int(42)),
-                    ("b".into(), Value::UInt(42)),
-                    ("c".into(), Value::Bool(true)),
+                    (ClarityName::from_literal("a"), Value::Int(42)),
+                    (ClarityName::from_literal("b"), Value::UInt(42)),
+                    (ClarityName::from_literal("c"), Value::Bool(true)),
                 ])
                 .unwrap()
             )

@@ -45,7 +45,7 @@ pub struct IsOk;
 
 impl Word for IsOk {
     fn name(&self) -> ClarityName {
-        "is-ok".into()
+        ClarityName::from_literal("is-ok")
     }
 }
 
@@ -70,7 +70,7 @@ pub struct IsErr;
 
 impl Word for IsErr {
     fn name(&self) -> ClarityName {
-        "is-err".into()
+        ClarityName::from_literal("is-err")
     }
 }
 

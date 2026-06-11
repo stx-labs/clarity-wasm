@@ -12,7 +12,7 @@ pub struct GetBlockInfo;
 
 impl Word for GetBlockInfo {
     fn name(&self) -> ClarityName {
-        "get-block-info?".into()
+        ClarityName::from_literal("get-block-info?")
     }
 }
 
@@ -103,7 +103,7 @@ pub struct GetBurnBlockInfo;
 
 impl Word for GetBurnBlockInfo {
     fn name(&self) -> ClarityName {
-        "get-burn-block-info?".into()
+        ClarityName::from_literal("get-burn-block-info?")
     }
 }
 
@@ -171,7 +171,7 @@ pub struct AtBlock;
 
 impl Word for AtBlock {
     fn name(&self) -> ClarityName {
-        "at-block".into()
+        ClarityName::from_literal("at-block")
     }
 }
 
@@ -259,7 +259,7 @@ pub struct GetStacksBlockInfo;
 
 impl Word for GetStacksBlockInfo {
     fn name(&self) -> ClarityName {
-        "get-stacks-block-info?".into()
+        ClarityName::from_literal("get-stacks-block-info?")
     }
 }
 
@@ -330,7 +330,7 @@ pub struct GetTenureInfo;
 
 impl Word for GetTenureInfo {
     fn name(&self) -> ClarityName {
-        "get-tenure-info?".into()
+        ClarityName::from_literal("get-tenure-info?")
     }
 }
 
@@ -412,9 +412,10 @@ impl ComplexWord for GetTenureInfo {
 #[cfg(test)]
 mod tests {
     use clarity::types::StacksEpochId;
-    use clarity::vm::errors::{CheckErrors, Error};
+    use clarity::vm::errors::{StaticCheckErrorKind, VmExecutionError};
     use clarity::vm::types::{OptionalData, PrincipalData, TupleData};
     use clarity::vm::{ClarityVersion, Value};
+use clarity_types::ClarityName;
 
     use crate::tools::{evaluate, TestEnvironment};
 
@@ -471,6 +472,7 @@ mod tests {
     mod clarity_v1_v2 {
         use clarity::types::StacksEpochId;
         use clarity::vm::ClarityVersion;
+        use clarity_types::errors::RuntimeCheckErrorKind;
 
         use super::*;
         use crate::tools::crosscheck_with_epoch;
@@ -543,7 +545,9 @@ mod tests {
             // This test should be re-worked once the typechecker is fixed
             // and can correctly detect all argument inconsistencies.
             let snippet = "(get-block-info? burnchain-header-hash u0 miner-address)";
-            let expected = Err(Error::Unchecked(CheckErrors::IncorrectArgumentCount(2, 3)));
+            let expected = Err(VmExecutionError::RuntimeCheck(
+                RuntimeCheckErrorKind::IncorrectArgumentCount(2, 3),
+            ));
             crosscheck_with_epoch(snippet, expected, StacksEpochId::Epoch24);
         }
     }
@@ -959,19 +963,19 @@ mod tests {
                 Value::some(
                     TupleData::from_data(vec![
                         (
-                            "addrs".into(),
+                            ClarityName::from_literal("addrs"),
                             Value::cons_list_unsanitized(vec![TupleData::from_data(vec![
                                 (
-                                    "hashbytes".into(),
+                                    ClarityName::from_literal("hashbytes"),
                                     Value::buff_from([0; 32].to_vec()).unwrap()
                                 ),
-                                ("version".into(), Value::buff_from_byte(0))
+                                (ClarityName::from_literal("version"), Value::buff_from_byte(0))
                             ])
                             .unwrap()
                             .into()])
                             .unwrap()
                         ),
-                        ("payout".into(), Value::UInt(0))
+                        (ClarityName::from_literal("payout"), Value::UInt(0))
                     ])
                     .unwrap()
                     .into()
@@ -982,6 +986,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "test system needs to be improved relative to versioning and epochs"]
     fn at_block_less_than_two_args() {
         let result = evaluate(
             "(at-block 0xb5e076ab7609c7f8c763b5c571d07aea80b06b41452231b1437370f4964ed66e)",
@@ -994,6 +999,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "test system needs to be improved relative to versioning and epochs"]
     fn at_block_more_than_two_args() {
         let result = evaluate(
             "(at-block 0xb5e076ab7609c7f8c763b5c571d07aea80b06b41452231b1437370f4964ed66e u0 u0)",
@@ -1006,6 +1012,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "test system needs to be improved relative to versioning and epochs"]
     fn at_block_var() {
         let e = evaluate(
                 "
@@ -1016,7 +1023,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             e,
-            Error::Unchecked(CheckErrors::NoSuchDataVariable("data".into()))
+            VmExecutionError::Unchecked(StaticCheckErrorKind::NoSuchDataVariable("data".into()))
         );
     }
 

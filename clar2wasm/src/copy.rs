@@ -180,6 +180,7 @@ impl WasmGenerator {
 
 #[cfg(test)]
 mod tests {
+    use clarity::vm::ClarityName;
     use clarity_types::types::{PrincipalData, TupleData, TypeSignature};
     use clarity_types::Value;
 
@@ -340,18 +341,21 @@ mod tests {
     #[test]
     fn copy_tuple() {
         let v = TupleData::from_data(vec![
-            ("uint".into(), Value::UInt(5)),
-            ("buff".into(), Value::buff_from(vec![52, 53, 54]).unwrap()),
+            (ClarityName::from_literal("uint"), Value::UInt(5)),
             (
-                "list".into(),
+                ClarityName::from_literal("buff"),
+                Value::buff_from(vec![52, 53, 54]).unwrap(),
+            ),
+            (
+                ClarityName::from_literal("list"),
                 Value::cons_list_unsanitized((1u8..10u8).map(Value::buff_from_byte).collect())
                     .unwrap(),
             ),
             (
-                "tuple".into(),
+                ClarityName::from_literal("tuple"),
                 TupleData::from_data(vec![
-                    ("subint".into(), Value::Int(0)),
-                    ("subbool".into(), Value::Bool(true)),
+                    (ClarityName::from_literal("subint"), Value::Int(0)),
+                    (ClarityName::from_literal("subbool"), Value::Bool(true)),
                 ])
                 .unwrap()
                 .into(),

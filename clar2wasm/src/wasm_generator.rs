@@ -2208,10 +2208,11 @@ mod tests {
     use clarity::vm::analysis::AnalysisDatabase;
     use clarity::vm::costs::LimitedCostTracker;
     use clarity::vm::database::MemoryBackingStore;
-    use clarity::vm::errors::{CheckErrors, Error};
+    use clarity::vm::errors::{RuntimeCheckErrorKind, VmExecutionError};
     use clarity::vm::types::{QualifiedContractIdentifier, StandardPrincipalData, TupleData};
     use clarity::vm::{ClarityVersion, Value};
-    use walrus::Module;
+    use clarity_types::{ClarityName, ContractName};
+use walrus::Module;
 
     // Tests that don't relate to specific words
     use crate::{
@@ -2255,7 +2256,7 @@ mod tests {
                 &snippet,
                 &QualifiedContractIdentifier::new(
                     StandardPrincipalData::transient(),
-                    ("tmp").into(),
+                    ContractName::from_literal("tmp"),
                 ),
                 LimitedCostTracker::new_free(),
                 ClarityVersion::Clarity2,
@@ -2370,7 +2371,9 @@ mod tests {
   (ok true))
 (bar)
 ",
-            Err(Error::Unchecked(CheckErrors::IncorrectArgumentCount(1, 2))),
+            Err(VmExecutionError::RuntimeCheck(
+                RuntimeCheckErrorKind::IncorrectArgumentCount(1, 2),
+            )),
         );
     }
 
@@ -2391,7 +2394,7 @@ mod tests {
         let expected = Value::from(
             TupleData::from_data(vec![
                 (
-                    "fn".into(),
+                    ClarityName::from_literal("fn"),
                     Value::error(
                         Value::cons_list_unsanitized(vec![Value::string_utf8_from_bytes(
                             b"foo".to_vec(),
@@ -2401,7 +2404,7 @@ mod tests {
                     )
                     .unwrap(),
                 ),
-                ("mymap".into(), Value::some(Value::Int(99)).unwrap()),
+                (ClarityName::from_literal("mymap"), Value::some(Value::Int(99)).unwrap()),
             ])
             .unwrap(),
         );

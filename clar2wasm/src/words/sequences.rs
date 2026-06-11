@@ -11,8 +11,8 @@ use crate::cost::WordCharge;
 use crate::duck_type::{dt_needed_workspace, need_ducktyping};
 use crate::error_mapping::ErrorMap;
 use crate::wasm_generator::{
-    add_placeholder_for_clarity_type, clar2wasm_ty, drop_value, has_in_memory_type, ArgumentsExt,
-    BorrowedLocal, GeneratorError, SequenceElementType, WasmGenerator,
+    add_placeholder_for_clarity_type, clar2wasm_ty, drop_value, get_global, has_in_memory_type,
+    ArgumentsExt, BorrowedLocal, GeneratorError, SequenceElementType, WasmGenerator,
 };
 use crate::wasm_utils::{get_type_in_memory_size, ArgumentCountCheck};
 use crate::words::{self, ComplexWord, Word};
@@ -22,7 +22,7 @@ pub struct ListCons;
 
 impl Word for ListCons {
     fn name(&self) -> ClarityName {
-        "list".into()
+        ClarityName::from_literal("list")
     }
 }
 
@@ -81,7 +81,7 @@ pub struct Fold;
 
 impl Word for Fold {
     fn name(&self) -> ClarityName {
-        "fold".into()
+        ClarityName::from_literal("fold")
     }
 }
 
@@ -341,7 +341,7 @@ pub struct Append;
 
 impl Word for Append {
     fn name(&self) -> ClarityName {
-        "append".into()
+        ClarityName::from_literal("append")
     }
 }
 
@@ -448,7 +448,7 @@ pub struct AsMaxLen;
 
 impl Word for AsMaxLen {
     fn name(&self) -> ClarityName {
-        "as-max-len?".into()
+        ClarityName::from_literal("as-max-len?")
     }
 }
 
@@ -555,7 +555,7 @@ pub struct Concat;
 
 impl Word for Concat {
     fn name(&self) -> ClarityName {
-        "concat".into()
+        ClarityName::from_literal("concat")
     }
 }
 
@@ -636,7 +636,7 @@ pub struct Map;
 
 impl Word for Map {
     fn name(&self) -> ClarityName {
-        "map".into()
+        ClarityName::from_literal("map")
     }
 }
 
@@ -1019,7 +1019,7 @@ pub struct Len;
 
 impl Word for Len {
     fn name(&self) -> ClarityName {
-        "len".into()
+        ClarityName::from_literal("len")
     }
 }
 
@@ -1106,8 +1106,8 @@ pub enum ElementAt {
 impl Word for ElementAt {
     fn name(&self) -> ClarityName {
         match self {
-            ElementAt::Original => "element-at".into(),
-            ElementAt::Alias => "element-at?".into(),
+            ElementAt::Original => ClarityName::from_literal("element-at"),
+            ElementAt::Alias => ClarityName::from_literal("element-at?"),
         }
     }
 }
@@ -1295,7 +1295,7 @@ pub struct ReplaceAt;
 
 impl Word for ReplaceAt {
     fn name(&self) -> ClarityName {
-        "replace-at?".into()
+        ClarityName::from_literal("replace-at?")
     }
 }
 
@@ -1439,14 +1439,32 @@ impl ComplexWord for ReplaceAt {
             SequenceElementType::Byte | SequenceElementType::UnicodeScalar
         ) {
             let repl_len = generator.module.locals.add(ValType::I32);
-            builder.local_tee(repl_len).unop(UnaryOp::I32Eqz).if_else(
-                None,
-                |then| {
-                    then.i32_const(ErrorMap::BadTypeConstruction as i32)
-                        .call(generator.func_by_name("stdlib.runtime-error"));
-                },
-                |_| {},
-            );
+            let error_id = {
+                let mut error = builder.dangling_instr_seq(None);
+                let expected = 1u32;
+                let actual = 0u32;
+                let (arg_name_offset_start, arg_name_len_expected) =
+                    generator.add_bytes_literal(&expected.to_le_bytes())?;
+                let (_, arg_name_len_got) = generator.add_bytes_literal(&actual.to_le_bytes())?;
+
+                error
+                    .i32_const(arg_name_offset_start as i32)
+                    .global_set(get_global(&generator.module, "runtime-error-arg-offset")?)
+                    .i32_const((arg_name_len_expected + arg_name_len_got) as i32)
+                    .global_set(get_global(&generator.module, "runtime-error-arg-len")?)
+                    .i32_const(ErrorMap::SequenceElementArityMismatch as i32)
+                    .call(generator.func_by_name("stdlib.runtime-error"));
+                error.id()
+            };
+
+            let ok_id = builder.dangling_instr_seq(None).id();
+            builder
+                .local_tee(repl_len)
+                .unop(UnaryOp::I32Eqz)
+                .instr(IfElse {
+                    consequent: error_id,
+                    alternative: ok_id,
+                });
             builder.local_get(repl_len);
         }
 
@@ -1565,7 +1583,7 @@ pub struct Slice;
 
 impl Word for Slice {
     fn name(&self) -> ClarityName {
-        "slice?".into()
+        ClarityName::from_literal("slice?")
     }
 }
 
@@ -2709,7 +2727,8 @@ mod tests {
     #[cfg(not(feature = "test-clarity-v1"))]
     #[cfg(test)]
     mod clarity_v2_v3 {
-        use clarity::vm::errors::RuntimeErrorType;
+        use clarity::vm::errors::{RuntimeError, VmExecutionError};
+        use clarity_types::ClarityTypeError;
 
         use super::*;
 
@@ -2832,9 +2851,12 @@ mod tests {
 
             crosscheck(
                 snippet,
-                Err(clarity::vm::errors::Error::Runtime(
-                    RuntimeErrorType::BadTypeConstruction,
-                    Some(Vec::new()),
+                Err(VmExecutionError::RuntimeCheck(
+                    ClarityTypeError::SequenceElementArityMismatch {
+                        expected: 1,
+                        found: 0,
+                    }
+                    .into(),
                 )),
             )
         }
@@ -2845,9 +2867,12 @@ mod tests {
 
             crosscheck(
                 snippet,
-                Err(clarity::vm::errors::Error::Runtime(
-                    RuntimeErrorType::BadTypeConstruction,
-                    Some(Vec::new()),
+                Err(VmExecutionError::RuntimeCheck(
+                    ClarityTypeError::SequenceElementArityMismatch {
+                        expected: 1,
+                        found: 0,
+                    }
+                    .into(),
                 )),
             )
         }
@@ -2858,9 +2883,12 @@ mod tests {
 
             crosscheck(
                 snippet,
-                Err(clarity::vm::errors::Error::Runtime(
-                    RuntimeErrorType::BadTypeConstruction,
-                    Some(Vec::new()),
+                Err(VmExecutionError::RuntimeCheck(
+                    ClarityTypeError::SequenceElementArityMismatch {
+                        expected: 1,
+                        found: 0,
+                    }
+                    .into(),
                 )),
             )
         }
