@@ -64,10 +64,7 @@ mod clarity_v2 {
 // Module with tests that should only be executed
 // when running Clarity::V3.
 //
-#[cfg(not(any(
-    feature = "test-clarity-v1",
-    feature = "test-clarity-v2",
-)))]
+#[cfg(not(any(feature = "test-clarity-v1", feature = "test-clarity-v2",)))]
 mod clarity_v3 {
     use clar2wasm::tools::crosscheck_with_epoch;
     use clarity::types::StacksEpochId;
