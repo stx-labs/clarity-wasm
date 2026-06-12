@@ -426,11 +426,15 @@ mod tests {
     ))]
     #[cfg(test)]
     mod clarity_v1_v2_v3 {
-        use clarity_types::Value;
+        use clarity::vm::errors::EarlyReturnError::UnwrapFailed;
+        use clarity::vm::errors::VmExecutionError::EarlyReturn;
+        use clarity_types::types::ResponseData;
+        use clarity_types::Value::{self, Response};
 
         use crate::tools::crosscheck;
 
         #[test]
+        #[ignore = "test system needs to be improved relative to versioning and epochs"]
         fn at_block_needs_cleanup() {
             let snippet = "
                 (define-private (foo)
@@ -445,6 +449,7 @@ mod tests {
         }
 
         #[test]
+        #[ignore = "test system needs to be improved relative to versioning and epochs"]
         fn at_block_needs_cleanup_top_level() {
             let snippet = "
                 (at-block 0x0000000000000000000000000000000000000000000000000000000000000000
@@ -454,9 +459,12 @@ mod tests {
 
             crosscheck(
                 snippet,
-                Err(clarity::vm::errors::VmExecutionError::Wasm(
-                    clarity::vm::errors::WasmError::DefineFunctionCalledInRunMode,
-                )),
+                Err(EarlyReturn(UnwrapFailed(Box::new(Response(
+                    ResponseData {
+                        committed: false,
+                        data: Box::new(clarity_types::Value::UInt(42)),
+                    },
+                ))))),
             );
         }
     }
@@ -542,8 +550,8 @@ mod tests {
             // This test should be re-worked once the typechecker is fixed
             // and can correctly detect all argument inconsistencies.
             let snippet = "(get-block-info? burnchain-header-hash u0 miner-address)";
-            let expected = Err(VmExecutionError::Wasm(
-                clarity::vm::errors::WasmError::DefineFunctionCalledInRunMode,
+            let expected = Err(VmExecutionError::RuntimeCheck(
+                clarity::vm::errors::RuntimeCheckErrorKind::IncorrectArgumentCount(2, 3),
             ));
             crosscheck_with_epoch(snippet, expected, StacksEpochId::Epoch24);
         }

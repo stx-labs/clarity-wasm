@@ -213,14 +213,11 @@ impl TestEnvironment {
             ) => version <= ClarityVersion::Clarity2,
 
             // For epochs 30, 31 and 32, all clarity versions are supported.
-            (
-                StacksEpochId::Epoch30
-                | StacksEpochId::Epoch31
-                | StacksEpochId::Epoch32
-                | StacksEpochId::Epoch33
-                | StacksEpochId::Epoch34,
-                _,
-            ) => true,
+            (StacksEpochId::Epoch30 | StacksEpochId::Epoch31 | StacksEpochId::Epoch32, _) => true,
+
+            (StacksEpochId::Epoch33, version) => version >= ClarityVersion::Clarity4,
+
+            (StacksEpochId::Epoch34, version) => version >= ClarityVersion::Clarity5,
         }
     }
 
@@ -538,7 +535,6 @@ impl TestConfig {
             _ if cfg!(feature = "test-clarity-v2") => ClarityVersion::Clarity2,
             _ if cfg!(feature = "test-clarity-v3") => ClarityVersion::Clarity3,
             _ if cfg!(feature = "test-clarity-v4") => ClarityVersion::Clarity4,
-            _ if cfg!(feature = "test-clarity-v5") => ClarityVersion::Clarity5,
             _ => ClarityVersion::latest(),
         }
     }

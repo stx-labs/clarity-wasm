@@ -1441,6 +1441,8 @@ impl ComplexWord for ReplaceAt {
             let repl_len = generator.module.locals.add(ValType::I32);
             let error_id = {
                 let mut error = builder.dangling_instr_seq(None);
+                // replace-at? fails when a string of size 0 is passed.
+                // These are the values that will be written in memory for proper error reporting.
                 let expected = 1u32;
                 let actual = 0u32;
                 let (arg_name_offset_start, arg_name_len_expected) =

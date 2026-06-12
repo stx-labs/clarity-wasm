@@ -124,6 +124,7 @@ impl From<i32> for ErrorMap {
             2 => ErrorMap::DivisionByZero,
             3 => ErrorMap::ArithmeticLog2Error,
             4 => ErrorMap::ArithmeticSqrtiError,
+            // TODO: This error needs to be removed/changed the same way it has been in stacks/core
             5 => ErrorMap::BadTypeConstruction,
             6 => ErrorMap::Panic,
             7 => ErrorMap::ShortReturnAssertionFailure,
