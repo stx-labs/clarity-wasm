@@ -9,7 +9,7 @@ use clar2wasm::wasm_utils::signature_from_string;
 )))]
 use clarity::util::hash::Sha512Trunc256Sum;
 use clarity::vm::types::{ResponseData, TupleData};
-use clarity::vm::{ClarityName, Value};
+use clarity::vm::{ClarityName, ContractName, Value};
 use proptest::prelude::*;
 
 use crate::{prop_signature, type_string, PropValue, TypePrinter};
@@ -29,7 +29,7 @@ proptest! {
         result in PropValue::any().no_shrink()
     ) {
         // first contract
-        let first_contract_name = "foo".into();
+        let first_contract_name = ContractName::from_literal("foo");
         let mut function_arguments = String::new();
         for (name, ty) in ('a'..).zip(tys.iter()) {
             write!(function_arguments, "({name} {}) ", type_string(ty)).unwrap();
@@ -43,7 +43,7 @@ proptest! {
         );
 
         // second contract
-        let second_contract_name = "bar".into();
+        let second_contract_name = ContractName::from_literal("bar");
         let mut call_arguments = String::new();
         for value in values {
             write!(call_arguments, "{value} ").unwrap();
@@ -68,7 +68,7 @@ proptest! {
         (ty, value) in prop_signature().prop_ind_flat_map2(|ty| PropValue::from_type(ty.clone())).no_shrink()
     ) {
         // first contract
-        let first_contract_name = "foo".into();
+        let first_contract_name = ContractName::from_literal("foo");
         let first_snippet = format!(
             r#"
                 (define-public (foofun (a {}))
@@ -78,7 +78,7 @@ proptest! {
         );
 
         // second contract
-        let second_contract_name = "bar".into();
+        let second_contract_name = ContractName::from_literal("bar");
         let second_snippet =
             format!(r#"(contract-call? .{first_contract_name} foofun {value})"#);
 
@@ -105,7 +105,7 @@ proptest! {
             .prop_map(|arg_ty| arg_ty.into_iter().unzip::<_, _, Vec<_>, Vec<_>>())
             .no_shrink(),
     ) {
-        let first_contract_name = "foo".into();
+        let first_contract_name = ContractName::from_literal("foo");
         let mut function_arguments = String::new();
         for (name, ty) in ('a'..).zip(tys.iter()) {
             write!(function_arguments, "({name} {}) ", type_string(ty)).unwrap();
@@ -125,7 +125,7 @@ proptest! {
         );
 
         // second contract
-        let second_contract_name = "bar".into();
+        let second_contract_name = ContractName::from_literal("bar");
         let mut call_arguments = String::new();
         for value in values.iter() {
             write!(call_arguments, "{value} ").unwrap();
@@ -164,6 +164,7 @@ proptest! {
     #![proptest_config(super::runtime_config())]
 
     #[test]
+    #[ignore = "test system needs to be improved relative to versioning and epochs"]
     fn as_contract_can_return_any_value(
         value in PropValue::any()
     ) {
@@ -190,7 +191,7 @@ proptest! {
         err_type in prop_signature(),
     ) {
         // first contract
-        let first_contract_name = "foo".into();
+        let first_contract_name = ContractName::from_literal("foo");
         let mut function_types = String::new();
         let mut function_arguments = String::new();
         for (name, ty) in ('a'..).zip(tys.iter()) {
@@ -213,7 +214,7 @@ proptest! {
         );
 
         // second contract
-        let second_contract_name = "bar".into();
+        let second_contract_name = ContractName::from_literal("bar");
 
         let contract_call_args: String =
             ('a'..)
@@ -263,7 +264,7 @@ proptest! {
         err_type in prop_signature(),
     ) {
         // first contract
-        let first_contract_name = "foo".into();
+        let first_contract_name = ContractName::from_literal("foo");
         let mut function_types = String::new();
         let mut function_arguments = String::new();
         for (name, ty) in ('a'..).zip(tys.iter()) {
@@ -286,7 +287,7 @@ proptest! {
         );
 
         // second contract
-        let second_contract_name = "bar".into();
+        let second_contract_name = ContractName::from_literal("bar");
 
         let contract_call_args: String =
             ('a'..)
@@ -338,7 +339,7 @@ proptest! {
         (err_type, err_value) in prop_signature().prop_ind_flat_map2(PropValue::from_type).no_shrink(),
     ) {
         // first contract
-        let first_contract_name = "foo".into();
+        let first_contract_name = ContractName::from_literal("foo");
         let mut function_types = String::new();
         let mut function_arguments = String::new();
         for (name, ty) in ('a'..).zip(tys.iter()) {
@@ -361,7 +362,7 @@ proptest! {
         );
 
         // second contract
-        let second_contract_name = "bar".into();
+        let second_contract_name = ContractName::from_literal("bar");
 
         let contract_call_args: String =
             ('a'..)
@@ -414,7 +415,7 @@ proptest! {
         (err_type, err_value) in prop_signature().prop_ind_flat_map2(PropValue::from_type).no_shrink(),
     ) {
         // first contract
-        let first_contract_name = "foo".into();
+        let first_contract_name = ContractName::from_literal("foo");
         let mut function_types = String::new();
         let mut function_arguments = String::new();
         for (name, ty) in ('a'..).zip(tys.iter()) {
@@ -437,7 +438,7 @@ proptest! {
         );
 
         // second contract
-        let second_contract_name = "bar".into();
+        let second_contract_name = ContractName::from_literal("bar");
 
         let contract_call_args: String =
             ('a'..)
@@ -490,7 +491,7 @@ proptest! {
         (err_type, err_value) in prop_signature().prop_ind_flat_map2(PropValue::from_type).no_shrink(),
     ) {
         // first contract
-        let first_contract_name = "foo".into();
+        let first_contract_name = ContractName::from_literal("foo");
         let mut function_types = String::new();
         let mut function_arguments = String::new();
         for (name, ty) in ('a'..).zip(tys.iter()) {
@@ -513,7 +514,7 @@ proptest! {
         );
 
         // second contract
-        let second_contract_name = "bar".into();
+        let second_contract_name = ContractName::from_literal("bar");
 
         let contract_call_args: String =
             ('a'..)
@@ -565,7 +566,7 @@ proptest! {
         err_type in prop_signature(),
     ) {
         // first contract
-        let first_contract_name = "foo".into();
+        let first_contract_name = ContractName::from_literal("foo");
         let mut function_types = String::new();
         let mut function_arguments = String::new();
         for (name, ty) in ('a'..).zip(tys.iter()) {
@@ -607,7 +608,7 @@ proptest! {
         );
 
         // second contract
-        let second_contract_name = "bar".into();
+        let second_contract_name = ContractName::from_literal("bar");
 
         let contract_call_args: String =
             ('a'..)
@@ -685,7 +686,7 @@ proptest! {
         .no_shrink()
     ) {
         // callee contract - generate random contract structure
-        let callee_contract_name = "callee".into();
+        let callee_contract_name = ContractName::from_literal("callee");
         let mut callee_snippet = String::new();
 
         for (func_type, func_name, tys, result) in function_defs.iter() {
@@ -702,7 +703,7 @@ proptest! {
         }
 
         // caller contract
-        let caller_contract_name = "caller".into();
+        let caller_contract_name = ContractName::from_literal("caller");
         let caller_snippet = "(contract-hash? .callee)";
 
         let expected = Sha512Trunc256Sum::from_data(callee_snippet.as_bytes());
@@ -755,7 +756,7 @@ proptest! {
         let expected = Value::okay(val.into()).unwrap();
 
         crosscheck_multi_contract(
-            &[("callee".into(), &callee), ("caller".into(), &caller)],
+            &[(ContractName::from_literal("callee"), &callee), (ContractName::from_literal("caller"), &caller)],
             Ok(Some(expected)),
         );
     }
@@ -826,7 +827,7 @@ proptest! {
         .unwrap();
 
         crosscheck_multi_contract(
-            &[("callee".into(), &callee), ("caller".into(), &caller)],
+            &[(ContractName::from_literal("callee"), &callee), (ContractName::from_literal("caller"), &caller)],
             Ok(Some(expected)),
         );
     }

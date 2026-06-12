@@ -25,11 +25,11 @@ proptest! {
         let expected = Value::from(
             TupleData::from_data(vec![
                 (
-                    ClarityName::from("mint"),
+                    ClarityName::from_literal("mint"),
                     Value::okay_true(),
                 ),
                 (
-                    ClarityName::from("owner"),
+                    ClarityName::from_literal("owner"),
                     Value::some(owner.into()).unwrap(),
                 ),
             ])
@@ -57,15 +57,15 @@ proptest! {
         let expected = Value::from(
             TupleData::from_data(vec![
                 (
-                    ClarityName::from("a-mint"),
+                    ClarityName::from_literal("a-mint"),
                     Value::okay_true(),
                 ),
                 (
-                    ClarityName::from("b-transfer"),
+                    ClarityName::from_literal("b-transfer"),
                     Value::okay_true(),
                 ),
                 (
-                    ClarityName::from("c-owner"),
+                    ClarityName::from_literal("c-owner"),
                     Value::some(owner2.into()).unwrap(),
                 ),
             ])
@@ -92,15 +92,15 @@ proptest! {
         let expected = Value::from(
             TupleData::from_data(vec![
                 (
-                    ClarityName::from("a-mint"),
+                    ClarityName::from_literal("a-mint"),
                     Value::okay_true(),
                 ),
                 (
-                    ClarityName::from("b-burn"),
+                    ClarityName::from_literal("b-burn"),
                     Value::okay_true(),
                 ),
                 (
-                    ClarityName::from("c-owner"),
+                    ClarityName::from_literal("c-owner"),
                     Value::none(),
                 ),
             ])
@@ -130,11 +130,11 @@ proptest! {
         let expected = Value::from(
             TupleData::from_data(vec![
                 (
-                    ClarityName::from("a-mint"),
+                    ClarityName::from_literal("a-mint"),
                     Value::okay_true(),
                 ),
                 (
-                    ClarityName::from("b-balance"),
+                    ClarityName::from_literal("b-balance"),
                     Value::UInt(total_supply),
                 ),
             ])
@@ -161,15 +161,15 @@ proptest! {
         let expected = Value::from(
             TupleData::from_data(vec![
                 (
-                    ClarityName::from("a-mint"),
+                    ClarityName::from_literal("a-mint"),
                     Value::okay_true(),
                 ),
                 (
-                    ClarityName::from("b-burn"),
+                    ClarityName::from_literal("b-burn"),
                     Value::okay_true(),
                 ),
                 (
-                    ClarityName::from("c-balance"),
+                    ClarityName::from_literal("c-balance"),
                     Value::UInt(0),
                 ),
             ])
@@ -202,27 +202,27 @@ proptest! {
         let expected = Value::from(
             TupleData::from_data(vec![
                 (
-                    ClarityName::from("a-mint1"),
+                    ClarityName::from_literal("a-mint1"),
                     Value::okay_true(),
                 ),
                 (
-                    ClarityName::from("b-mint2"),
+                    ClarityName::from_literal("b-mint2"),
                     Value::okay_true(),
                 ),
                 (
-                    ClarityName::from("c-supply"),
+                    ClarityName::from_literal("c-supply"),
                     Value::UInt(mint_supply * 2),
                 ),
                 (
-                    ClarityName::from("d-transfer"),
+                    ClarityName::from_literal("d-transfer"),
                     Value::okay_true(),
                 ),
                 (
-                    ClarityName::from("e-balance-sender"),
+                    ClarityName::from_literal("e-balance-sender"),
                     Value::UInt(0),
                 ),
                 (
-                    ClarityName::from("f-balance-recipient"),
+                    ClarityName::from_literal("f-balance-recipient"),
                     Value::UInt(mint_supply * 2),
                 ),
             ])

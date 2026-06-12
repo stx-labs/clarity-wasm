@@ -12,10 +12,9 @@ use clarity::types::StacksEpochId;
 use clarity::vm::analysis::run_analysis;
 use clarity::vm::ast::build_ast;
 use clarity::vm::contexts::{EventBatch, GlobalContext};
-use clarity::vm::contracts::Contract;
 use clarity::vm::costs::{CostTracker, ExecutionCost, LimitedCostTracker};
 use clarity::vm::database::ClarityDatabase;
-use clarity::vm::errors::{CheckErrors, Error, WasmError};
+use clarity::vm::errors::{StaticCheckErrorKind, VmExecutionError, WasmError};
 use clarity::vm::events::{SmartContractEventData, StacksTransactionEvent};
 use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
 use clarity::vm::{eval_all, ClarityVersion, ContractContext, ContractName, Value};
@@ -214,13 +213,11 @@ impl TestEnvironment {
             ) => version <= ClarityVersion::Clarity2,
 
             // For epochs 30, 31 and 32, all clarity versions are supported.
-            (
-                StacksEpochId::Epoch30
-                | StacksEpochId::Epoch31
-                | StacksEpochId::Epoch32
-                | StacksEpochId::Epoch33,
-                _,
-            ) => true,
+            (StacksEpochId::Epoch30 | StacksEpochId::Epoch31 | StacksEpochId::Epoch32, _) => true,
+
+            (StacksEpochId::Epoch33, version) => version >= ClarityVersion::Clarity4,
+
+            (StacksEpochId::Epoch34, version) => version >= ClarityVersion::Clarity5,
         }
     }
 
@@ -228,7 +225,7 @@ impl TestEnvironment {
         &mut self,
         contract_name: &str,
         snippet: &str,
-    ) -> Result<Option<Value>, Error> {
+    ) -> Result<Option<Value>, VmExecutionError> {
         self.inner_init_contract_with_snippet(
             contract_name,
             false,
@@ -245,11 +242,11 @@ impl TestEnvironment {
         snippet: &str,
         version: ClarityVersion,
         epoch: StacksEpochId,
-    ) -> Result<Option<Value>, Error> {
+    ) -> Result<Option<Value>, VmExecutionError> {
         let contract_id = match is_boot_contract {
             false => QualifiedContractIdentifier::new(
                 StandardPrincipalData::transient(),
-                (*contract_name).into(),
+                ContractName::try_from(contract_name)?,
             ),
             true => boot_code_id(contract_name, self.is_mainnet),
         };
@@ -267,9 +264,11 @@ impl TestEnvironment {
                     analysis_db,
                     !is_boot_contract && self.emit_cost_code,
                 )
-                .map_err(|e| CheckErrors::Expects(format!("Compilation failure {e:?}")))
+                .map_err(|e| {
+                    StaticCheckErrorKind::Unreachable(format!("Compilation failure {e:?}"))
+                })
             })
-            .map_err(|e| Error::Wasm(WasmError::WasmGeneratorError(format!("{e:?}"))))?;
+            .map_err(|e| VmExecutionError::Wasm(WasmError::WasmGeneratorError(format!("{e:?}"))))?;
 
         self.datastore
             .as_analysis_db()
@@ -306,12 +305,9 @@ impl TestEnvironment {
         )?;
 
         let data_size = contract_context.data_size;
-        global_context.database.insert_contract(
-            &contract_id,
-            Contract {
-                contract_context: contract_context.clone(),
-            },
-        )?;
+        global_context
+            .database
+            .insert_contract(&contract_id, contract_context.clone().into())?;
         global_context
             .database
             .set_contract_data_size(&contract_id, data_size)
@@ -333,7 +329,7 @@ impl TestEnvironment {
         Ok(return_val.ret)
     }
 
-    pub fn evaluate(&mut self, snippet: &str) -> Result<Option<Value>, Error> {
+    pub fn evaluate(&mut self, snippet: &str) -> Result<Option<Value>, VmExecutionError> {
         self.init_contract_with_snippet("snippet", snippet)
     }
 
@@ -354,38 +350,42 @@ impl TestEnvironment {
         &mut self,
         contract_name: &str,
         snippet: &str,
-    ) -> Result<Option<Value>, Error> {
+    ) -> Result<Option<Value>, VmExecutionError> {
         let contract_id = QualifiedContractIdentifier::new(
             StandardPrincipalData::transient(),
-            (*contract_name).into(),
+            ContractName::try_from(contract_name)?,
         );
 
-        let contract_analysis = self.datastore.as_analysis_db().execute(|analysis_db| {
-            let mut cost_tracker = LimitedCostTracker::new_free();
+        let contract_analysis = self
+            .datastore
+            .as_analysis_db()
+            .execute(|analysis_db| {
+                let mut cost_tracker = LimitedCostTracker::new_free();
 
-            // Parse the contract
-            let ast = build_ast(
-                &contract_id,
-                snippet,
-                &mut cost_tracker,
-                self.version,
-                self.epoch,
-            )
-            .map_err(|e| Error::Wasm(WasmError::WasmGeneratorError(format!("{e:?}"))))?;
+                // Parse the contract
+                let ast = build_ast(
+                    &contract_id,
+                    snippet,
+                    &mut cost_tracker,
+                    self.version,
+                    self.epoch,
+                )
+                .map_err(|e| StaticCheckErrorKind::Unreachable(format!("{e:?}")))?;
 
-            // Run the analysis passes
-            run_analysis(
-                &contract_id,
-                &ast.expressions,
-                analysis_db,
-                false,
-                cost_tracker,
-                self.epoch,
-                self.version,
-                true,
-            )
-            .map_err(|boxed| Error::Wasm(WasmError::WasmGeneratorError(format!("{:?}", boxed.0))))
-        })?;
+                // Run the analysis passes
+                run_analysis(
+                    &contract_id,
+                    &ast.expressions,
+                    analysis_db,
+                    false,
+                    cost_tracker,
+                    self.epoch,
+                    self.version,
+                    true,
+                )
+                .map_err(|boxed| StaticCheckErrorKind::Unreachable(format!("{:?}", boxed.0)))
+            })
+            .map_err(|e| VmExecutionError::Wasm(WasmError::WasmGeneratorError(format!("{e:?}"))))?;
 
         self.datastore
             .as_analysis_db()
@@ -424,12 +424,9 @@ impl TestEnvironment {
             None,
         )?;
 
-        global_context.database.insert_contract(
-            &contract_id,
-            Contract {
-                contract_context: contract_context.clone(),
-            },
-        )?;
+        global_context
+            .database
+            .insert_contract(&contract_id, contract_context.clone().into())?;
         global_context
             .database
             .set_contract_data_size(&contract_id, contract_context.data_size)
@@ -447,7 +444,7 @@ impl TestEnvironment {
         Ok(result)
     }
 
-    pub fn interpret(&mut self, snippet: &str) -> Result<Option<Value>, Error> {
+    pub fn interpret(&mut self, snippet: &str) -> Result<Option<Value>, VmExecutionError> {
         self.interpret_contract_with_snippet("snippet", snippet)
     }
 }
@@ -474,7 +471,7 @@ pub fn evaluate_at(
     snippet: &str,
     epoch: StacksEpochId,
     version: ClarityVersion,
-) -> Result<Option<Value>, Error> {
+) -> Result<Option<Value>, VmExecutionError> {
     let mut env = TestEnvironment::new(epoch, version);
     env.evaluate(snippet)
 }
@@ -487,14 +484,14 @@ pub fn evaluate_at_with_amount(
     amount: u128,
     epoch: StacksEpochId,
     version: ClarityVersion,
-) -> Result<Option<Value>, Error> {
+) -> Result<Option<Value>, VmExecutionError> {
     let mut env = TestEnvironment::new_with_amount(amount, epoch, version);
     env.evaluate(snippet)
 }
 
 /// Evaluate a Clarity snippet at the latest epoch and clarity version.
 /// Returns an optional value -- the result of the evaluation.
-pub fn evaluate(snippet: &str) -> Result<Option<Value>, Error> {
+pub fn evaluate(snippet: &str) -> Result<Option<Value>, VmExecutionError> {
     evaluate_at(snippet, StacksEpochId::latest(), ClarityVersion::latest())
 }
 
@@ -504,7 +501,7 @@ pub fn interpret_at(
     snippet: &str,
     epoch: StacksEpochId,
     version: ClarityVersion,
-) -> Result<Option<Value>, Error> {
+) -> Result<Option<Value>, VmExecutionError> {
     let mut env = TestEnvironment::new(epoch, version);
     env.interpret(snippet)
 }
@@ -517,14 +514,14 @@ pub fn interpret_at_with_amount(
     amount: u128,
     epoch: StacksEpochId,
     version: ClarityVersion,
-) -> Result<Option<Value>, Error> {
+) -> Result<Option<Value>, VmExecutionError> {
     let mut env = TestEnvironment::new_with_amount(amount, epoch, version);
     env.interpret(snippet)
 }
 
 /// Interprets a Clarity snippet at the latest epoch and clarity version.
 /// Returns an optional value -- the result of the evaluation.
-pub fn interpret(snippet: &str) -> Result<Option<Value>, Error> {
+pub fn interpret(snippet: &str) -> Result<Option<Value>, VmExecutionError> {
     interpret_at(snippet, StacksEpochId::latest(), ClarityVersion::latest())
 }
 
@@ -550,10 +547,10 @@ impl TestConfig {
 
 struct CrossEvalResult {
     env_interpreted: TestEnvironment,
-    interpreted: Result<Option<Value>, Error>,
+    interpreted: Result<Option<Value>, VmExecutionError>,
 
     env_compiled: TestEnvironment,
-    compiled: Result<Option<Value>, Error>,
+    compiled: Result<Option<Value>, VmExecutionError>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -564,10 +561,10 @@ enum KnownBug {
 
 impl KnownBug {
     fn check_for_known_bugs(
-        compiled: &Result<Option<Value>, Error>,
-        interpreted: &Result<Option<Value>, Error>,
+        compiled: &Result<Option<Value>, VmExecutionError>,
+        interpreted: &Result<Option<Value>, VmExecutionError>,
     ) -> Option<Self> {
-        let check_predicate = |pred: &dyn Fn(&Error) -> bool| {
+        let check_predicate = |pred: &dyn Fn(&VmExecutionError) -> bool| {
             interpreted.as_ref().is_err_and(pred) && compiled.as_ref().is_err_and(pred)
         };
 
@@ -580,13 +577,13 @@ impl KnownBug {
 
     /// Allows to detect if an error suffers from this issue:
     /// [https://github.com/stacks-network/stacks-core/issues/4622].
-    fn has_list_of_qualified_principal_issue(err: &Error) -> bool {
+    fn has_list_of_qualified_principal_issue(err: &VmExecutionError) -> bool {
         static RGX: LazyLock<Regex> = LazyLock::new(|| {
             let regex = r#"expecting expression of type '.*(?:\(principal ([A-Z0-9]{41}\.[^\)]+)\)|principal).*', found '\(.*principal ([^\)]+).*\)'"#;
             Regex::new(regex).unwrap()
         });
 
-        if let Error::Wasm(WasmError::WasmGeneratorError(message)) = err {
+        if let VmExecutionError::Wasm(WasmError::WasmGeneratorError(message)) = err {
             RGX.captures(message).is_some_and(|caps| {
                 caps.get(1)
                     .is_none_or(|cap1| cap1.as_str() == caps.get(2).unwrap().as_str())
@@ -651,7 +648,7 @@ fn execute_crosscheck(
     Some(result)
 }
 
-pub fn crosscheck(snippet: &str, expected: Result<Option<Value>, Error>) {
+pub fn crosscheck(snippet: &str, expected: Result<Option<Value>, VmExecutionError>) {
     if let Some(eval) = execute_crosscheck(
         TestEnvironment::new(TestConfig::latest_epoch(), TestConfig::clarity_version()),
         snippet,
@@ -665,7 +662,11 @@ pub fn crosscheck(snippet: &str, expected: Result<Option<Value>, Error>) {
     }
 }
 
-pub fn crosscheck_with_amount(snippet: &str, amount: u128, expected: Result<Option<Value>, Error>) {
+pub fn crosscheck_with_amount(
+    snippet: &str,
+    amount: u128,
+    expected: Result<Option<Value>, VmExecutionError>,
+) {
     if let Some(eval) = execute_crosscheck(
         TestEnvironment::new_with_amount(
             amount,
@@ -685,7 +686,7 @@ pub fn crosscheck_with_amount(snippet: &str, amount: u128, expected: Result<Opti
 
 pub fn crosscheck_with_env(
     snippet: &str,
-    expected: Result<Option<Value>, Error>,
+    expected: Result<Option<Value>, VmExecutionError>,
     env: TestEnvironment,
 ) {
     if let Some(eval) = execute_crosscheck(env, snippet, |_| {}) {
@@ -738,7 +739,7 @@ pub fn crosscheck_compare_only_with_epoch_and_version(
     crosscheck_compare_only_with_env(snippet, TestEnvironment::new(epoch, version));
 }
 
-pub fn crosscheck_compare_only_with_expected_error<E: Fn(&Error) -> bool>(
+pub fn crosscheck_compare_only_with_expected_error<E: Fn(&VmExecutionError) -> bool>(
     snippet: &str,
     expected: E,
 ) {
@@ -765,11 +766,11 @@ pub fn crosscheck_compare_only_advancing_tip(snippet: &str, count: u32) {
 
 pub fn crosscheck_with_epoch(
     snippet: &str,
-    expected: Result<Option<Value>, Error>,
+    expected: Result<Option<Value>, VmExecutionError>,
     epoch: StacksEpochId,
 ) {
     if let Some(eval) = execute_crosscheck(
-        TestEnvironment::new(epoch, TestConfig::clarity_version()),
+        TestEnvironment::new(epoch, dbg!(TestConfig::clarity_version())),
         snippet,
         |_| {},
     ) {
@@ -783,7 +784,7 @@ pub fn crosscheck_with_epoch(
 
 pub fn crosscheck_with_clarity_version(
     snippet: &str,
-    expected: Result<Option<Value>, Error>,
+    expected: Result<Option<Value>, VmExecutionError>,
     version: ClarityVersion,
 ) {
     if let Some(eval) = execute_crosscheck(
@@ -812,14 +813,14 @@ pub fn crosscheck_validate<V: Fn(Value)>(snippet: &str, validator: V) {
 
 pub fn crosscheck_multi_contract(
     contracts: &[(ContractName, &str)],
-    expected: Result<Option<Value>, Error>,
+    expected: Result<Option<Value>, VmExecutionError>,
 ) {
     crosscheck_multi_contract_with_env(contracts, expected, TestEnvironment::default())
 }
 
 pub fn crosscheck_multi_contract_with_env(
     contracts: &[(ContractName, &str)],
-    expected: Result<Option<Value>, Error>,
+    expected: Result<Option<Value>, VmExecutionError>,
     env: TestEnvironment,
 ) {
     // compiled version
@@ -930,7 +931,7 @@ pub enum Network {
 pub fn crosscheck_with_network(
     network: Network,
     snippet: &str,
-    expected: Result<Option<Value>, Error>,
+    expected: Result<Option<Value>, VmExecutionError>,
 ) {
     let eval = match crosseval(
         snippet,
@@ -1043,7 +1044,7 @@ pub fn as_oom_check_snippet(
                 snippet,
                 &QualifiedContractIdentifier::new(
                     StandardPrincipalData::transient(),
-                    ("foo").into(),
+                    ContractName::from_literal("foo"),
                 ),
                 LimitedCostTracker::new_free(),
                 version,
@@ -1051,7 +1052,7 @@ pub fn as_oom_check_snippet(
                 analysis_db,
                 false,
             )
-            .map_err(|e| CheckErrors::Expects(format!("Compilation failure {e:?}")))
+            .map_err(|e| StaticCheckErrorKind::Unreachable(format!("Compilation failure {e:?}")))
         })
         .expect("Could not compile snippet")
         .module;
@@ -1103,7 +1104,7 @@ pub fn as_oom_check_snippet(
 pub fn crosscheck_oom_with_non_literal_args(
     snippet: &str,
     args_types: &[TypeSignature],
-    expected: Result<Option<Value>, Error>,
+    expected: Result<Option<Value>, VmExecutionError>,
 ) {
     crosscheck(
         &as_oom_check_snippet(
@@ -1125,7 +1126,7 @@ pub fn crosscheck_oom_with_non_literal_args_compare_only(
     crosscheck_compare_only(&as_oom_check_snippet(snippet, args_types, epoch, version));
 }
 
-pub fn crosscheck_oom(snippet: &str, expected: Result<Option<Value>, Error>) {
+pub fn crosscheck_oom(snippet: &str, expected: Result<Option<Value>, VmExecutionError>) {
     crosscheck_oom_with_non_literal_args(snippet, &[], expected)
 }
 
@@ -1139,7 +1140,7 @@ pub fn crosscheck_oom_compare_only_with_epoch_and_version(
 
 pub fn crosscheck_oom_with_env(
     snippet: &str,
-    expected: Result<Option<Value>, Error>,
+    expected: Result<Option<Value>, VmExecutionError>,
     env: TestEnvironment,
 ) {
     crosscheck_with_env(

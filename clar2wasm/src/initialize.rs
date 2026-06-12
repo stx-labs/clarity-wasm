@@ -1,6 +1,6 @@
 use clarity::vm::analysis::ContractAnalysis;
 use clarity::vm::contexts::GlobalContext;
-use clarity::vm::errors::{Error, RuntimeErrorType, WasmError};
+use clarity::vm::errors::{RuntimeError, VmExecutionError, WasmError};
 use clarity::vm::events::*;
 use clarity::vm::types::{AssetIdentifier, BuffData, PrincipalData, QualifiedContractIdentifier};
 use clarity::vm::{CallStack, ContractContext, Value};
@@ -90,10 +90,10 @@ impl<'a, 'b> ClarityWasmContext<'a, 'b> {
         self.sender = Some(sender);
     }
 
-    pub fn pop_sender(&mut self) -> Result<PrincipalData, Error> {
+    pub fn pop_sender(&mut self) -> Result<PrincipalData, VmExecutionError> {
         self.sender
             .take()
-            .ok_or(RuntimeErrorType::NoSenderInContext.into())
+            .ok_or(RuntimeError::NoSenderInContext.into())
             .inspect(|_| {
                 self.sender = self.sender_stack.pop();
             })
@@ -106,10 +106,10 @@ impl<'a, 'b> ClarityWasmContext<'a, 'b> {
         self.caller = Some(caller);
     }
 
-    pub fn pop_caller(&mut self) -> Result<PrincipalData, Error> {
+    pub fn pop_caller(&mut self) -> Result<PrincipalData, VmExecutionError> {
         self.caller
             .take()
-            .ok_or(RuntimeErrorType::NoCallerInContext.into())
+            .ok_or(RuntimeError::NoCallerInContext.into())
             .inspect(|_| {
                 self.caller = self.caller_stack.pop();
             })
@@ -119,10 +119,10 @@ impl<'a, 'b> ClarityWasmContext<'a, 'b> {
         self.bhh_stack.push(bhh);
     }
 
-    pub fn pop_at_block(&mut self) -> Result<StacksBlockId, Error> {
+    pub fn pop_at_block(&mut self) -> Result<StacksBlockId, VmExecutionError> {
         self.bhh_stack
             .pop()
-            .ok_or(Error::Wasm(WasmError::WasmGeneratorError(
+            .ok_or(VmExecutionError::Wasm(WasmError::WasmGeneratorError(
                 "Could not pop at_block".to_string(),
             )))
     }
@@ -140,16 +140,18 @@ impl<'a, 'b> ClarityWasmContext<'a, 'b> {
 
     /// Return a mutable reference to the contract_context if we are currently
     /// initializing a contract, else, return an error.
-    pub fn contract_context_mut(&mut self) -> Result<&mut ContractContext, Error> {
+    pub fn contract_context_mut(&mut self) -> Result<&mut ContractContext, VmExecutionError> {
         match &mut self.contract_context_mut {
             Some(contract_context) => Ok(contract_context),
-            None => Err(Error::Wasm(WasmError::DefineFunctionCalledInRunMode)),
+            None => Err(VmExecutionError::Wasm(
+                WasmError::DefineFunctionCalledInRunMode,
+            )),
         }
     }
 
     pub fn push_to_event_batch(&mut self, event: StacksTransactionEvent) {
         if let Some(batch) = self.global_context.event_batches.last_mut() {
-            batch.events.push(event);
+            batch.0.events.push(event);
         }
     }
 
@@ -165,7 +167,7 @@ impl<'a, 'b> ClarityWasmContext<'a, 'b> {
         StacksTransactionEvent::SmartContractEvent(print_event)
     }
 
-    pub fn register_print_event(&mut self, value: Value) -> Result<(), Error> {
+    pub fn register_print_event(&mut self, value: Value) -> Result<(), VmExecutionError> {
         let event = Self::construct_print_transaction_event(
             &self.contract_context().contract_identifier,
             &value,
@@ -181,7 +183,7 @@ impl<'a, 'b> ClarityWasmContext<'a, 'b> {
         recipient: PrincipalData,
         amount: u128,
         memo: BuffData,
-    ) -> Result<(), Error> {
+    ) -> Result<(), VmExecutionError> {
         let event_data = STXTransferEventData {
             sender,
             recipient,
@@ -198,7 +200,7 @@ impl<'a, 'b> ClarityWasmContext<'a, 'b> {
         &mut self,
         sender: PrincipalData,
         amount: u128,
-    ) -> Result<(), Error> {
+    ) -> Result<(), VmExecutionError> {
         let event_data = STXBurnEventData { sender, amount };
         let event = StacksTransactionEvent::STXEvent(STXEventType::STXBurnEvent(event_data));
 
@@ -212,7 +214,7 @@ impl<'a, 'b> ClarityWasmContext<'a, 'b> {
         recipient: PrincipalData,
         value: Value,
         asset_identifier: AssetIdentifier,
-    ) -> Result<(), Error> {
+    ) -> Result<(), VmExecutionError> {
         let event_data = NFTTransferEventData {
             sender,
             recipient,
@@ -230,7 +232,7 @@ impl<'a, 'b> ClarityWasmContext<'a, 'b> {
         recipient: PrincipalData,
         value: Value,
         asset_identifier: AssetIdentifier,
-    ) -> Result<(), Error> {
+    ) -> Result<(), VmExecutionError> {
         let event_data = NFTMintEventData {
             recipient,
             asset_identifier,
@@ -247,7 +249,7 @@ impl<'a, 'b> ClarityWasmContext<'a, 'b> {
         sender: PrincipalData,
         value: Value,
         asset_identifier: AssetIdentifier,
-    ) -> Result<(), Error> {
+    ) -> Result<(), VmExecutionError> {
         let event_data = NFTBurnEventData {
             sender,
             asset_identifier,
@@ -265,7 +267,7 @@ impl<'a, 'b> ClarityWasmContext<'a, 'b> {
         recipient: PrincipalData,
         amount: u128,
         asset_identifier: AssetIdentifier,
-    ) -> Result<(), Error> {
+    ) -> Result<(), VmExecutionError> {
         let event_data = FTTransferEventData {
             sender,
             recipient,
@@ -283,7 +285,7 @@ impl<'a, 'b> ClarityWasmContext<'a, 'b> {
         recipient: PrincipalData,
         amount: u128,
         asset_identifier: AssetIdentifier,
-    ) -> Result<(), Error> {
+    ) -> Result<(), VmExecutionError> {
         let event_data = FTMintEventData {
             recipient,
             asset_identifier,
@@ -300,7 +302,7 @@ impl<'a, 'b> ClarityWasmContext<'a, 'b> {
         sender: PrincipalData,
         amount: u128,
         asset_identifier: AssetIdentifier,
-    ) -> Result<(), Error> {
+    ) -> Result<(), VmExecutionError> {
         let event_data = FTBurnEventData {
             sender,
             asset_identifier,
@@ -331,7 +333,7 @@ pub fn initialize_contract(
     contract_context: &mut ContractContext,
     sponsor: Option<PrincipalData>,
     contract_analysis: &ContractAnalysis,
-) -> Result<ContractInitReturn, Error> {
+) -> Result<ContractInitReturn, VmExecutionError> {
     let publisher: PrincipalData = contract_context.contract_identifier.issuer.clone().into();
 
     let mut call_stack = CallStack::new();
@@ -351,7 +353,7 @@ pub fn initialize_contract(
         .contract_context()
         .with_wasm_module(|wasm_module| {
             Module::from_binary(&engine, wasm_module)
-                .map_err(|e| Error::Wasm(WasmError::UnableToLoadModule(e)))
+                .map_err(|e| VmExecutionError::Wasm(WasmError::UnableToLoadModule(e)))
         })?;
     let mut store = Store::new(&engine, init_context);
     let mut linker = Linker::new(&engine);
@@ -359,17 +361,17 @@ pub fn initialize_contract(
     link_host_functions(&mut linker)?;
     linker
         .define_cost_globals(&mut store)
-        .map_err(|e| Error::Wasm(WasmError::UnableToLoadModule(e)))?;
+        .map_err(|e| VmExecutionError::Wasm(WasmError::UnableToLoadModule(e)))?;
 
     let instance = linker
         .instantiate(&mut store, &module)
-        .map_err(|e| Error::Wasm(WasmError::UnableToLoadModule(e)))?;
+        .map_err(|e| VmExecutionError::Wasm(WasmError::UnableToLoadModule(e)))?;
 
     // Call the `.top-level` function, which contains all top-level expressions
     // from the contract.
     let top_level = instance
         .get_func(&mut store, ".top-level")
-        .ok_or(Error::Wasm(WasmError::DefinesNotFound))?;
+        .ok_or(VmExecutionError::Wasm(WasmError::DefinesNotFound))?;
 
     // Get the return type of the top-level expressions function
     let ty = top_level.ty(&mut store);
@@ -389,7 +391,7 @@ pub fn initialize_contract(
     store.data_mut().contract_context_mut()?.set_wasm_module(
         module
             .serialize()
-            .map_err(|e| Error::Wasm(WasmError::WasmCompileFailed(e)))?,
+            .map_err(|e| VmExecutionError::Wasm(WasmError::WasmCompileFailed(e)))?,
     );
 
     // Get the type of the last top-level expression with a return value
@@ -404,7 +406,7 @@ pub fn initialize_contract(
     let ret = if let Some(return_type) = return_type {
         let memory = instance
             .get_memory(&mut store, "memory")
-            .ok_or(Error::Wasm(WasmError::MemoryNotFound))?;
+            .ok_or(VmExecutionError::Wasm(WasmError::MemoryNotFound))?;
         wasm_to_clarity_value(return_type, 0, &results, memory, &mut &mut store, epoch)
             .map(|(val, _offset)| val)?
     } else {
@@ -413,7 +415,7 @@ pub fn initialize_contract(
 
     let cost = linker
         .get_used_cost(&mut store)
-        .map_err(|_| Error::Wasm(WasmError::GlobalNotFound("cost-*".to_string())))?;
+        .map_err(|_| VmExecutionError::Wasm(WasmError::GlobalNotFound("cost-*".to_string())))?;
 
     Ok(ContractInitReturn { ret, cost })
 }

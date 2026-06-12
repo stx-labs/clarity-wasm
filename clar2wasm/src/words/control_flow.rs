@@ -14,7 +14,7 @@ pub struct Begin;
 
 impl Word for Begin {
     fn name(&self) -> ClarityName {
-        "begin".into()
+        ClarityName::from_literal("begin")
     }
 }
 
@@ -54,7 +54,7 @@ pub struct UnwrapPanic;
 
 impl Word for UnwrapPanic {
     fn name(&self) -> ClarityName {
-        "unwrap-panic".into()
+        ClarityName::from_literal("unwrap-panic")
     }
 }
 
@@ -196,7 +196,7 @@ pub struct UnwrapErrPanic;
 
 impl Word for UnwrapErrPanic {
     fn name(&self) -> ClarityName {
-        "unwrap-err-panic".into()
+        ClarityName::from_literal("unwrap-err-panic")
     }
 }
 
@@ -290,7 +290,7 @@ impl ComplexWord for UnwrapErrPanic {
 
 #[cfg(test)]
 mod tests {
-    use clarity::vm::errors::{Error, RuntimeErrorType};
+    use clarity::vm::errors::{RuntimeError, VmExecutionError};
     use clarity::vm::Value;
 
     use crate::tools::{crosscheck, crosscheck_expect_failure, evaluate};
@@ -361,8 +361,8 @@ mod tests {
 
         crosscheck(
             snippet,
-            Err(Error::Runtime(
-                RuntimeErrorType::UnwrapFailure,
+            Err(VmExecutionError::Runtime(
+                RuntimeError::UnwrapFailure,
                 Some(Vec::new()),
             )),
         )
@@ -383,8 +383,8 @@ mod tests {
 
         crosscheck(
             snippet,
-            Err(Error::Runtime(
-                RuntimeErrorType::UnwrapFailure,
+            Err(VmExecutionError::Runtime(
+                RuntimeError::UnwrapFailure,
                 Some(Vec::new()),
             )),
         )
@@ -405,8 +405,8 @@ mod tests {
 
         crosscheck(
             snippet,
-            Err(Error::Runtime(
-                RuntimeErrorType::UnwrapFailure,
+            Err(VmExecutionError::Runtime(
+                RuntimeError::UnwrapFailure,
                 Some(Vec::new()),
             )),
         )
@@ -415,7 +415,7 @@ mod tests {
     /// Verify that the full response type is set correctly for the last
     /// expression in a `begin` block.
     #[test]
-    fn begin_response_type_bug() -> Result<(), Error> {
+    fn begin_response_type_bug() -> Result<(), VmExecutionError> {
         evaluate(
             r#"
 (define-private (foo)

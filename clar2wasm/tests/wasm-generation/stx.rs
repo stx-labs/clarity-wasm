@@ -23,15 +23,15 @@ proptest! {
         let expected = Value::from(
             TupleData::from_data(vec![
                 (
-                    ClarityName::from("a-balance1"),
+                    ClarityName::from_literal("a-balance1"),
                     Value::UInt(amount),
                 ),
                 (
-                    ClarityName::from("b-burn"),
+                    ClarityName::from_literal("b-burn"),
                     Value::okay_true(),
                 ),
                 (
-                    ClarityName::from("c-balance2"),
+                    ClarityName::from_literal("c-balance2"),
                     Value::UInt(0),
                 ),
             ])
@@ -58,19 +58,19 @@ proptest! {
         let expected = Value::from(
             TupleData::from_data(vec![
                 (
-                    ClarityName::from("a-balance-before"),
+                    ClarityName::from_literal("a-balance-before"),
                     Value::UInt(amount),
                 ),
                 (
-                    ClarityName::from("b-transfer"),
+                    ClarityName::from_literal("b-transfer"),
                     Value::okay_true(),
                 ),
                 (
-                    ClarityName::from("c-balance-former"),
+                    ClarityName::from_literal("c-balance-former"),
                     Value::UInt(0),
                 ),
                 (
-                    ClarityName::from("d-balance-new"),
+                    ClarityName::from_literal("d-balance-new"),
                     Value::UInt(amount),
                 ),
             ])
@@ -99,19 +99,19 @@ proptest! {
         let expected = Value::from(
             TupleData::from_data(vec![
                 (
-                    ClarityName::from("a-balance-before"),
+                    ClarityName::from_literal("a-balance-before"),
                     Value::UInt(amount),
                 ),
                 (
-                    ClarityName::from("b-transfer"),
+                    ClarityName::from_literal("b-transfer"),
                     Value::okay_true(),
                 ),
                 (
-                    ClarityName::from("c-balance-former"),
+                    ClarityName::from_literal("c-balance-former"),
                     Value::UInt(0),
                 ),
                 (
-                    ClarityName::from("d-balance-new"),
+                    ClarityName::from_literal("d-balance-new"),
                     Value::UInt(amount),
                 ),
             ])

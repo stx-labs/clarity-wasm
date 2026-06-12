@@ -17,7 +17,7 @@ pub struct TupleCons;
 
 impl Word for TupleCons {
     fn name(&self) -> ClarityName {
-        "tuple".into()
+        ClarityName::from_literal("tuple")
     }
 }
 
@@ -106,7 +106,7 @@ pub struct TupleGet;
 
 impl Word for TupleGet {
     fn name(&self) -> ClarityName {
-        "get".into()
+        ClarityName::from_literal("get")
     }
 }
 
@@ -184,7 +184,7 @@ pub struct TupleMerge;
 
 impl Word for TupleMerge {
     fn name(&self) -> ClarityName {
-        "merge".into()
+        ClarityName::from_literal("merge")
     }
 }
 
@@ -347,7 +347,7 @@ mod tests {
 
         let expected = Value::from(
             clarity::vm::types::TupleData::from_data(vec![(
-                clarity::vm::ClarityName::from("a"),
+                clarity::vm::ClarityName::from_literal("a"),
                 Value::Sequence(clarity::vm::types::SequenceData::String(
                     clarity::vm::types::CharType::ASCII(clarity::vm::types::ASCIIData {
                         data: "Hello, World!".bytes().collect(),
@@ -368,23 +368,26 @@ mod tests {
         let expected = Value::from(
             clarity::vm::types::TupleData::from_data(vec![
                 (
-                    clarity::vm::ClarityName::from("a"),
+                    clarity::vm::ClarityName::from_literal("a"),
                     Value::Sequence(clarity::vm::types::SequenceData::String(
                         clarity::vm::types::CharType::ASCII(clarity::vm::types::ASCIIData {
                             data: "Hello, World!".bytes().collect(),
                         }),
                     )),
                 ),
-                (clarity::vm::ClarityName::from("b"), Value::UInt(789)),
                 (
-                    clarity::vm::ClarityName::from("c"),
+                    clarity::vm::ClarityName::from_literal("b"),
+                    Value::UInt(789),
+                ),
+                (
+                    clarity::vm::ClarityName::from_literal("c"),
                     Value::Sequence(clarity::vm::types::SequenceData::Buffer(
                         clarity::vm::types::BuffData {
                             data: vec![0xde, 0xad, 0xbe, 0xef],
                         },
                     )),
                 ),
-                (clarity::vm::ClarityName::from("d"), Value::Int(123)),
+                (clarity::vm::ClarityName::from_literal("d"), Value::Int(123)),
             ])
             .unwrap(),
         );
@@ -404,8 +407,8 @@ mod tests {
 
         let expected = Value::from(
             TupleData::from_data(vec![
-                (ClarityName::from("b"), Value::Bool(true)),
-                (ClarityName::from("a"), Value::Int(2)),
+                (ClarityName::from_literal("b"), Value::Bool(true)),
+                (ClarityName::from_literal("a"), Value::Int(2)),
             ])
             .unwrap(),
         );

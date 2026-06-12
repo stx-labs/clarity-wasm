@@ -19,9 +19,10 @@ use clarity::util::hash::Sha512Trunc256Sum;
 use clarity::vm::analysis::AnalysisDatabase;
 use clarity::vm::costs::ExecutionCost;
 use clarity::vm::database::{BurnStateDB, ClarityBackingStore, HeadersDB};
-use clarity::vm::errors::{InterpreterError, InterpreterResult as Result};
+use clarity::vm::errors::{VmExecutionError, VmInternalError};
 use clarity::vm::types::{QualifiedContractIdentifier, TupleData};
 use clarity::vm::{StacksEpoch, Value};
+use clarity_types::ClarityName;
 use rusqlite::Connection;
 use sha2::{Digest, Sha512_256};
 
@@ -120,10 +121,13 @@ fn height_to_block(height: u32, genesis_time: Option<u64>) -> BlockInfo {
     let pox_payout_addrs = (
         vec![TupleData::from_data(vec![
             (
-                "hashbytes".into(),
+                ClarityName::from_literal("hashbytes"),
                 Value::buff_from([0; 32].to_vec()).unwrap(),
             ),
-            ("version".into(), Value::buff_from_byte(0)),
+            (
+                ClarityName::from_literal("version"),
+                Value::buff_from_byte(0),
+            ),
         ])
         .unwrap()],
         0_u128,
@@ -199,7 +203,7 @@ impl Default for Datastore {
 }
 
 impl ClarityBackingStore for Datastore {
-    fn put_all_data(&mut self, items: Vec<(String, String)>) -> Result<()> {
+    fn put_all_data(&mut self, items: Vec<(String, String)>) -> Result<(), VmExecutionError> {
         for (key, value) in items {
             self.put(&key, &value);
         }
@@ -207,12 +211,12 @@ impl ClarityBackingStore for Datastore {
     }
 
     /// fetch K-V out of the committed datastore
-    fn get_data(&mut self, key: &str) -> Result<Option<String>> {
+    fn get_data(&mut self, key: &str) -> Result<Option<String>, VmExecutionError> {
         let lookup_id = self
             .block_id_lookup
             .get(&self.current_chain_tip)
             .ok_or_else(|| {
-                InterpreterError::Expect(
+                VmInternalError::Expect(
                     "Could not find current chain tip in block_id_lookup map".to_string(),
                 )
             })?;
@@ -221,7 +225,7 @@ impl ClarityBackingStore for Datastore {
             Ok(map.get(key).cloned())
         } else {
             Err(
-                InterpreterError::Expect("Block does not exist for current chain tip".to_string())
+                VmInternalError::Expect("Block does not exist for current chain tip".to_string())
                     .into(),
             )
         }
@@ -231,18 +235,18 @@ impl ClarityBackingStore for Datastore {
     fn get_data_from_path(
         &mut self,
         _hash: &clarity::types::chainstate::TrieHash,
-    ) -> Result<Option<String>> {
+    ) -> Result<Option<String>, VmExecutionError> {
         unreachable!()
     }
 
-    fn has_entry(&mut self, key: &str) -> Result<bool> {
+    fn has_entry(&mut self, key: &str) -> Result<bool, VmExecutionError> {
         Ok(self.get_data(key)?.is_some())
     }
 
     /// change the current MARF context to service reads from a different chain_tip
     ///   used to implement time-shifted evaluation.
     /// returns the previous block header hash on success
-    fn set_block_hash(&mut self, bhh: StacksBlockId) -> Result<StacksBlockId> {
+    fn set_block_hash(&mut self, bhh: StacksBlockId) -> Result<StacksBlockId, VmExecutionError> {
         let prior_tip = self.open_chain_tip.clone();
         self.current_chain_tip = bhh;
         Ok(prior_tip)
@@ -275,7 +279,7 @@ impl ClarityBackingStore for Datastore {
         contract: &QualifiedContractIdentifier,
         key: &str,
         value: &str,
-    ) -> Result<()> {
+    ) -> Result<(), VmExecutionError> {
         self.metadata
             .insert((contract.to_string(), key.to_string()), value.to_string());
         Ok(())
@@ -285,7 +289,7 @@ impl ClarityBackingStore for Datastore {
         &mut self,
         contract: &QualifiedContractIdentifier,
         key: &str,
-    ) -> Result<Option<String>> {
+    ) -> Result<Option<String>, VmExecutionError> {
         let key = &(contract.to_string(), key.to_string());
 
         match self.metadata.get(key) {
@@ -294,7 +298,10 @@ impl ClarityBackingStore for Datastore {
         }
     }
 
-    fn get_data_with_proof(&mut self, _key: &str) -> Result<Option<(String, Vec<u8>)>> {
+    fn get_data_with_proof(
+        &mut self,
+        _key: &str,
+    ) -> Result<Option<(String, Vec<u8>)>, VmExecutionError> {
         Ok(None)
     }
 
@@ -302,14 +309,14 @@ impl ClarityBackingStore for Datastore {
     fn get_data_with_proof_from_path(
         &mut self,
         _hash: &clarity::types::chainstate::TrieHash,
-    ) -> Result<Option<(String, Vec<u8>)>> {
+    ) -> Result<Option<(String, Vec<u8>)>, VmExecutionError> {
         unreachable!()
     }
 
     fn get_contract_hash(
         &mut self,
         _contract: &QualifiedContractIdentifier,
-    ) -> Result<(StacksBlockId, Sha512Trunc256Sum)> {
+    ) -> Result<(StacksBlockId, Sha512Trunc256Sum), VmExecutionError> {
         panic!("Datastore cannot get_contract_hash")
     }
 
@@ -318,7 +325,7 @@ impl ClarityBackingStore for Datastore {
         _at_height: u32,
         _contract: &QualifiedContractIdentifier,
         _key: &str,
-    ) -> Result<Option<String>> {
+    ) -> Result<Option<String>, VmExecutionError> {
         panic!("Datastore cannot get_metadata_manual")
     }
 
@@ -348,10 +355,13 @@ impl BurnDatastore {
             pox_payout_addrs: (
                 vec![TupleData::from_data(vec![
                     (
-                        "hashbytes".into(),
+                        ClarityName::from_literal("hashbytes"),
                         Value::buff_from([0; 32].to_vec()).unwrap(),
                     ),
-                    ("version".into(), Value::buff_from_byte(0)),
+                    (
+                        ClarityName::from_literal("version"),
+                        Value::buff_from_byte(0),
+                    ),
                 ])
                 .unwrap()],
                 0_u128,
@@ -451,6 +461,7 @@ impl HeadersDB for BurnDatastore {
     fn get_vrf_seed_for_block(
         &self,
         id_bhh: &StacksBlockId,
+        _tip: &StacksBlockId,
         _epoch_id: &StacksEpochId,
     ) -> Option<VRFSeed> {
         self.store.get(id_bhh).map(|id| id.vrf_seed.clone())
@@ -471,6 +482,7 @@ impl HeadersDB for BurnDatastore {
     fn get_miner_address(
         &self,
         id_bhh: &StacksBlockId,
+        _tip: &StacksBlockId,
         _epoch_id: &StacksEpochId,
     ) -> Option<StacksAddress> {
         self.store.get(id_bhh).map(|id| id.miner.clone())
@@ -478,6 +490,7 @@ impl HeadersDB for BurnDatastore {
     fn get_burnchain_tokens_spent_for_block(
         &self,
         id_bhh: &StacksBlockId,
+        _tip: &StacksBlockId,
         _epoch_id: &StacksEpochId,
     ) -> Option<u128> {
         self.store
@@ -487,6 +500,7 @@ impl HeadersDB for BurnDatastore {
     fn get_burnchain_tokens_spent_for_winning_block(
         &self,
         id_bhh: &StacksBlockId,
+        _tip: &StacksBlockId,
         _epoch_id: &StacksEpochId,
     ) -> Option<u128> {
         self.store
@@ -496,6 +510,7 @@ impl HeadersDB for BurnDatastore {
     fn get_tokens_earned_for_block(
         &self,
         id_bhh: &StacksBlockId,
+        _tip: &StacksBlockId,
         _epoch_id: &StacksEpochId,
     ) -> Option<u128> {
         self.store.get(id_bhh).map(|id| id.tokens_earned_for_block)
@@ -619,7 +634,10 @@ impl BurnStateDB for BurnDatastore {
 }
 
 impl Datastore {
-    pub fn open(_path_str: &str, _miner_tip: Option<&StacksBlockId>) -> Result<Datastore> {
+    pub fn open(
+        _path_str: &str,
+        _miner_tip: Option<&StacksBlockId>,
+    ) -> Result<Datastore, VmExecutionError> {
         Ok(Datastore::new())
     }
 

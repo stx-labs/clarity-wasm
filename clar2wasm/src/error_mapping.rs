@@ -1,10 +1,13 @@
 use clarity::types::StacksEpochId;
 use clarity::vm::costs::CostErrors;
-use clarity::vm::errors::{CheckErrors, Error, RuntimeErrorType, ShortReturnType, WasmError};
+use clarity::vm::errors::{
+    CommonCheckErrorKind, EarlyReturnError, RuntimeCheckErrorKind, RuntimeError, VmExecutionError,
+    WasmError,
+};
 use clarity::vm::types::ResponseData;
 use clarity::vm::{ClarityVersion, Value};
 use clarity_types::types::{ASCIIData, CharType};
-use clarity_types::ClarityName;
+use clarity_types::{ClarityName, ClarityTypeError};
 use walrus::InstrSeqBuilder;
 use wasmtime::{AsContextMut, Instance, Trap};
 
@@ -84,6 +87,9 @@ pub enum ErrorMap {
     /// Indicates an attempt to use a function with too many arguments
     ArgumentCountAtMost = 15,
 
+    /// Indicates an attempt to use a function with too many arguments
+    SequenceElementArityMismatch = 16,
+
     /// Indicates a runtime cost overrun
     CostOverrunRuntime = 100,
 
@@ -118,6 +124,7 @@ impl From<i32> for ErrorMap {
             2 => ErrorMap::DivisionByZero,
             3 => ErrorMap::ArithmeticLog2Error,
             4 => ErrorMap::ArithmeticSqrtiError,
+            // TODO: This error needs to be removed/changed the same way it has been in stacks/core
             5 => ErrorMap::BadTypeConstruction,
             6 => ErrorMap::Panic,
             7 => ErrorMap::ShortReturnAssertionFailure,
@@ -129,6 +136,7 @@ impl From<i32> for ErrorMap {
             13 => ErrorMap::ArgumentCountMismatch,
             14 => ErrorMap::ArgumentCountAtLeast,
             15 => ErrorMap::ArgumentCountAtMost,
+            16 => ErrorMap::SequenceElementArityMismatch,
             100 => ErrorMap::CostOverrunRuntime,
             101 => ErrorMap::CostOverrunReadCount,
             102 => ErrorMap::CostOverrunReadLength,
@@ -165,15 +173,21 @@ pub(crate) fn resolve_error(
     mut store: impl AsContextMut,
     epoch_id: &StacksEpochId,
     clarity_version: &ClarityVersion,
-) -> Error {
-    if let Some(vm_error) = e.root_cause().downcast_ref::<Error>() {
-        return referror_to_error(vm_error, Error::Wasm(WasmError::ModuleNotFound));
+) -> VmExecutionError {
+    if let Some(vm_error) = e.root_cause().downcast_ref::<VmExecutionError>() {
+        return referror_to_error(vm_error, VmExecutionError::Wasm(WasmError::ModuleNotFound));
     };
 
-    if let Some(vm_error) = e.root_cause().downcast_ref::<CheckErrors>() {
-        return <CheckErrors as std::convert::Into<Error>>::into(referror_to_error(
+    if let Some(vm_error) = e.root_cause().downcast_ref::<RuntimeCheckErrorKind>() {
+        return <RuntimeCheckErrorKind as std::convert::Into<VmExecutionError>>::into(
+            referror_to_error(vm_error, RuntimeCheckErrorKind::AtBlockUnavailable),
+        );
+    };
+
+    if let Some(vm_error) = e.root_cause().downcast_ref::<RuntimeError>() {
+        return <RuntimeError as std::convert::Into<VmExecutionError>>::into(referror_to_error(
             vm_error,
-            CheckErrors::ExpectedName,
+            RuntimeError::ArithmeticOverflow,
         ));
     };
 
@@ -187,7 +201,7 @@ pub(crate) fn resolve_error(
     }
 
     // All other errors are treated as general runtime errors.
-    Error::Wasm(WasmError::Runtime(e))
+    VmExecutionError::Wasm(WasmError::Runtime(e))
 }
 
 /// Converts a WebAssembly runtime error code into a Clarity `Error`.
@@ -207,42 +221,42 @@ fn from_runtime_error_code(
     e: wasmtime::Error,
     epoch_id: &StacksEpochId,
     clarity_version: &ClarityVersion,
-) -> Error {
+) -> VmExecutionError {
     let runtime_error_code = get_global_i32(&instance, &mut store, "runtime-error-code");
 
     match ErrorMap::from(runtime_error_code) {
-        ErrorMap::NotClarityError => Error::Wasm(WasmError::Runtime(e)),
+        ErrorMap::NotClarityError => VmExecutionError::Wasm(WasmError::Runtime(e)),
         ErrorMap::ArithmeticOverflow => {
-            Error::Runtime(RuntimeErrorType::ArithmeticOverflow, Some(Vec::new()))
+            VmExecutionError::Runtime(RuntimeError::ArithmeticOverflow, Some(Vec::new()))
         }
         ErrorMap::ArithmeticUnderflow => {
-            Error::Runtime(RuntimeErrorType::ArithmeticUnderflow, Some(Vec::new()))
+            VmExecutionError::Runtime(RuntimeError::ArithmeticUnderflow, Some(Vec::new()))
         }
         ErrorMap::DivisionByZero => {
-            Error::Runtime(RuntimeErrorType::DivisionByZero, Some(Vec::new()))
+            VmExecutionError::Runtime(RuntimeError::DivisionByZero, Some(Vec::new()))
         }
-        ErrorMap::ArithmeticLog2Error => Error::Runtime(
-            RuntimeErrorType::Arithmetic(LOG2_ERROR_MESSAGE.into()),
+        ErrorMap::ArithmeticLog2Error => VmExecutionError::Runtime(
+            RuntimeError::Arithmetic(LOG2_ERROR_MESSAGE.into()),
             Some(Vec::new()),
         ),
-        ErrorMap::ArithmeticSqrtiError => Error::Runtime(
-            RuntimeErrorType::Arithmetic(SQRTI_ERROR_MESSAGE.into()),
+        ErrorMap::ArithmeticSqrtiError => VmExecutionError::Runtime(
+            RuntimeError::Arithmetic(SQRTI_ERROR_MESSAGE.into()),
             Some(Vec::new()),
         ),
         ErrorMap::BadTypeConstruction => {
-            Error::Runtime(RuntimeErrorType::BadTypeConstruction, Some(Vec::new()))
+            VmExecutionError::Runtime(RuntimeError::BadTypeConstruction, Some(Vec::new()))
         }
         ErrorMap::Panic => {
             // TODO: see issue: #531
-            // This RuntimeErrorType::UnwrapFailure need to have a proper context.
-            Error::Runtime(RuntimeErrorType::UnwrapFailure, Some(Vec::new()))
+            // This RuntimeError::UnwrapFailure need to have a proper context.
+            VmExecutionError::Runtime(RuntimeError::UnwrapFailure, Some(Vec::new()))
         }
         ErrorMap::ShortReturnAssertionFailure => {
             let clarity_val = short_return_value(&instance, &mut store, epoch_id, clarity_version);
-            Error::ShortReturn(ShortReturnType::AssertionFailed(Box::new(clarity_val)))
+            VmExecutionError::EarlyReturn(EarlyReturnError::AssertionFailed(Box::new(clarity_val)))
         }
-        ErrorMap::ArithmeticPowError => Error::Runtime(
-            RuntimeErrorType::Arithmetic(POW_ERROR_MESSAGE.into()),
+        ErrorMap::ArithmeticPowError => VmExecutionError::Runtime(
+            RuntimeError::Arithmetic(POW_ERROR_MESSAGE.into()),
             Some(Vec::new()),
         ),
         ErrorMap::NameAlreadyUsed => {
@@ -262,62 +276,76 @@ fn from_runtime_error_code(
             )
             .unwrap_or_else(|e| panic!("Could not recover arg_name: {e}"));
 
-            Error::Unchecked(CheckErrors::NameAlreadyUsed(arg_name))
+            VmExecutionError::RuntimeCheck(RuntimeCheckErrorKind::NameAlreadyUsed(arg_name))
         }
         ErrorMap::ShortReturnExpectedValueResponse => {
             let clarity_val = short_return_value(&instance, &mut store, epoch_id, clarity_version);
-            Error::ShortReturn(ShortReturnType::ExpectedValue(Box::new(Value::Response(
-                ResponseData {
+            VmExecutionError::EarlyReturn(EarlyReturnError::UnwrapFailed(Box::new(
+                Value::Response(ResponseData {
                     committed: false,
                     data: Box::new(clarity_val),
-                },
-            ))))
+                }),
+            )))
         }
         ErrorMap::ShortReturnExpectedValueOptional => {
-            Error::ShortReturn(ShortReturnType::ExpectedValue(Box::new(Value::Optional(
-                clarity::vm::types::OptionalData { data: None },
-            ))))
+            VmExecutionError::EarlyReturn(EarlyReturnError::UnwrapFailed(Box::new(
+                Value::Optional(clarity::vm::types::OptionalData { data: None }),
+            )))
         }
         ErrorMap::ShortReturnExpectedValue => {
             let clarity_val = short_return_value(&instance, &mut store, epoch_id, clarity_version);
-            Error::ShortReturn(ShortReturnType::ExpectedValue(Box::new(clarity_val)))
+            VmExecutionError::EarlyReturn(EarlyReturnError::UnwrapFailed(Box::new(clarity_val)))
         }
         ErrorMap::ArgumentCountMismatch => {
             let (expected, got) = get_runtime_error_arg_lengths(&instance, &mut store);
-            Error::Unchecked(CheckErrors::IncorrectArgumentCount(expected, got))
+            VmExecutionError::RuntimeCheck(RuntimeCheckErrorKind::IncorrectArgumentCount(
+                expected, got,
+            ))
         }
         ErrorMap::ArgumentCountAtLeast => {
             let (expected, got) = get_runtime_error_arg_lengths(&instance, &mut store);
-            Error::Unchecked(CheckErrors::RequiresAtLeastArguments(expected, got))
+            CommonCheckErrorKind::RequiresAtLeastArguments(expected, got).into()
         }
         ErrorMap::ArgumentCountAtMost => {
             let (expected, got) = get_runtime_error_arg_lengths(&instance, &mut store);
-            Error::Unchecked(CheckErrors::RequiresAtMostArguments(expected, got))
+            CommonCheckErrorKind::RequiresAtMostArguments(expected, got).into()
         }
-        ErrorMap::CostOverrunRuntime => Error::from(CostErrors::CostOverflow),
-        ErrorMap::CostOverrunReadCount => Error::from(CostErrors::CostOverflow),
-        ErrorMap::CostOverrunReadLength => Error::from(CostErrors::CostOverflow),
-        ErrorMap::CostOverrunWriteCount => Error::from(CostErrors::CostOverflow),
-        ErrorMap::CostOverrunWriteLength => Error::from(CostErrors::CostOverflow),
+        ErrorMap::SequenceElementArityMismatch => {
+            let (expected, found) = get_runtime_error_arg_lengths(&instance, &mut store);
+            VmExecutionError::RuntimeCheck(
+                ClarityTypeError::SequenceElementArityMismatch { expected, found }.into(),
+            )
+        }
+        ErrorMap::CostOverrunRuntime => VmExecutionError::from(CostErrors::CostOverflow),
+        ErrorMap::CostOverrunReadCount => VmExecutionError::from(CostErrors::CostOverflow),
+        ErrorMap::CostOverrunReadLength => VmExecutionError::from(CostErrors::CostOverflow),
+        ErrorMap::CostOverrunWriteCount => VmExecutionError::from(CostErrors::CostOverflow),
+        ErrorMap::CostOverrunWriteLength => VmExecutionError::from(CostErrors::CostOverflow),
         ErrorMap::ExternError => {
             match instance.get_global(store.as_context_mut(), "linked-error") {
-                None => Error::Wasm(WasmError::GlobalNotFound("runtime-error-linked".to_owned())),
+                None => VmExecutionError::Wasm(WasmError::GlobalNotFound(
+                    "runtime-error-linked".to_owned(),
+                )),
                 Some(global) => match global.get(store.as_context_mut()).unwrap_externref() {
-                    None => Error::Wasm(WasmError::Expect("".to_owned())),
+                    None => VmExecutionError::Wasm(WasmError::Expect("".to_owned())),
                     Some(linked_error_extern) => {
-                        match linked_error_extern.data().downcast_ref::<Error>() {
-                            None => Error::Wasm(WasmError::Expect(
+                        match linked_error_extern
+                            .data()
+                            .downcast_ref::<VmExecutionError>()
+                        {
+                            None => VmExecutionError::Wasm(WasmError::Expect(
                                 "runtime-error-linked should hold an error type".to_owned(),
                             )),
-                            Some(ref_error) => {
-                                referror_to_error(ref_error, Error::Wasm(WasmError::ModuleNotFound))
-                            }
+                            Some(ref_error) => referror_to_error(
+                                ref_error,
+                                VmExecutionError::Wasm(WasmError::ModuleNotFound),
+                            ),
                         }
                     }
                 },
             }
         }
-        ErrorMap::SignatureTypeSizeCheckError => Error::from(CheckErrors::Expects(
+        ErrorMap::SignatureTypeSizeCheckError => VmExecutionError::Wasm(WasmError::Expect(
             "FAIL: .size() overflowed on too large of a type. construction should have failed!"
                 .into(),
         )),

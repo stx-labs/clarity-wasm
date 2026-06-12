@@ -1,5 +1,5 @@
 use clar2wasm::tools::{crosscheck_compare_only, crosscheck_compare_only_with_expected_error};
-use clarity::vm::errors::{Error, RuntimeErrorType};
+use clarity::vm::errors::{RuntimeError, VmExecutionError};
 use proptest::proptest;
 
 use crate::{int, uint};
@@ -16,7 +16,7 @@ proptest! {
         for op in &ONE_VALUE_OPS {
             crosscheck_compare_only_with_expected_error(
                 &format!("({op} {v1})"),
-                |e| matches!(e, Error::Runtime(RuntimeErrorType::Arithmetic(_), _))
+                |e| matches!(e, VmExecutionError::Runtime(RuntimeError::Arithmetic(_), _))
             )
         }
     }
@@ -44,8 +44,8 @@ proptest! {
             crosscheck_compare_only_with_expected_error(
                 &format!("({op} {v1} {v2})"),
                 |e| matches!(e,
-                    Error::Runtime(
-                        RuntimeErrorType::ArithmeticOverflow | RuntimeErrorType::Arithmetic(_),
+                    VmExecutionError::Runtime(
+                        RuntimeError::ArithmeticOverflow | RuntimeError::Arithmetic(_),
                         _)))
         }
     }
@@ -60,9 +60,9 @@ proptest! {
             crosscheck_compare_only_with_expected_error(
                 &format!("({op} {v1} {v2})"),
                 |e| matches!(e,
-                    Error::Runtime(
-                        RuntimeErrorType::ArithmeticOverflow |
-                        RuntimeErrorType::Arithmetic(_),
+                    VmExecutionError::Runtime(
+                        RuntimeError::ArithmeticOverflow |
+                        RuntimeError::Arithmetic(_),
                         _)))
         }
     }
@@ -77,9 +77,9 @@ proptest! {
             let values_str = values.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(" ");
             crosscheck_compare_only_with_expected_error(
                 &format!("({op} {values_str})"),
-                |e| matches!(e, Error::Runtime(
-                    RuntimeErrorType::ArithmeticOverflow |
-                    RuntimeErrorType::ArithmeticUnderflow, _))
+                |e| matches!(e, VmExecutionError::Runtime(
+                    RuntimeError::ArithmeticOverflow |
+                    RuntimeError::ArithmeticUnderflow, _))
             )
         }
     }
@@ -93,9 +93,9 @@ proptest! {
         for op in &MULTI_VALUE_OPS {
             crosscheck_compare_only_with_expected_error(
                 &format!("({op} {v1} {v2})"),
-                |e| matches!(e, Error::Runtime(
-                    RuntimeErrorType::ArithmeticOverflow |
-                    RuntimeErrorType::ArithmeticUnderflow, _))
+                |e| matches!(e, VmExecutionError::Runtime(
+                    RuntimeError::ArithmeticOverflow |
+                    RuntimeError::ArithmeticUnderflow, _))
             )
         }
     }

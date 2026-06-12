@@ -29,7 +29,7 @@ mod clarity_v2_v3 {
                 &format!("(from-consensus-buff? {{a: int}} {serialized})"),
                 Ok(Some(
                     Value::some(Value::Tuple(
-                        TupleData::from_data(vec![("a".into(), Value::Int(42))]).unwrap(),
+                        TupleData::from_data(vec![(ClarityName::from_literal("a"), Value::Int(42))]).unwrap(),
                     ))
                     .unwrap(),
                 )),
@@ -46,7 +46,7 @@ mod clarity_v2_v3 {
                 &format!("(from-consensus-buff? {{b: int}} 0x0c000000020161{}0162000000000000000000000000000000002a)", hex::encode(data)),
                 Ok(Some(
                     Value::some(Value::Tuple(
-                        TupleData::from_data(vec![("b".into(), Value::Int(42))]).unwrap(),
+                        TupleData::from_data(vec![(ClarityName::from_literal("b"), Value::Int(42))]).unwrap(),
                     ))
                     .unwrap(),
                 )),
@@ -62,8 +62,7 @@ mod clarity_v2_v3 {
             let skippable = tuple2.0.expect_tuple().unwrap();
 
             let merged_tuple = TupleData::shallow_merge(deserializable, skippable);
-            prop_assume!(merged_tuple.is_ok(), "Cannot create a correct merged tuple");
-            let merged_tuple = PropValue::from(Value::from(merged_tuple.unwrap()));
+            let merged_tuple = PropValue::from(Value::from(merged_tuple));
 
             let mut data = Vec::new();
             prop_assume!(

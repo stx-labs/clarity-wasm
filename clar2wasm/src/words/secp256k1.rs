@@ -11,7 +11,7 @@ pub struct Recover;
 
 impl Word for Recover {
     fn name(&self) -> ClarityName {
-        "secp256k1-recover?".into()
+        ClarityName::from_literal("secp256k1-recover?")
     }
 }
 
@@ -64,7 +64,7 @@ pub struct Verify;
 
 impl Word for Verify {
     fn name(&self) -> ClarityName {
-        "secp256k1-verify".into()
+        ClarityName::from_literal("secp256k1-verify")
     }
 }
 
@@ -101,7 +101,7 @@ impl ComplexWord for Verify {
 
 #[cfg(test)]
 mod tests {
-    use clarity::vm::errors::Error;
+    use clarity::vm::errors::VmExecutionError;
     use clarity::vm::types::{
         BuffData, BufferLength, SequenceData, SequenceSubtype, TypeSignature,
     };
@@ -210,14 +210,14 @@ mod tests {
         let short_hash = "de5b9eb9e7c5592930eb2e30a01369c36586d872082ed8181ee83d2a0ec20f";
         crosscheck(&format!("(secp256k1-recover? 0x{short_hash}
             0x8738487ebe69b93d8e51583be8eee50bb4213fc49c767d329632730cc193b873554428fc936ca3569afc15f1c9365f6591d6251a89fee9c9ac661116824d3a1301)"),
-            Err(Error::Unchecked(
-                clarity::vm::errors::CheckErrors::TypeValueError(
+            Err(VmExecutionError::RuntimeCheck(
+                clarity::vm::errors::RuntimeCheckErrorKind::TypeValueError(
                     Box::new(TypeSignature::SequenceType(SequenceSubtype::BufferType(
                         BufferLength::try_from(32_u32).unwrap(),
                     ))),
-                    Box::new(Value::Sequence(SequenceData::Buffer(BuffData {
+                    Value::Sequence(SequenceData::Buffer(BuffData {
                         data: hex::decode(short_hash).unwrap(),
-                    }))),
+                    })).to_error_string(),
                 ),
             )));
 
@@ -263,16 +263,16 @@ mod tests {
         crosscheck(&format!("(secp256k1-verify 0x{short_hash}
             0x8738487ebe69b93d8e51583be8eee50bb4213fc49c767d329632730cc193b873554428fc936ca3569afc15f1c9365f6591d6251a89fee9c9ac661116824d3a1301
             0x03adb8de4bfb65db2cfd6120d55c6526ae9c52e675db7e47308636534ba7786110)"),
-            Err(Error::Unchecked(
-                clarity::vm::errors::CheckErrors::TypeValueError(
+            Err(VmExecutionError::RuntimeCheck(
+                clarity::vm::errors::RuntimeCheckErrorKind::TypeValueError(
                     Box::new(TypeSignature::SequenceType(SequenceSubtype::BufferType(
                         BufferLength::try_from(32_u32).unwrap(),
                     ))),
-                    Box::new(Value::Sequence(SequenceData::Buffer(BuffData {
+                    Value::Sequence(SequenceData::Buffer(BuffData {
                         data: hex::decode(short_hash).unwrap(),
-                    }))),
+                    })).to_error_string()),
                 ),
-            )));
+            ));
 
         // Signature too short
         let short_sig = "8738487ebe69b93d8e51583be8eee50bb4213fc49c767d329632730cc193b873554428fc936ca3569afc15f1c9365f6591d6251a89fee9c9ac661116824d3a";
@@ -294,14 +294,14 @@ mod tests {
         crosscheck(&format!("(secp256k1-verify 0xde5b9eb9e7c5592930eb2e30a01369c36586d872082ed8181ee83d2a0ec20f04
             0x8738487ebe69b93d8e51583be8eee50bb4213fc49c767d329632730cc193b873554428fc936ca3569afc15f1c9365f6591d6251a89fee9c9ac661116824d3a1301
             0x{short_pubkey})"),
-            Err(Error::Unchecked(
-                clarity::vm::errors::CheckErrors::TypeValueError(
+            Err(VmExecutionError::RuntimeCheck(
+                clarity::vm::errors::RuntimeCheckErrorKind::TypeValueError(
                     Box::new(TypeSignature::SequenceType(SequenceSubtype::BufferType(
                         BufferLength::try_from(33_u32).unwrap(),
                     ))),
-                    Box::new(Value::Sequence(SequenceData::Buffer(BuffData {
+                    Value::Sequence(SequenceData::Buffer(BuffData {
                         data: hex::decode(short_pubkey).unwrap(),
-                    }))),
+                    })).to_error_string(),
                 ),
             )));
     }

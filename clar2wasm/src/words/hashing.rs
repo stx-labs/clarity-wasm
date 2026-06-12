@@ -94,7 +94,7 @@ pub struct Hash160;
 
 impl Word for Hash160 {
     fn name(&self) -> ClarityName {
-        "hash160".into()
+        ClarityName::from_literal("hash160")
     }
 }
 
@@ -116,7 +116,7 @@ pub struct Sha256;
 
 impl Word for Sha256 {
     fn name(&self) -> ClarityName {
-        "sha256".into()
+        ClarityName::from_literal("sha256")
     }
 }
 
@@ -138,7 +138,7 @@ pub struct Keccak256;
 
 impl Word for Keccak256 {
     fn name(&self) -> ClarityName {
-        "keccak256".into()
+        ClarityName::from_literal("keccak256")
     }
 }
 
@@ -196,7 +196,7 @@ pub struct Sha512;
 
 impl Word for Sha512 {
     fn name(&self) -> ClarityName {
-        "sha512".into()
+        ClarityName::from_literal("sha512")
     }
 }
 
@@ -218,7 +218,7 @@ pub struct Sha512_256;
 
 impl Word for Sha512_256 {
     fn name(&self) -> ClarityName {
-        "sha512/256".into()
+        ClarityName::from_literal("sha512/256")
     }
 }
 

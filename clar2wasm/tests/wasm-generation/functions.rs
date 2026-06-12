@@ -125,9 +125,9 @@ proptest! {
         let call_args = join_stringified(&values);
 
         let expected = TupleData::from_data(vec![
-            (ClarityName::from("fn"), response.clone().into()),
+            (ClarityName::from_literal("fn"), response.clone().into()),
             // Response does not affect private functions
-            (ClarityName::from("side"), Value::Bool(true)),
+            (ClarityName::from_literal("side"), Value::Bool(true)),
         ]).unwrap().into();
 
         crosscheck(
@@ -234,9 +234,9 @@ proptest! {
         let call_args = join_stringified(&values);
 
         let expected = TupleData::from_data(vec![
-            (ClarityName::from("fn"), response.clone().into()),
+            (ClarityName::from_literal("fn"), response.clone().into()),
             // Err responses revert changes (`(var-set side true)`)
-            (ClarityName::from("side"), Value::Bool(
+            (ClarityName::from_literal("side"), Value::Bool(
                 match response {
                     PropValue(Value::Response(ResponseData{ committed, ..})) => committed,
                     _ => unreachable!("Expected a response")

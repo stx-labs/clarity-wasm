@@ -1,6 +1,6 @@
 use clar2wasm::wasm_generator::WasmGenerator;
 use clarity::vm::types::{TupleData, TupleTypeSignature, TypeSignature};
-use clarity::vm::Value;
+use clarity::vm::{ClarityName, Value};
 use proptest::prelude::*;
 
 use crate::{prop_signature, PropValue};
@@ -19,8 +19,8 @@ proptest! {
         // since `serialization_size` push on the stack the value and the size,
         // we'll expect a tuple {a: value, b: size}
         let return_ty: TypeSignature = TupleTypeSignature::try_from(vec![
-            ("a".into(), ty.clone()),
-            ("b".into(), TypeSignature::UIntType),
+            (ClarityName::from_literal("a"), ty.clone()),
+            (ClarityName::from_literal("b"), TypeSignature::UIntType),
         ])
         .unwrap()
         .into();
@@ -44,8 +44,8 @@ proptest! {
             .serialized_size()
             .expect("could not compute serialized size");
         let expected = TupleData::from_data(vec![
-            ("a".into(), value),
-            ("b".into(), Value::UInt(expected_size as u128)),
+            (ClarityName::from_literal("a"), value),
+            (ClarityName::from_literal("b"), Value::UInt(expected_size as u128)),
         ])
         .unwrap()
         .into();

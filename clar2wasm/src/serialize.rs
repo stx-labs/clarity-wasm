@@ -1263,7 +1263,7 @@ mod tests {
     use clarity::vm::types::{
         PrincipalData, SequenceSubtype, TupleData, TupleTypeSignature, TypeSignature,
     };
-    use clarity::vm::Value;
+    use clarity::vm::{ClarityName, Value};
 
     use crate::wasm_generator::WasmGenerator;
 
@@ -1273,8 +1273,8 @@ mod tests {
         // since `serialization_size` push on the stack the value and the size,
         // we'll expect a tuple {a: value, b: size}
         let return_ty: TypeSignature = TupleTypeSignature::try_from(vec![
-            ("a".into(), ty.clone()),
-            ("b".into(), TypeSignature::UIntType),
+            (ClarityName::from_literal("a"), ty.clone()),
+            (ClarityName::from_literal("b"), TypeSignature::UIntType),
         ])
         .unwrap()
         .into();
@@ -1298,8 +1298,11 @@ mod tests {
             .serialized_size()
             .expect("could not compute serialized size");
         let expected = TupleData::from_data(vec![
-            ("a".into(), value),
-            ("b".into(), Value::UInt(expected_size as u128)),
+            (ClarityName::from_literal("a"), value),
+            (
+                ClarityName::from_literal("b"),
+                Value::UInt(expected_size as u128),
+            ),
         ])
         .unwrap()
         .into();
@@ -1448,9 +1451,9 @@ mod tests {
     #[test]
     fn serialization_size_tuple() {
         let value = TupleData::from_data(vec![
-            ("int".into(), Value::Int(1)),
+            (ClarityName::from_literal("int"), Value::Int(1)),
             (
-                "principal".into(),
+                ClarityName::from_literal("principal"),
                 PrincipalData::parse("STB44HYPYAT2BB2QE513NSP81HTMYWBJP02HPGK6.foobar")
                     .unwrap()
                     .into(),
@@ -1466,18 +1469,21 @@ mod tests {
     #[test]
     fn serialization_size_complex_size() {
         let value = TupleData::from_data(vec![
-            ("uint".into(), Value::UInt(5)),
-            ("buff".into(), Value::buff_from(vec![52, 53, 54]).unwrap()),
+            (ClarityName::from_literal("uint"), Value::UInt(5)),
             (
-                "list".into(),
+                ClarityName::from_literal("buff"),
+                Value::buff_from(vec![52, 53, 54]).unwrap(),
+            ),
+            (
+                ClarityName::from_literal("list"),
                 Value::cons_list_unsanitized((1u8..10u8).map(Value::buff_from_byte).collect())
                     .unwrap(),
             ),
             (
-                "tuple".into(),
+                ClarityName::from_literal("tuple"),
                 TupleData::from_data(vec![
-                    ("subint".into(), Value::Int(0)),
-                    ("subbool".into(), Value::Bool(true)),
+                    (ClarityName::from_literal("subint"), Value::Int(0)),
+                    (ClarityName::from_literal("subbool"), Value::Bool(true)),
                 ])
                 .unwrap()
                 .into(),

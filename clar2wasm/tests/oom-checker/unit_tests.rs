@@ -3,7 +3,7 @@ use clar2wasm::tools::{
     crosscheck_oom_with_non_literal_args, TestConfig, TestEnvironment,
 };
 use clarity::vm::types::{PrincipalData, TypeSignature};
-use clarity::vm::Value;
+use clarity::vm::{ClarityName, ContractName, Value};
 use clarity_types::types::SequenceSubtype;
 
 use crate::list_of;
@@ -204,21 +204,24 @@ fn get_burn_block_info_pox_addrs_oom() {
             Value::some(
                 clarity::vm::types::TupleData::from_data(vec![
                     (
-                        "addrs".into(),
+                        ClarityName::from_literal("addrs"),
                         Value::cons_list_unsanitized(vec![
                             clarity::vm::types::TupleData::from_data(vec![
                                 (
-                                    "hashbytes".into(),
+                                    ClarityName::from_literal("hashbytes"),
                                     Value::buff_from([0; 32].to_vec()).unwrap(),
                                 ),
-                                ("version".into(), Value::buff_from_byte(0)),
+                                (
+                                    ClarityName::from_literal("version"),
+                                    Value::buff_from_byte(0),
+                                ),
                             ])
                             .unwrap()
                             .into(),
                         ])
                         .unwrap(),
                     ),
-                    ("payout".into(), Value::UInt(0)),
+                    (ClarityName::from_literal("payout"), Value::UInt(0)),
                 ])
                 .unwrap()
                 .into(),
@@ -312,7 +315,10 @@ fn contract_call_with_workspace_oom() {
     .unwrap();
 
     crosscheck_multi_contract(
-        &[("callee".into(), &callee), ("caller".into(), caller)],
+        &[
+            (ContractName::from_literal("callee"), &callee),
+            (ContractName::from_literal("caller"), caller),
+        ],
         Ok(Some(expected)),
     );
 }

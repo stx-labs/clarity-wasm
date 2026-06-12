@@ -14,7 +14,7 @@ pub struct ClaritySome;
 
 impl Word for ClaritySome {
     fn name(&self) -> ClarityName {
-        "some".into()
+        ClarityName::from_literal("some")
     }
 }
 
@@ -55,7 +55,7 @@ pub struct ClarityOk;
 
 impl Word for ClarityOk {
     fn name(&self) -> ClarityName {
-        "ok".into()
+        ClarityName::from_literal("ok")
     }
 }
 
@@ -106,7 +106,7 @@ pub struct ClarityErr;
 
 impl Word for ClarityErr {
     fn name(&self) -> ClarityName {
-        "err".into()
+        ClarityName::from_literal("err")
     }
 }
 

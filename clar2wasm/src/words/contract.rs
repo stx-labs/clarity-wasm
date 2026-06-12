@@ -17,7 +17,7 @@ pub struct AsContract;
 
 impl Word for AsContract {
     fn name(&self) -> ClarityName {
-        "as-contract".into()
+        ClarityName::from_literal("as-contract")
     }
 }
 
@@ -53,7 +53,7 @@ pub struct ContractCall;
 
 impl Word for ContractCall {
     fn name(&self) -> ClarityName {
-        "contract-call?".into()
+        ClarityName::from_literal("contract-call?")
     }
 }
 
@@ -204,7 +204,7 @@ pub struct ContractHash;
 
 impl Word for ContractHash {
     fn name(&self) -> ClarityName {
-        "contract-hash?".into()
+        ClarityName::from_literal("contract-hash?")
     }
 }
 
@@ -248,6 +248,7 @@ impl SimpleWord for ContractHash {
 #[cfg(test)]
 mod tests {
     use clarity::vm::Value;
+    use clarity_types::ContractName;
 
     use crate::tools::{
         crosscheck_multi_contract, crosscheck_multi_contract_with_env, TestEnvironment,
@@ -899,9 +900,9 @@ mod tests {
 
         crosscheck_multi_contract(
             &[
-                ("foo".into(), foo_trait),
-                ("foo-impl".into(), foo_impl),
-                ("call-foo".into(), call_foo),
+                (ContractName::from_literal("foo"), foo_trait),
+                (ContractName::from_literal("foo-impl"), foo_impl),
+                (ContractName::from_literal("call-foo"), call_foo),
             ],
             Ok(Some(Value::okay_true())),
         );
@@ -942,10 +943,10 @@ mod tests {
 
         crosscheck_multi_contract(
             &[
-                ("foo".into(), foo_trait),
-                ("foo-impl".into(), foo_impl),
-                ("call-foo".into(), call_foo),
-                ("bar".into(), bar),
+                (ContractName::from_literal("foo"), foo_trait),
+                (ContractName::from_literal("foo-impl"), foo_impl),
+                (ContractName::from_literal("call-foo"), call_foo),
+                (ContractName::from_literal("bar"), bar),
             ],
             Ok(Some(Value::okay_true())),
         );
@@ -972,7 +973,10 @@ mod tests {
     "#;
 
         crosscheck_multi_contract_with_env(
-            &[("foo".into(), foo), ("bar".into(), bar)],
+            &[
+                (ContractName::from_literal("foo"), foo),
+                (ContractName::from_literal("bar"), bar),
+            ],
             Ok(Some(Value::okay_true())),
             TestEnvironment::new(
                 clarity::types::StacksEpochId::Epoch20,
@@ -1004,7 +1008,10 @@ mod tests {
             let expected = Sha512Trunc256Sum::from_data(callee.as_bytes());
 
             crosscheck_multi_contract(
-                &[("callee".into(), callee), ("caller".into(), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(
                     Value::okay(Value::buff_from(expected.0.to_vec()).unwrap()).unwrap(),
                 )),
@@ -1023,7 +1030,10 @@ mod tests {
             let expected = Sha512Trunc256Sum::from_data(callee.as_bytes());
 
             crosscheck_multi_contract(
-                &[("callee".into(), callee), ("caller".into(), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(
                     Value::okay(Value::buff_from(expected.0.to_vec()).unwrap()).unwrap(),
                 )),

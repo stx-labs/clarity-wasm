@@ -11,7 +11,7 @@ pub struct Let;
 
 impl Word for Let {
     fn name(&self) -> ClarityName {
-        "let".into()
+        ClarityName::from_literal("let")
     }
 }
 
@@ -87,7 +87,8 @@ impl ComplexWord for Let {
 
 #[cfg(test)]
 mod tests {
-    use clarity::vm::errors::{CheckErrors, Error, ShortReturnType};
+    use clarity::vm::errors::RuntimeCheckErrorKind::NameAlreadyUsed;
+    use clarity::vm::errors::{EarlyReturnError, VmExecutionError};
     use clarity::vm::Value;
 
     use crate::tools::{crosscheck, crosscheck_compare_only, crosscheck_expect_failure, evaluate};
@@ -150,8 +151,8 @@ mod tests {
                 (define-read-only (dup) (ok u1))
                 (caller)
             ",
-            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
-                "dup".to_owned(),
+            Err(VmExecutionError::RuntimeCheck(NameAlreadyUsed(
+                "dup".into(),
             ))),
         );
     }
@@ -164,8 +165,8 @@ mod tests {
                 (define-public (caller) (let ((dup u0)) (ok dup)))
                 (caller)
             ",
-            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
-                "dup".to_owned(),
+            Err(VmExecutionError::RuntimeCheck(NameAlreadyUsed(
+                "dup".into(),
             ))),
         );
     }
@@ -250,9 +251,9 @@ mod tests {
 
         crosscheck(
             snippet,
-            Err(Error::ShortReturn(ShortReturnType::ExpectedValue(
-                Box::new(Value::err_uint(42)),
-            ))),
+            Err(VmExecutionError::EarlyReturn(
+                EarlyReturnError::UnwrapFailed(Box::new(Value::err_uint(42))),
+            )),
         );
     }
 

@@ -10,7 +10,7 @@ pub struct DefinePrivateFunction;
 
 impl Word for DefinePrivateFunction {
     fn name(&self) -> ClarityName {
-        "define-private".into()
+        ClarityName::from_literal("define-private")
     }
 }
 
@@ -55,7 +55,7 @@ pub struct DefineReadonlyFunction;
 
 impl Word for DefineReadonlyFunction {
     fn name(&self) -> ClarityName {
-        "define-read-only".into()
+        ClarityName::from_literal("define-read-only")
     }
 }
 
@@ -102,7 +102,7 @@ pub struct DefinePublicFunction;
 
 impl Word for DefinePublicFunction {
     fn name(&self) -> ClarityName {
-        "define-public".into()
+        ClarityName::from_literal("define-public")
     }
 }
 
@@ -141,8 +141,9 @@ impl ComplexWord for DefinePublicFunction {
 #[cfg(test)]
 mod tests {
     use clarity::types::StacksEpochId;
-    use clarity::vm::errors::{CheckErrors, Error};
-    use clarity::vm::{ClarityVersion, Value};
+    use clarity::vm::errors::RuntimeCheckErrorKind::NameAlreadyUsed;
+    use clarity::vm::errors::{RuntimeCheckErrorKind, VmExecutionError};
+    use clarity::vm::{ClarityVersion, ContractName, Value};
 
     use crate::tools::{
         crosscheck, crosscheck_expect_failure, crosscheck_multi_contract, evaluate, TestEnvironment,
@@ -433,26 +434,26 @@ mod tests {
 ";
         crosscheck(
             &format!("{snippet} (foo 1 2 3 4)"),
-            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
-                "a".to_string(),
-            ))),
+            Err(VmExecutionError::RuntimeCheck(
+                RuntimeCheckErrorKind::NameAlreadyUsed("a".to_string()),
+            )),
         );
         crosscheck(
             &format!("{snippet} (bar 1 2 3 4)"),
-            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
-                "d".to_string(),
-            ))),
+            Err(VmExecutionError::RuntimeCheck(
+                RuntimeCheckErrorKind::NameAlreadyUsed("d".to_string()),
+            )),
         );
     }
 
     #[test]
-    fn reuse_arg_name_contrac_call() {
-        let first_contract_name = "callee".into();
+    fn reuse_arg_name_contract_call() {
+        let first_contract_name = ContractName::from_literal("callee");
         let first_snippet = "
 (define-public (foo (a int) (a int) (b int) (b int)) (ok 1))
 ";
 
-        let second_contract_name = "caller".into();
+        let second_contract_name = ContractName::from_literal("caller");
         let second_snippet = format!(r#"(contract-call? .{first_contract_name} foo 1 2 3 4)"#);
 
         crosscheck_multi_contract(
@@ -460,9 +461,9 @@ mod tests {
                 (first_contract_name, first_snippet),
                 (second_contract_name, &second_snippet),
             ],
-            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
-                "a".to_string(),
-            ))),
+            Err(VmExecutionError::RuntimeCheck(
+                RuntimeCheckErrorKind::NameAlreadyUsed("a".to_string()),
+            )),
         );
     }
 
@@ -476,9 +477,9 @@ mod tests {
 (define-read-only (get-symbol) (ok "RKT"))
 (define-read-only (get-token-uri) (ok none))
             "#,
-            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
-                "get-symbol".to_string(),
-            ))),
+            Err(VmExecutionError::RuntimeCheck(
+                RuntimeCheckErrorKind::NameAlreadyUsed("get-symbol".to_string()),
+            )),
         )
     }
 
@@ -489,8 +490,8 @@ mod tests {
                 (define-read-only (dup) (ok u1))
                 (define-constant dup u2)
             "#,
-            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
-                "dup".to_string(),
+            Err(VmExecutionError::RuntimeCheck(NameAlreadyUsed(
+                "dup".into(),
             ))),
         )
     }
@@ -502,8 +503,8 @@ mod tests {
                 (define-read-only (dup) (ok u1))
                 (define-data-var dup uint u2)
             "#,
-            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
-                "dup".to_string(),
+            Err(VmExecutionError::RuntimeCheck(NameAlreadyUsed(
+                "dup".into(),
             ))),
         )
     }
@@ -515,8 +516,8 @@ mod tests {
                 (define-read-only (dup) (ok u1))
                 (define-map dup uint uint)
             "#,
-            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
-                "dup".to_string(),
+            Err(VmExecutionError::RuntimeCheck(NameAlreadyUsed(
+                "dup".into(),
             ))),
         )
     }
@@ -528,8 +529,8 @@ mod tests {
                 (define-read-only (dup) (ok u1))
                 (define-fungible-token dup)
             "#,
-            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
-                "dup".to_string(),
+            Err(VmExecutionError::RuntimeCheck(NameAlreadyUsed(
+                "dup".into(),
             ))),
         )
     }
@@ -541,8 +542,8 @@ mod tests {
                 (define-read-only (dup) (ok u1))
                 (define-non-fungible-token dup uint)
             "#,
-            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
-                "dup".to_string(),
+            Err(VmExecutionError::RuntimeCheck(NameAlreadyUsed(
+                "dup".into(),
             ))),
         )
     }
@@ -554,8 +555,8 @@ mod tests {
                 (define-read-only (dup) (ok u1))
                 (define-trait dup ((f () (response uint uint))))
             "#,
-            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
-                "dup".to_string(),
+            Err(VmExecutionError::RuntimeCheck(NameAlreadyUsed(
+                "dup".into(),
             ))),
         )
     }
@@ -567,8 +568,8 @@ mod tests {
                 (define-read-only (dup) (ok u1))
                 (define-private (dup) u2)
             "#,
-            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
-                "dup".to_string(),
+            Err(VmExecutionError::RuntimeCheck(NameAlreadyUsed(
+                "dup".into(),
             ))),
         )
     }
@@ -580,8 +581,8 @@ mod tests {
                 (define-read-only (dup) (ok u1))
                 (define-public (dup) (ok u2))
             "#,
-            Err(Error::Unchecked(CheckErrors::NameAlreadyUsed(
-                "dup".to_string(),
+            Err(VmExecutionError::RuntimeCheck(NameAlreadyUsed(
+                "dup".into(),
             ))),
         )
     }

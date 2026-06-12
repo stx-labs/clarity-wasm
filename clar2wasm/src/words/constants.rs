@@ -11,7 +11,7 @@ pub struct DefineConstant;
 
 impl Word for DefineConstant {
     fn name(&self) -> ClarityName {
-        "define-constant".into()
+        ClarityName::from_literal("define-constant")
     }
 }
 
@@ -119,6 +119,7 @@ mod tests {
         ASCIIData, CharType, ListData, ListTypeData, PrincipalData, SequenceData, TupleData,
     };
     use clarity::vm::Value;
+    use clarity_types::ClarityName;
 
     use crate::tools::{crosscheck, crosscheck_expect_failure, evaluate, TestEnvironment};
 
@@ -392,8 +393,8 @@ mod tests {
             snippet,
             Ok(Some(
                 TupleData::from_data(vec![
-                    ("foo".into(), Value::err_uint(1)),
-                    ("bar".into(), Value::err_uint(1)),
+                    (ClarityName::from_literal("foo"), Value::err_uint(1)),
+                    (ClarityName::from_literal("bar"), Value::err_uint(1)),
                 ])
                 .unwrap()
                 .into(),

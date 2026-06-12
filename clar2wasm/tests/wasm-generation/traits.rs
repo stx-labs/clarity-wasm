@@ -2,6 +2,7 @@ use std::fmt::Write;
 
 use clar2wasm::tools::crosscheck_multi_contract;
 use clarity::vm::types::TypeSignature;
+use clarity_types::ContractName;
 use proptest::prelude::*;
 
 use crate::{prop_signature, type_string, PropValue};
@@ -77,7 +78,7 @@ proptest! {
         trait_name in "impl-trait-[a-z]{1,5}",
         methods in prop::collection::vec(trait_method(), 1..20),
     ) {
-        let first_contract_name = "foo".into();
+        let first_contract_name = ContractName::from_literal("foo");
         let first_snippet =
             methods
                 .iter()
@@ -87,7 +88,7 @@ proptest! {
                 })
                 + "\n))";
 
-        let second_contract_name = "bar".into();
+        let second_contract_name = ContractName::from_literal("bar");
         let second_snippet = methods.iter().fold(
             format!("(impl-trait .{first_contract_name}.{trait_name})\n"),
             |mut acc, meth| {

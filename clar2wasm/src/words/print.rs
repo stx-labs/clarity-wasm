@@ -12,7 +12,7 @@ pub struct Print;
 
 impl Word for Print {
     fn name(&self) -> ClarityName {
-        "print".into()
+        ClarityName::from_literal("print")
     }
 }
 
@@ -95,7 +95,7 @@ mod tests {
     use clarity::vm::types::{
         ASCIIData, CharType, ListTypeData, SequenceData, TupleData, UTF8Data,
     };
-    use clarity::vm::Value;
+    use clarity::vm::{ClarityName, ContractName, Value};
 
     use crate::tools::{crosscheck, evaluate};
 
@@ -126,14 +126,14 @@ mod tests {
 
     #[test]
     fn test_contract_call() {
-        let first_contract_name = "callee".into();
+        let first_contract_name = ContractName::from_literal("callee");
         let first_snippet = r#"
 (define-public (foo (a int))
   (ok (print a))
 )
             "#;
 
-        let second_contract_name = "caller".into();
+        let second_contract_name = ContractName::from_literal("caller");
         let second_snippet = "(unwrap-panic (contract-call? .callee foo 42))";
 
         crate::tools::crosscheck_multi_contract(
@@ -174,9 +174,9 @@ mod tests {
             "(print { a: (list), b: (list none), c: (err u1) })",
             Ok(Some(Value::Tuple(
                 TupleData::from_data(vec![
-                    ("a".into(), notype_list),
-                    ("b".into(), none_list),
-                    ("c".into(), err),
+                    (ClarityName::from_literal("a"), notype_list),
+                    (ClarityName::from_literal("b"), none_list),
+                    (ClarityName::from_literal("c"), err),
                 ])
                 .unwrap(),
             ))),
@@ -220,12 +220,12 @@ mod tests {
 
     #[test]
     fn test_print_string_ascii_param() {
-        let callee = "callee".into();
+        let callee = ContractName::from_literal("callee");
         let callee_snippet = r#"
 (define-read-only (test-string-ascii (str (string-ascii 3)))
   (print str))"#;
 
-        let caller = "caller".into();
+        let caller = ContractName::from_literal("caller");
         let caller_snippet = "(contract-call? .callee test-string-ascii \"abc\")";
 
         crate::tools::crosscheck_multi_contract(
@@ -259,12 +259,12 @@ mod tests {
 
     #[test]
     fn test_print_string_utf8_param() {
-        let callee = "callee".into();
+        let callee = ContractName::from_literal("callee");
         let callee_snippet = r#"
 (define-read-only (test-string-utf8 (str (string-utf8 3)))
   (print str))"#;
 
-        let caller = "caller".into();
+        let caller = ContractName::from_literal("caller");
         let caller_snippet = "(contract-call? .callee test-string-utf8 u\"abc\")";
 
         crate::tools::crosscheck_multi_contract(

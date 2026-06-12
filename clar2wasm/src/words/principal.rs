@@ -21,7 +21,7 @@ pub struct IsStandard;
 
 impl Word for IsStandard {
     fn name(&self) -> ClarityName {
-        "is-standard".into()
+        ClarityName::from_literal("is-standard")
     }
 }
 
@@ -94,7 +94,7 @@ pub struct Construct;
 
 impl Word for Construct {
     fn name(&self) -> ClarityName {
-        "principal-construct?".into()
+        ClarityName::from_literal("principal-construct?")
     }
 }
 
@@ -207,7 +207,7 @@ fn generate_tuple(
 
 impl Word for Destruct {
     fn name(&self) -> ClarityName {
-        "principal-destruct?".into()
+        ClarityName::from_literal("principal-destruct?")
     }
 }
 
@@ -251,12 +251,18 @@ impl SimpleWord for Destruct {
         #[allow(clippy::unwrap_used)]
         let tuple_ty = TypeSignature::TupleType(
             vec![
-                ("hash-bytes".into(), TypeSignature::BUFFER_20.clone()),
                 (
-                    "name".into(),
+                    ClarityName::from_literal("hash-bytes"),
+                    TypeSignature::BUFFER_20.clone(),
+                ),
+                (
+                    ClarityName::from_literal("name"),
                     TypeSignature::new_option(TypeSignature::STRING_ASCII_40.clone()).unwrap(),
                 ),
-                ("version".into(), TypeSignature::BUFFER_1.clone()),
+                (
+                    ClarityName::from_literal("version"),
+                    TypeSignature::BUFFER_1.clone(),
+                ),
             ]
             .try_into()
             .unwrap(),
@@ -296,7 +302,7 @@ pub struct PrincipalOf;
 
 impl Word for PrincipalOf {
     fn name(&self) -> ClarityName {
-        "principal-of?".into()
+        ClarityName::from_literal("principal-of?")
     }
 }
 
@@ -338,7 +344,7 @@ impl ComplexWord for PrincipalOf {
 
 #[cfg(test)]
 mod tests {
-    use clarity::vm::errors::Error;
+    use clarity::vm::errors::VmExecutionError;
     use clarity::vm::types::{
         BuffData, BufferLength, PrincipalData, SequenceData, SequenceSubtype, TypeSignature,
     };
@@ -367,14 +373,15 @@ mod tests {
 
         crosscheck(
             &format!("(principal-of? 0x{pubkey_32_bytes})"),
-            Err(Error::Unchecked(
-                clarity::vm::errors::CheckErrors::TypeValueError(
+            Err(VmExecutionError::RuntimeCheck(
+                clarity::vm::errors::RuntimeCheckErrorKind::TypeValueError(
                     Box::new(TypeSignature::SequenceType(SequenceSubtype::BufferType(
                         BufferLength::try_from(33_u32).unwrap(),
                     ))),
-                    Box::new(Value::Sequence(SequenceData::Buffer(BuffData {
+                    Value::Sequence(SequenceData::Buffer(BuffData {
                         data: hex::decode(pubkey_32_bytes).unwrap(),
-                    }))),
+                    }))
+                    .to_error_string(),
                 ),
             )),
         );
@@ -437,6 +444,7 @@ mod tests {
     #[cfg(test)]
     mod clarity_v2_v3 {
         use clarity::vm::types::{ResponseData, StandardPrincipalData, TupleData};
+        use clarity::vm::ClarityName;
 
         use super::*;
 
@@ -533,9 +541,9 @@ mod tests {
                 Ok(Some(
                     Value::error(
                         TupleData::from_data(vec![
-                            ("error_code".into(), Value::UInt(0)),
+                            (ClarityName::from_literal("error_code"), Value::UInt(0)),
                             (
-                                "value".into(),
+                                ClarityName::from_literal("value"),
                                 Value::some(
                                     PrincipalData::parse(
                                         "SP3X6QWWETNBZWGBK6DRGTR1KX50S74D3433WDGJY",
@@ -561,9 +569,9 @@ mod tests {
                 Ok(Some(
                     Value::error(
                         TupleData::from_data(vec![
-                            ("error_code".into(), Value::UInt(0)),
+                            (ClarityName::from_literal("error_code"), Value::UInt(0)),
                             (
-                                "value".into(),
+                                ClarityName::from_literal("value"),
                                 Value::some(
                                     PrincipalData::parse(
                                         "SP3X6QWWETNBZWGBK6DRGTR1KX50S74D3433WDGJY.foo",
@@ -589,8 +597,8 @@ mod tests {
                 Ok(Some(
                     Value::error(
                         TupleData::from_data(vec![
-                            ("error_code".into(), Value::UInt(1)),
-                            ("value".into(), Value::none()),
+                            (ClarityName::from_literal("error_code"), Value::UInt(1)),
+                            (ClarityName::from_literal("value"), Value::none()),
                         ])
                         .unwrap()
                         .into(),
@@ -607,8 +615,8 @@ mod tests {
                 Ok(Some(
                     Value::error(
                         TupleData::from_data(vec![
-                            ("error_code".into(), Value::UInt(1)),
-                            ("value".into(), Value::none()),
+                            (ClarityName::from_literal("error_code"), Value::UInt(1)),
+                            (ClarityName::from_literal("value"), Value::none()),
                         ])
                         .unwrap()
                         .into(),
@@ -625,8 +633,8 @@ mod tests {
                 Ok(Some(
                     Value::error(
                         TupleData::from_data(vec![
-                            ("error_code".into(), Value::UInt(1)),
-                            ("value".into(), Value::none()),
+                            (ClarityName::from_literal("error_code"), Value::UInt(1)),
+                            (ClarityName::from_literal("value"), Value::none()),
                         ])
                         .unwrap()
                         .into(),
@@ -643,8 +651,8 @@ mod tests {
                 Ok(Some(
                     Value::error(
                         TupleData::from_data(vec![
-                            ("error_code".into(), Value::UInt(2)),
-                            ("value".into(), Value::none()),
+                            (ClarityName::from_literal("error_code"), Value::UInt(2)),
+                            (ClarityName::from_literal("value"), Value::none()),
                         ])
                         .unwrap()
                         .into(),
@@ -661,8 +669,8 @@ mod tests {
                 Ok(Some(
                     Value::error(
                         TupleData::from_data(vec![
-                            ("error_code".into(), Value::UInt(2)),
-                            ("value".into(), Value::none()),
+                            (ClarityName::from_literal("error_code"), Value::UInt(2)),
+                            (ClarityName::from_literal("value"), Value::none()),
                         ])
                         .unwrap()
                         .into(),
@@ -680,15 +688,18 @@ mod tests {
                     Value::okay(
                         TupleData::from_data(vec![
                             (
-                                "hash-bytes".into(),
+                                ClarityName::from_literal("hash-bytes"),
                                 Value::buff_from(
                                     hex::decode("164247d6f2b425ac5771423ae6c80c754f7172b0")
                                         .unwrap(),
                                 )
                                 .unwrap(),
                             ),
-                            ("name".into(), Value::none()),
-                            ("version".into(), Value::buff_from_byte(0x1a)),
+                            (ClarityName::from_literal("name"), Value::none()),
+                            (
+                                ClarityName::from_literal("version"),
+                                Value::buff_from_byte(0x1a),
+                            ),
                         ])
                         .unwrap()
                         .into(),
@@ -706,7 +717,7 @@ mod tests {
                     Value::okay(
                         TupleData::from_data(vec![
                             (
-                                "hash-bytes".into(),
+                                ClarityName::from_literal("hash-bytes"),
                                 Value::buff_from(
                                     hex::decode("164247d6f2b425ac5771423ae6c80c754f7172b0")
                                         .unwrap(),
@@ -714,14 +725,17 @@ mod tests {
                                 .unwrap(),
                             ),
                             (
-                                "name".into(),
+                                ClarityName::from_literal("name"),
                                 Value::some(
                                     Value::string_ascii_from_bytes("foo".as_bytes().to_vec())
                                         .unwrap(),
                                 )
                                 .unwrap(),
                             ),
-                            ("version".into(), Value::buff_from_byte(0x1a)),
+                            (
+                                ClarityName::from_literal("version"),
+                                Value::buff_from_byte(0x1a),
+                            ),
                         ])
                         .unwrap()
                         .into(),
@@ -739,15 +753,18 @@ mod tests {
                     Value::error(
                         TupleData::from_data(vec![
                             (
-                                "hash-bytes".into(),
+                                ClarityName::from_literal("hash-bytes"),
                                 Value::buff_from(
                                     hex::decode("fa6bf38ed557fe417333710d6033e9419391a320")
                                         .unwrap(),
                                 )
                                 .unwrap(),
                             ),
-                            ("name".into(), Value::none()),
-                            ("version".into(), Value::buff_from_byte(0x16)),
+                            (ClarityName::from_literal("name"), Value::none()),
+                            (
+                                ClarityName::from_literal("version"),
+                                Value::buff_from_byte(0x16),
+                            ),
                         ])
                         .unwrap()
                         .into(),
@@ -765,7 +782,7 @@ mod tests {
                     Value::error(
                         TupleData::from_data(vec![
                             (
-                                "hash-bytes".into(),
+                                ClarityName::from_literal("hash-bytes"),
                                 Value::buff_from(
                                     hex::decode("fa6bf38ed557fe417333710d6033e9419391a320")
                                         .unwrap(),
@@ -773,14 +790,17 @@ mod tests {
                                 .unwrap(),
                             ),
                             (
-                                "name".into(),
+                                ClarityName::from_literal("name"),
                                 Value::some(
                                     Value::string_ascii_from_bytes("foo".as_bytes().to_vec())
                                         .unwrap(),
                                 )
                                 .unwrap(),
                             ),
-                            ("version".into(), Value::buff_from_byte(0x16)),
+                            (
+                                ClarityName::from_literal("version"),
+                                Value::buff_from_byte(0x16),
+                            ),
                         ])
                         .unwrap()
                         .into(),
@@ -859,7 +879,7 @@ mod tests {
                     data: Box::new(Value::Principal(PrincipalData::Contract(
                         QualifiedContractIdentifier::new(
                             StandardPrincipalData::transient(),
-                            ContractName::from("snippet"),
+                            ContractName::from_literal("snippet"),
                         ),
                     ))),
                 }))),

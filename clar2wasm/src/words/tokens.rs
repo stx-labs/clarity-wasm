@@ -12,7 +12,7 @@ pub struct DefineFungibleToken;
 
 impl Word for DefineFungibleToken {
     fn name(&self) -> ClarityName {
-        "define-fungible-token".into()
+        ClarityName::from_literal("define-fungible-token")
     }
 }
 
@@ -76,7 +76,7 @@ pub struct BurnFungibleToken;
 
 impl Word for BurnFungibleToken {
     fn name(&self) -> ClarityName {
-        "ft-burn?".into()
+        ClarityName::from_literal("ft-burn?")
     }
 }
 
@@ -118,7 +118,7 @@ pub struct TransferFungibleToken;
 
 impl Word for TransferFungibleToken {
     fn name(&self) -> ClarityName {
-        "ft-transfer?".into()
+        ClarityName::from_literal("ft-transfer?")
     }
 }
 
@@ -162,7 +162,7 @@ pub struct MintFungibleToken;
 
 impl Word for MintFungibleToken {
     fn name(&self) -> ClarityName {
-        "ft-mint?".into()
+        ClarityName::from_literal("ft-mint?")
     }
 }
 
@@ -203,7 +203,7 @@ pub struct GetSupplyOfFungibleToken;
 
 impl Word for GetSupplyOfFungibleToken {
     fn name(&self) -> ClarityName {
-        "ft-get-supply".into()
+        ClarityName::from_literal("ft-get-supply")
     }
 }
 
@@ -237,7 +237,7 @@ pub struct GetBalanceOfFungibleToken;
 
 impl Word for GetBalanceOfFungibleToken {
     fn name(&self) -> ClarityName {
-        "ft-get-balance".into()
+        ClarityName::from_literal("ft-get-balance")
     }
 }
 
@@ -279,7 +279,7 @@ pub struct DefineNonFungibleToken;
 
 impl Word for DefineNonFungibleToken {
     fn name(&self) -> ClarityName {
-        "define-non-fungible-token".into()
+        ClarityName::from_literal("define-non-fungible-token")
     }
 }
 
@@ -338,7 +338,7 @@ pub struct BurnNonFungibleToken;
 
 impl Word for BurnNonFungibleToken {
     fn name(&self) -> ClarityName {
-        "nft-burn?".into()
+        ClarityName::from_literal("nft-burn?")
     }
 }
 
@@ -396,7 +396,7 @@ pub struct TransferNonFungibleToken;
 
 impl Word for TransferNonFungibleToken {
     fn name(&self) -> ClarityName {
-        "nft-transfer?".into()
+        ClarityName::from_literal("nft-transfer?")
     }
 }
 
@@ -458,7 +458,7 @@ pub struct MintNonFungibleToken;
 
 impl Word for MintNonFungibleToken {
     fn name(&self) -> ClarityName {
-        "nft-mint?".into()
+        ClarityName::from_literal("nft-mint?")
     }
 }
 
@@ -516,7 +516,7 @@ pub struct GetOwnerOfNonFungibleToken;
 
 impl Word for GetOwnerOfNonFungibleToken {
     fn name(&self) -> ClarityName {
-        "nft-get-owner?".into()
+        ClarityName::from_literal("nft-get-owner?")
     }
 }
 
@@ -577,7 +577,7 @@ impl ComplexWord for GetOwnerOfNonFungibleToken {
 #[cfg(test)]
 mod tests {
     use clarity::vm::types::{PrincipalData, TupleData};
-    use clarity::vm::Value;
+    use clarity::vm::{ClarityName, Value};
 
     use crate::tools::{crosscheck, crosscheck_expect_failure, evaluate};
 
@@ -893,9 +893,9 @@ mod tests {
 
         let expected = Value::from(
             TupleData::from_data(vec![
-                ("mint".into(), Value::okay_true()),
+                (ClarityName::from_literal("mint"), Value::okay_true()),
                 (
-                    "owner".into(),
+                    ClarityName::from_literal("owner"),
                     Value::some(Value::Principal(
                         PrincipalData::parse_standard_principal(
                             "SS5V2M24Z6WSK5PWMPTNQZNRKE15NKE5KV9PG69J",

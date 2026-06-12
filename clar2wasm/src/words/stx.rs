@@ -12,7 +12,7 @@ pub struct StxBurn;
 
 impl Word for StxBurn {
     fn name(&self) -> ClarityName {
-        "stx-burn?".into()
+        ClarityName::from_literal("stx-burn?")
     }
 }
 
@@ -39,7 +39,7 @@ pub struct StxGetBalance;
 
 impl Word for StxGetBalance {
     fn name(&self) -> ClarityName {
-        "stx-get-balance".into()
+        ClarityName::from_literal("stx-get-balance")
     }
 }
 
@@ -62,7 +62,7 @@ pub struct StxTransfer;
 
 impl Word for StxTransfer {
     fn name(&self) -> ClarityName {
-        "stx-transfer?".into()
+        ClarityName::from_literal("stx-transfer?")
     }
 }
 
@@ -98,7 +98,7 @@ pub struct StxTransferMemo;
 
 impl Word for StxTransferMemo {
     fn name(&self) -> ClarityName {
-        "stx-transfer-memo?".into()
+        ClarityName::from_literal("stx-transfer-memo?")
     }
 }
 
@@ -134,7 +134,7 @@ pub struct StxGetAccount;
 
 impl Word for StxGetAccount {
     fn name(&self) -> ClarityName {
-        "stx-account".into()
+        ClarityName::from_literal("stx-account")
     }
 }
 

@@ -20,8 +20,8 @@ pub enum IndexOf {
 impl Word for IndexOf {
     fn name(&self) -> ClarityName {
         match self {
-            IndexOf::Original => "index-of".into(),
-            IndexOf::Alias => "index-of?".into(),
+            IndexOf::Original => ClarityName::from_literal("index-of"),
+            IndexOf::Alias => ClarityName::from_literal("index-of?"),
         }
     }
 }
