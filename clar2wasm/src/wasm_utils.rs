@@ -1369,6 +1369,7 @@ pub fn call_function<'a>(
     link_host_functions(&mut linker)?;
 
     let mut cost_globals = link_host_globals(&mut linker, &mut store.as_context_mut())?;
+    store.data_mut().cost_globals = Some(cost_globals);
     // The cost meter holds the cost from the caller before doing the contract call.
     // This is the value we instantiate the current cost globals with
     let cost_meter = store.data().global_context.cost_meter;
