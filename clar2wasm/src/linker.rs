@@ -81,7 +81,9 @@ fn link_global<T>(
 }
 
 /// Link the host interface functions into the Wasm module.
-pub fn link_host_functions(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExecutionError> {
+pub fn link_host_functions(
+    linker: &mut Linker<ClarityWasmContext>,
+) -> Result<(), VmExecutionError> {
     link_define_function_fn(linker)?;
     link_define_variable_fn(linker)?;
     link_define_ft_fn(linker)?;
