@@ -11,6 +11,7 @@ use clarity::consts::{CHAIN_ID_MAINNET, CHAIN_ID_TESTNET};
 use clarity::types::StacksEpochId;
 use clarity::vm::analysis::run_analysis;
 use clarity::vm::ast::build_ast;
+use clarity::vm::clarity_wasm::CostMeter;
 use clarity::vm::contexts::{EventBatch, GlobalContext};
 use clarity::vm::costs::{CostTracker, ExecutionCost, LimitedCostTracker};
 use clarity::vm::database::ClarityDatabase;
@@ -22,7 +23,6 @@ use clarity_types::types::TypeSignature;
 use regex::Regex;
 
 use crate::compile;
-use crate::cost::CostMeter;
 use crate::datastore::{BurnDatastore, Datastore, StacksConstants};
 use crate::initialize::initialize_contract;
 use crate::wasm_utils::get_type_in_memory_size;

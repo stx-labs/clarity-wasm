@@ -9,7 +9,7 @@ pub use walrus::Module;
 use wasm_generator::{GeneratorError, WasmGenerator};
 
 mod cost;
-pub use cost::{AccessCostMeter, CostGlobals, CostLinker, CostMeter};
+pub use cost::{AccessCostMeter, CostGlobals, CostLinker};
 
 mod deserialize;
 pub mod initialize;

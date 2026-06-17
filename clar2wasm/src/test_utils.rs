@@ -10,7 +10,7 @@ use clarity::vm::{ClarityVersion, Value};
 use walrus::{FunctionBuilder, InstrSeqBuilder, MemoryId};
 use wasmtime::{Engine, Module, Store};
 
-use crate::linker::dummy_linker;
+use crate::linker::{dummy_linker, link_host_globals};
 use crate::wasm_generator::{
     add_placeholder_for_clarity_type, clar2wasm_ty, GeneratorError, WasmGenerator,
 };
@@ -183,7 +183,8 @@ impl WasmGenerator {
     pub fn execute_module(&mut self, return_ty: &TypeSignature) -> Value {
         let engine = Engine::default();
         let mut store = Store::new(&engine, ());
-        let linker = dummy_linker(&engine).expect("failed to create linker");
+        let mut linker = dummy_linker(&engine).expect("failed to create linker");
+        link_host_globals(&mut linker, &mut store).expect("failed to link host globals");
         let module =
             Module::new(&engine, self.module.emit_wasm()).expect("failed to create module");
         let instance = linker

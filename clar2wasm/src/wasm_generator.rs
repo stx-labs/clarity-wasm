@@ -21,7 +21,8 @@ use walrus::{
     MemoryId, Module, ValType,
 };
 
-use crate::cost::{ChargeContext, WordCharge};
+use crate::cost::OverheadCosts::{InnerTypeCheckCost, UserFunctionApplication};
+use crate::cost::{ChargeContext, ChargeGenerator, WordCharge};
 use crate::duck_type::need_ducktyping;
 use crate::error_mapping::ErrorMap;
 use crate::wasm_utils::{
@@ -459,6 +460,27 @@ impl WasmGenerator {
         Ok(())
     }
 
+    fn export_contract_call_cost_overhead_function(&mut self) -> Result<(), GeneratorError> {
+        let mut helper_function =
+            FunctionBuilder::new(&mut self.module.types, &[ValType::I32, ValType::I32], &[]);
+        let contract_call_arity = self.module.locals.add(ValType::I32);
+        let total_parameters_size = self.module.locals.add(ValType::I32);
+        let mut body = helper_function.func_body();
+
+        self.charge_overhead(&mut body, UserFunctionApplication, contract_call_arity)?;
+
+        self.charge_overhead(&mut body, InnerTypeCheckCost, total_parameters_size)?;
+
+        let cost_helper = helper_function.finish(
+            vec![contract_call_arity, total_parameters_size],
+            &mut self.module.funcs,
+        );
+        self.module
+            .exports
+            .add(".contract-call-cost-overhead", cost_helper);
+        Ok(())
+    }
+
     pub fn generate(mut self) -> Result<Module, GeneratorError> {
         let expressions = std::mem::take(&mut self.contract_analysis.expressions);
 
@@ -497,6 +519,7 @@ impl WasmGenerator {
             )),
         );
         self.module.exports.add("workspace-size", workspace_global);
+        self.export_contract_call_cost_overhead_function()?;
 
         Ok(self.module)
     }

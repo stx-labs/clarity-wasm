@@ -7,108 +7,21 @@ mod clar1;
 mod clar2;
 mod clar3;
 
-use std::fmt;
-use std::ops::{AddAssign, SubAssign};
+use std::fmt::{self, Display};
+use std::ops::SubAssign;
 
 use clarity::types::StacksEpochId;
-use clarity::vm::costs::ExecutionCost;
+use clarity::vm::clarity_wasm::CostMeter;
 use clarity::vm::ClarityName;
 use walrus::ir::{BinaryOp, Instr, UnaryOp, Unop};
 use walrus::{FunctionId, GlobalId, InstrSeqBuilder, LocalId, Module};
-use wasmtime::{AsContextMut, Extern, Global, Mutability, Val, ValType};
+use wasmtime::{AsContextMut, Extern, Global, Val};
 
 use crate::error_mapping::ErrorMap;
 use crate::wasm_generator::{GeneratorError, WasmGenerator};
 use crate::words::Word;
 
 type Result<T, E = GeneratorError> = std::result::Result<T, E>;
-
-/// Values of the cost globals
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct CostMeter {
-    pub runtime: i64,
-    pub read_count: i64,
-    pub read_length: i64,
-    pub write_count: i64,
-    pub write_length: i64,
-}
-
-impl CostMeter {
-    pub const INIT: Self = Self::MAX;
-    pub const ZERO: Self = Self::MIN;
-
-    pub const MAX: Self = Self {
-        runtime: i64::MAX,
-        read_count: i64::MAX,
-        read_length: i64::MAX,
-        write_count: i64::MAX,
-        write_length: i64::MAX,
-    };
-
-    pub const MIN: Self = Self {
-        runtime: 0,
-        read_count: 0,
-        read_length: 0,
-        write_count: 0,
-        write_length: 0,
-    };
-}
-
-impl AddAssign<&CostMeter> for CostMeter {
-    fn add_assign(&mut self, rhs: &CostMeter) {
-        self.runtime.add_assign(rhs.runtime);
-        self.read_count.add_assign(rhs.read_count);
-        self.read_length.add_assign(rhs.read_length);
-        self.write_count.add_assign(rhs.write_count);
-        self.write_length.add_assign(rhs.write_length);
-    }
-}
-
-impl AddAssign<CostMeter> for CostMeter {
-    fn add_assign(&mut self, rhs: CostMeter) {
-        self.add_assign(&rhs);
-    }
-}
-
-impl SubAssign<&CostMeter> for CostMeter {
-    fn sub_assign(&mut self, rhs: &CostMeter) {
-        self.runtime.sub_assign(rhs.runtime);
-        self.read_count.sub_assign(rhs.read_count);
-        self.read_length.sub_assign(rhs.read_length);
-        self.write_count.sub_assign(rhs.write_count);
-        self.write_length.sub_assign(rhs.write_length);
-    }
-}
-
-impl SubAssign<CostMeter> for CostMeter {
-    fn sub_assign(&mut self, rhs: CostMeter) {
-        self.sub_assign(&rhs);
-    }
-}
-
-impl From<CostMeter> for ExecutionCost {
-    fn from(meter: CostMeter) -> Self {
-        Self {
-            write_length: meter.write_length as _,
-            write_count: meter.write_count as _,
-            read_length: meter.read_length as _,
-            read_count: meter.read_count as _,
-            runtime: meter.runtime as _,
-        }
-    }
-}
-
-impl From<ExecutionCost> for CostMeter {
-    fn from(meter: ExecutionCost) -> Self {
-        Self {
-            write_length: meter.write_length as _,
-            write_count: meter.write_count as _,
-            read_length: meter.read_length as _,
-            read_count: meter.read_count as _,
-            runtime: meter.runtime as _,
-        }
-    }
-}
 
 /// Globals used for cost tracking
 #[derive(Debug, Clone, Copy)]
@@ -120,13 +33,97 @@ pub struct CostGlobals {
     pub write_length: Global,
 }
 
+impl CostGlobals {
+    pub fn to_cost_meter<T>(
+        &self,
+        store: &mut impl AsContextMut<Data = T>,
+    ) -> wasmtime::Result<CostMeter> {
+        let runtime = self
+            .runtime
+            .get(store.as_context_mut())
+            .i64()
+            .ok_or(GetCostGlobalsError::Runtime)?;
+        let write_count = self
+            .write_count
+            .get(store.as_context_mut())
+            .i64()
+            .ok_or(GetCostGlobalsError::WriteCount)?;
+        let write_length = self
+            .write_length
+            .get(store.as_context_mut())
+            .i64()
+            .ok_or(GetCostGlobalsError::WriteLength)?;
+        let read_count = self
+            .read_count
+            .get(store.as_context_mut())
+            .i64()
+            .ok_or(GetCostGlobalsError::ReadCount)?;
+        let read_length = self
+            .read_length
+            .get(store.as_context_mut())
+            .i64()
+            .ok_or(GetCostGlobalsError::ReadLength)?;
+
+        Ok(CostMeter {
+            runtime,
+            read_count,
+            read_length,
+            write_count,
+            write_length,
+        })
+    }
+
+    pub fn from_cost_meter<T>(
+        &mut self,
+        store: &mut impl AsContextMut<Data = T>,
+        cost_meter: &CostMeter,
+    ) -> wasmtime::Result<()> {
+        self.runtime
+            .set(store.as_context_mut(), Val::I64(cost_meter.runtime))?;
+        self.read_count
+            .set(store.as_context_mut(), Val::I64(cost_meter.read_count))?;
+        self.read_length
+            .set(store.as_context_mut(), Val::I64(cost_meter.read_length))?;
+        self.write_count
+            .set(store.as_context_mut(), Val::I64(cost_meter.write_count))?;
+        self.write_length
+            .set(store.as_context_mut(), Val::I64(cost_meter.write_length))?;
+        Ok(())
+    }
+}
+
 /// Trait for a `Linker` that can be used to retrieve the cost globals.
 pub trait CostLinker<T> {
     /// Get the cost globals.
     fn get_cost_globals(&self, store: impl AsContextMut<Data = T>)
         -> wasmtime::Result<CostGlobals>;
-    /// Define the cost globals.
-    fn define_cost_globals(&mut self, store: impl AsContextMut<Data = T>) -> wasmtime::Result<()>;
+}
+
+#[derive(Debug)]
+pub enum Cost {
+    Runtime,
+    ReadCount,
+    ReadLength,
+    WriteCount,
+    WriteLength,
+}
+
+impl Cost {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Cost::Runtime => "cost-runtime",
+            Cost::ReadCount => "cost-read-count",
+            Cost::ReadLength => "cost-read-length",
+            Cost::WriteCount => "cost-write-count",
+            Cost::WriteLength => "cost-write-length",
+        }
+    }
+}
+
+impl Display for Cost {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 /// Convenience to use the same error string in multiple places
@@ -188,62 +185,6 @@ impl<T> CostLinker<T> for wasmtime::Linker<T> {
             write_length: unwrap_global_or(write_length, WriteLength)?,
         })
     }
-
-    fn define_cost_globals(
-        &mut self,
-        mut store: impl AsContextMut<Data = T>,
-    ) -> wasmtime::Result<()> {
-        let mut store = store.as_context_mut();
-
-        define_cost_global_import(self, &mut store, "cost-runtime", CostMeter::INIT.runtime)?;
-        define_cost_global_import(
-            self,
-            &mut store,
-            "cost-read-count",
-            CostMeter::INIT.read_count,
-        )?;
-        define_cost_global_import(
-            self,
-            &mut store,
-            "cost-read-length",
-            CostMeter::INIT.read_length,
-        )?;
-        define_cost_global_import(
-            self,
-            &mut store,
-            "cost-write-count",
-            CostMeter::INIT.read_length,
-        )?;
-        define_cost_global_import(
-            self,
-            &mut store,
-            "cost-write-length",
-            CostMeter::INIT.read_length,
-        )?;
-
-        Ok(())
-    }
-}
-
-fn define_cost_global_import<T>(
-    linker: &mut wasmtime::Linker<T>,
-    mut store: impl AsContextMut<Data = T>,
-    name: &str,
-    value: i64,
-) -> wasmtime::Result<()> {
-    use wasmtime::{Global, GlobalType};
-
-    let mut store = store.as_context_mut();
-
-    let global = Global::new(
-        &mut store,
-        GlobalType::new(ValType::I64, Mutability::Var),
-        Val::I64(value as _),
-    )?;
-
-    linker.define(&mut store, "clarity", name, global)?;
-
-    Ok(())
 }
 
 /// Trait to manipulate the values of a cost meter.
@@ -381,6 +322,21 @@ pub trait ChargeGenerator {
 
         Ok(())
     }
+
+    fn charge_overhead(
+        &self,
+        instrs: &mut InstrSeqBuilder,
+        overhead_type: OverheadCosts,
+        n: impl Into<Scalar>,
+    ) -> Result<()> {
+        let n = n.into();
+
+        if let Some((ctx, module)) = self.cost_context() {
+            ctx.emit(instrs, module, &ctx.overhead_cost(&overhead_type), n)?;
+        }
+
+        Ok(())
+    }
 }
 
 impl ChargeGenerator for WasmGenerator {
@@ -440,6 +396,7 @@ impl ScalarGet for InstrSeqBuilder<'_> {
 }
 
 /// Context required from a generator to emit cost tracking code.
+#[derive(Debug)]
 pub struct ChargeContext {
     pub epoch: StacksEpochId,
     pub runtime: GlobalId,
@@ -448,6 +405,15 @@ pub struct ChargeContext {
     pub write_count: GlobalId,
     pub write_length: GlobalId,
     pub runtime_error: FunctionId,
+}
+
+// Doing a contract call involves costs charges.
+// But these should not be conflated with a word cost.
+// We do not want to pollute the namespace with new reserved keywords that are only used for internal management.
+#[derive(Debug)]
+pub enum OverheadCosts {
+    UserFunctionApplication,
+    InnerTypeCheckCost,
 }
 
 impl ChargeContext {
@@ -466,6 +432,26 @@ impl ChargeContext {
             | StacksEpochId::Epoch32 => clar3::WORD_COSTS.get(name),
             // From epoch 33 we should use clar4 word costs
             StacksEpochId::Epoch33 | StacksEpochId::Epoch34 => todo!(),
+        }
+    }
+
+    // A contract call involves costs that are not tied to the word itself
+    // but to the internal management
+    fn overhead_cost(&self, overhead_type: &OverheadCosts) -> WordCost {
+        match self.epoch {
+            StacksEpochId::Epoch10 => panic!("clarity did not exist in epoch 1"),
+            StacksEpochId::Epoch20 => clar1::overhead_costs(overhead_type),
+            StacksEpochId::Epoch2_05 => clar2::overhead_costs(overhead_type),
+            StacksEpochId::Epoch21
+            | StacksEpochId::Epoch22
+            | StacksEpochId::Epoch23
+            | StacksEpochId::Epoch24
+            | StacksEpochId::Epoch25
+            | StacksEpochId::Epoch30
+            | StacksEpochId::Epoch31
+            | StacksEpochId::Epoch32
+            | StacksEpochId::Epoch33
+            | StacksEpochId::Epoch34 => clar3::overhead_costs(overhead_type),
         }
     }
 }
@@ -792,6 +778,7 @@ mod caf {
     //! *not* that the code generation of each word is correct.
 
     use super::*;
+    use crate::linker::link_host_globals;
 
     #[test]
     fn constant() {
@@ -928,7 +915,7 @@ mod caf {
         let mut linker = Linker::<()>::new(&engine);
         let mut store = Store::new(&engine, ());
 
-        linker.define_cost_globals(&mut store).unwrap();
+        link_host_globals(&mut linker, &mut store).expect("host globals should be linked");
         linker
             .set_cost_meter(
                 &mut store,
@@ -1065,6 +1052,24 @@ mod word {
         assert_eq!(cost, expected_cost, "'cost' should match 'expected_cost'");
     }
 
+    fn execute_snippets(
+        epoch: StacksEpochId,
+        version: ClarityVersion,
+        snippets: &[(&str, &str)],
+        expected_cost: CostMeter,
+    ) {
+        let mut env = TestEnvironment::new_with_cost(epoch, version);
+
+        snippets.iter().for_each(|(contract_name, snippet)| {
+            env.init_contract_with_snippet(contract_name, snippet)
+                .expect("init_contract should succeed");
+        });
+        let cost_tracker = env.cost_tracker;
+
+        let cost = CostMeter::from(cost_tracker.get_total());
+        assert_eq!(cost, expected_cost, "'cost' should match 'expected_cost'");
+    }
+
     macro_rules! epoch_for_version {
         (1) => {
             StacksEpochId::Epoch20
@@ -1094,6 +1099,27 @@ mod word {
         ($name:literal, $snippet:literal, { $($version:literal => $cost:expr),* $(,)? }) => {
             $(
                 decl_test!($version, $name, $snippet, $cost);
+            )*
+        }
+    }
+
+    macro_rules! decl_test_with_contract_call {
+        ($version:literal, $name:literal, ($callee_name:literal, $callee_snippet:literal), ($caller_name:literal , $caller_snippet:literal), $expected_cost:expr) => {
+            paste::paste! {
+                #[test]
+                fn [<$name _ v $version >]() {
+                    let epoch = epoch_for_version!($version);
+                    let version = ClarityVersion::default_for_epoch(epoch);
+                    execute_snippets(epoch, version, &[($callee_name, $callee_snippet), ($caller_name, $caller_snippet)], $expected_cost);
+                }
+            }
+        };
+    }
+
+    macro_rules! decl_tests_with_contract_call{
+        ($name:literal, ($callee_name:literal, $callee_snippet:literal), ($caller_name:literal, $caller_snippet:literal), { $($version:literal => $cost:expr),* $(,)? }) => {
+            $(
+                decl_test_with_contract_call!($version, $name, ($callee_name, $callee_snippet), ($caller_name, $caller_snippet), $cost);
             )*
         }
     }
@@ -1733,11 +1759,20 @@ mod word {
         3 => CostMeter { runtime: 4352,  read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
     });
 
-    // decl_tests!("contract_call", todo!(), {
-    //     1 => CostMeter { runtime: 4000, read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
-    //     2 => CostMeter { runtime: 199,  read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
-    //     3 => CostMeter { runtime: 164,  read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
-    // });
+    decl_tests_with_contract_call!(
+        "contract_call",
+        (
+            "callee",
+            "(define-public (foo (a int) (b int) (c int) (d int)) (ok 1))"
+        ),
+        ("caller", "(contract-call? .callee foo 1 2 3 4)"),
+        {
+                 1 => CostMeter { runtime: 133000, read_count: 3, read_length: 61, write_count: 0, write_length: 0 },
+                 2 => CostMeter { runtime: 981,  read_count: 3, read_length: 61, write_count: 0, write_length: 0 },
+                 3 => CostMeter { runtime: 715,  read_count: 3, read_length: 61, write_count: 0, write_length: 0 },
+             }
+    );
+
     // decl_tests!("contract_of", "(contract-of contract)", {
     //     1 => CostMeter { runtime: 4000, read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
     //     2 => CostMeter { runtime: 199,  read_count: 0, read_length: 0, write_count: 0, write_length: 0 },

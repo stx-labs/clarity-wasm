@@ -45,7 +45,7 @@ impl ComplexWord for ToConsensusBuff {
         generator.serialization_size(builder, &ty)?;
         builder.local_set(*length);
 
-        // to-consensus-buff has been aded in Clarity2 which has epoch > 2.05 by default.
+        // to-consensus-buff has been added in Clarity2 which has epoch > 2.05 by default.
         // Therefore we do not need to do difference charge for different epochs.
         self.charge(generator, builder, *length)?;
 

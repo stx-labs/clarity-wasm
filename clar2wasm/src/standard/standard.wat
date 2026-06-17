@@ -352,7 +352,7 @@
             (param $value_offset i32)
             (param $value_length i32)))
 
-    (import "clarity" "principal_to_string_ascii" 
+    (import "clarity" "principal_to_string_ascii"
         (func $stdlib.principal_to_string_ascii
             (param $principal_offset i32)
             (param $principal_length i32)
@@ -378,11 +378,11 @@
     ;;      `stacks-core`
     ;;
     ;; ;; Cost tracking globals
-    ;; (import "clarity" "cost-runtime" (global $cost-runtime (mut i64)))
-    ;; (import "clarity" "cost-read-count" (global $cost-read-count (mut i64)))
-    ;; (import "clarity" "cost-read-length" (global $cost-read-length (mut i64)))
-    ;; (import "clarity" "cost-write-count" (global $cost-write-count (mut i64)))
-    ;; (import "clarity" "cost-write-length" (global $cost-write-length (mut i64)))
+    (import "clarity" "cost-runtime" (global $cost-runtime (mut i64)))
+    (import "clarity" "cost-read-count" (global $cost-read-count (mut i64)))
+    (import "clarity" "cost-read-length" (global $cost-read-length (mut i64)))
+    (import "clarity" "cost-write-count" (global $cost-write-count (mut i64)))
+    (import "clarity" "cost-write-length" (global $cost-write-length (mut i64)))
 
     ;; Global definitions
     (global $stack-pointer (mut i32) (i32.const 0))

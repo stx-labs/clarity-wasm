@@ -2,8 +2,10 @@ use std::collections::HashMap;
 
 use clarity::vm::ClarityName;
 use lazy_static::lazy_static;
+use Caf::*;
 
 use super::{Caf, WordCost};
+use crate::cost::OverheadCosts;
 use crate::words::arithmetic::{Add, Div, Log2, Modulo, Mul, Power, Sqrti, Sub};
 use crate::words::bindings::Let;
 use crate::words::bitwise::{
@@ -47,7 +49,6 @@ use crate::words::Word;
 
 lazy_static! {
     pub(super) static ref WORD_COSTS: HashMap<ClarityName, WordCost> = {
-        use Caf::*;
 
         let mut map = HashMap::new();
 
@@ -1168,4 +1169,23 @@ lazy_static! {
 
         map
     };
+}
+
+pub fn overhead_costs(overhead_type: &OverheadCosts) -> WordCost {
+    match overhead_type {
+        OverheadCosts::UserFunctionApplication => WordCost {
+            runtime: Linear { a: 26, b: 5 },
+            read_count: None,
+            read_length: None,
+            write_count: None,
+            write_length: None,
+        },
+        OverheadCosts::InnerTypeCheckCost => WordCost {
+            runtime: Linear { a: 2, b: 5 },
+            read_count: None,
+            read_length: None,
+            write_count: None,
+            write_length: None,
+        },
+    }
 }
