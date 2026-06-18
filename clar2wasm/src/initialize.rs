@@ -1,5 +1,5 @@
 use clarity::vm::analysis::ContractAnalysis;
-use clarity::vm::clarity_wasm::CostMeter;
+use clarity::vm::clarity_wasm::{AccessCostMeter, CostGlobals, CostMeter};
 use clarity::vm::contexts::GlobalContext;
 use clarity::vm::errors::{RuntimeError, VmExecutionError, WasmError};
 use clarity::vm::events::*;
@@ -8,9 +8,9 @@ use clarity::vm::{CallStack, ContractContext, Value};
 use stacks_common::types::chainstate::StacksBlockId;
 use wasmtime::{AsContextMut, Linker, Module, Store};
 
-use crate::linker::{link_host_functions, link_host_globals};
+use crate::error_mapping;
+use crate::linker::{link_cost_globals, link_host_functions};
 use crate::wasm_utils::*;
-use crate::{error_mapping, AccessCostMeter, CostGlobals};
 
 // The context used when making calls into the Wasm module.
 pub struct ClarityWasmContext<'a, 'b> {
@@ -365,7 +365,7 @@ pub fn initialize_contract(
     // Link in the host interface functions and globals.
     link_host_functions(&mut linker)?;
     store.data_mut().cost_globals = Some(
-        link_host_globals(&mut linker, &mut store.as_context_mut())
+        link_cost_globals(&mut linker, &mut store.as_context_mut())
             .map_err(|e| VmExecutionError::Wasm(WasmError::UnableToLoadModule(e.into())))?,
     );
 

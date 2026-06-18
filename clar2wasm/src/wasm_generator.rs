@@ -21,7 +21,6 @@ use walrus::{
     MemoryId, Module, ValType,
 };
 
-use crate::cost::OverheadCosts::{InnerTypeCheckCost, UserFunctionApplication};
 use crate::cost::{ChargeContext, ChargeGenerator, WordCharge};
 use crate::duck_type::need_ducktyping;
 use crate::error_mapping::ErrorMap;
@@ -467,9 +466,7 @@ impl WasmGenerator {
         let total_parameters_size = self.module.locals.add(ValType::I32);
         let mut body = helper_function.func_body();
 
-        self.charge_overhead(&mut body, UserFunctionApplication, contract_call_arity)?;
-
-        self.charge_overhead(&mut body, InnerTypeCheckCost, total_parameters_size)?;
+        self.charge_contract_call_overhead(&mut body, contract_call_arity, total_parameters_size)?;
 
         let cost_helper = helper_function.finish(
             vec![contract_call_arity, total_parameters_size],

@@ -1,6 +1,7 @@
 use std::io::{Cursor, Write as _};
 
 use clarity::vm::callables::{DefineType, DefinedFunction};
+use clarity::vm::clarity_wasm::{Cost, CostGlobals};
 use clarity::vm::contexts::{ExecutionState, InvocationContext};
 use clarity::vm::costs::{constants as cost_constants, CostTracker};
 use clarity::vm::database::{ClarityDatabase, STXBalance, StoreType};
@@ -27,18 +28,10 @@ use wasmtime::{
     Store, Val,
 };
 
-use crate::cost::Cost;
 use crate::initialize::ClarityWasmContext;
 use crate::wasm_utils::*;
-use crate::CostGlobals;
 
-pub fn link_host_globals<T>(
-    linker: &mut Linker<T>,
-    store: &mut impl AsContextMut<Data = T>,
-) -> Result<CostGlobals, VmExecutionError> {
-    link_cost_globals(linker, store)
-}
-fn link_cost_globals<T>(
+pub fn link_cost_globals<T>(
     linker: &mut Linker<T>,
     store: &mut impl AsContextMut<Data = T>,
 ) -> Result<CostGlobals, VmExecutionError> {
@@ -7129,7 +7122,7 @@ pub fn load_stdlib() -> Result<(Instance, Store<()>), wasmtime::Error> {
     let mut store = Store::new(&engine, ());
 
     let mut linker = dummy_linker(&engine)?;
-    link_host_globals(&mut linker, &mut store.as_context_mut())?;
+    link_cost_globals(&mut linker, &mut store.as_context_mut())?;
 
     let module = Module::new(&engine, standard_lib)?;
     let instance = linker.instantiate(&mut store, &module)?;
