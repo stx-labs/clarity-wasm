@@ -17,7 +17,7 @@ use crate::wasm_utils::ArgumentCountCheck;
 use crate::words::SimpleWord;
 
 // The WASM local holding the ExternRef for the current `as-contract?`
-// allowance context. Set by `AsContractPostV4::traverse` so the `With*`
+// allowance context. Set by `AsContractSafe::traverse` so the `With*`
 // words can load it onto the stack before calling their host functions.
 //
 // Stored in a thread_local because it is only relevant during code
@@ -39,15 +39,15 @@ where
 }
 
 #[derive(Debug)]
-pub struct AsContractPreV4;
+pub struct AsContract;
 
-impl Word for AsContractPreV4 {
+impl Word for AsContract {
     fn name(&self) -> ClarityName {
         ClarityName::from_literal("as-contract")
     }
 }
 
-impl ComplexWord for AsContractPreV4 {
+impl ComplexWord for AsContract {
     fn traverse(
         &self,
         generator: &mut WasmGenerator,
@@ -61,29 +61,29 @@ impl ComplexWord for AsContractPreV4 {
 
         let inner = args.get_expr(0)?;
 
-        // Call the host interface function, `enter_as_contract_pre_v4`
-        builder.call(generator.func_by_name("stdlib.enter_as_contract_pre_v4"));
+        // Call the host interface function, `enter_as_contract`
+        builder.call(generator.func_by_name("stdlib.enter_as_contract"));
 
         // Traverse the inner expression
         generator.traverse_expr(builder, inner)?;
 
-        // Call the host interface function, `exit_as_contract_pre_v4`
-        builder.call(generator.func_by_name("stdlib.exit_as_contract_pre_v4"));
+        // Call the host interface function, `exit_as_contract`
+        builder.call(generator.func_by_name("stdlib.exit_as_contract"));
 
         Ok(())
     }
 }
 
 #[derive(Debug)]
-pub struct AsContractPostV4;
+pub struct AsContractSafe;
 
-impl Word for AsContractPostV4 {
+impl Word for AsContractSafe {
     fn name(&self) -> ClarityName {
         ClarityName::from_literal("as-contract?")
     }
 }
 
-impl ComplexWord for AsContractPostV4 {
+impl ComplexWord for AsContractSafe {
     fn traverse(
         &self,
         generator: &mut WasmGenerator,
@@ -125,8 +125,8 @@ impl ComplexWord for AsContractPostV4 {
             generator.set_expr_type(last, inner_ty.clone())?;
         }
 
-        // Call the host interface function, `enter_as_contract_post_v4`
-        builder.call(generator.func_by_name("stdlib.enter_as_contract_post_v4"));
+        // Call the host interface function, `enter_as_contract_safe`
+        builder.call(generator.func_by_name("stdlib.enter_as_contract_safe"));
 
         // Stash the allowance handle so With* words can reference it.
         let allowance_ref_local = generator.borrow_local(ValType::Externref);
@@ -178,7 +178,7 @@ impl ComplexWord for AsContractPostV4 {
 
                 // Validate allowances and commit or abort the transaction.
                 fail_block.local_get(*allowance_ref_local);
-                fail_block.call(generator.func_by_name("stdlib.exit_as_contract_post_v4"));
+                fail_block.call(generator.func_by_name("stdlib.exit_as_contract_safe"));
 
                 // We can put back the former allowance context
                 ALLOWANCE_CONTEXT.set(former_allowance_ctx);
@@ -230,7 +230,7 @@ impl ComplexWord for AsContractPostV4 {
                 // TODO: this will never be called if we are in top-level. This shouldn’t be a problem as
                 // the host would discard the context on trap. However, it could lead to issues in the future
                 // so a cleaner implementation should be provided here.
-                exprs_block.call(generator.func_by_name("stdlib.cleanup_as_contract_post_v4"));
+                exprs_block.call(generator.func_by_name("stdlib.cleanup_as_contract_safe"));
 
                 exprs_block.br(early_return);
             } else {
@@ -1577,7 +1577,7 @@ mod tests {
         use crate::tools::{crosscheck, evaluate};
 
         #[test]
-        fn as_contract_post_v4_switches_sender_and_caller() {
+        fn as_contract_safe_switches_sender_and_caller() {
             crosscheck(
                 r#"
                     (let (
@@ -1781,7 +1781,7 @@ mod tests {
         // ==================== with-all-assets-unsafe ====================
 
         #[test]
-        fn as_contract_unsafe_nft_transfer() {
+        fn as_contract_safe_unsafe_nft_transfer() {
             let callee: &str = r#"
                 (define-non-fungible-token token uint)
 
@@ -1811,7 +1811,7 @@ mod tests {
         }
 
         #[test]
-        fn as_contract_unsafe_stx_transfer() {
+        fn as_contract_safe_unsafe_stx_transfer() {
             let callee = r#"
                 (define-public (send-stx (amount uint) (recipient principal))
                     (as-contract? ((with-all-assets-unsafe))
@@ -1835,7 +1835,7 @@ mod tests {
         // ==================== with-stx ====================
 
         #[test]
-        fn as_contract_stx_ok() {
+        fn as_contract_safe_stx_ok() {
             let callee = r#"
                 (define-public (send-stx (amount uint) (recipient principal))
                     (as-contract? ((with-stx u100))
@@ -1857,7 +1857,7 @@ mod tests {
         }
 
         #[test]
-        fn as_contract_stx_exceeds_allowance() {
+        fn as_contract_safe_stx_exceeds_allowance() {
             let callee = r#"
                 (define-public (send-stx (amount uint) (recipient principal))
                     (as-contract? ((with-stx u10))
@@ -1894,7 +1894,7 @@ mod tests {
         }
 
         #[test]
-        fn as_contract_stx_no_allowance() {
+        fn as_contract_safe_stx_no_allowance() {
             let callee = r#"
                 (define-public (send-stx (amount uint) (recipient principal))
                     (as-contract? ()
@@ -1933,7 +1933,7 @@ mod tests {
         // ==================== with-ft ====================
 
         #[test]
-        fn as_contract_ft_ok() {
+        fn as_contract_safe_ft_ok() {
             let callee = r#"
                 (define-fungible-token my-token)
 
@@ -1961,7 +1961,7 @@ mod tests {
         }
 
         #[test]
-        fn as_contract_ft_exceeds_allowance() {
+        fn as_contract_safe_ft_exceeds_allowance() {
             let callee = r#"
                 (define-fungible-token my-token)
 
@@ -2008,7 +2008,7 @@ mod tests {
         }
 
         #[test]
-        fn as_contract_ft_no_allowance() {
+        fn as_contract_safe_ft_no_allowance() {
             let callee = r#"
                 (define-fungible-token my-token)
 
@@ -2057,7 +2057,7 @@ mod tests {
         // ==================== with-ft wildcard ====================
 
         #[test]
-        fn as_contract_ft_wildcard_ok() {
+        fn as_contract_safe_ft_wildcard_ok() {
             let callee = r#"
                 (define-fungible-token my-token)
 
@@ -2085,7 +2085,7 @@ mod tests {
         }
 
         #[test]
-        fn as_contract_ft_wildcard_exceeds() {
+        fn as_contract_safe_ft_wildcard_exceeds() {
             let callee = r#"
                 (define-fungible-token my-token)
 
@@ -2132,7 +2132,7 @@ mod tests {
         }
 
         #[test]
-        fn as_contract_ft_wildcard_with_exact() {
+        fn as_contract_safe_ft_wildcard_with_exact() {
             let callee = r#"
                 (define-fungible-token my-token)
 
@@ -2163,7 +2163,7 @@ mod tests {
         }
 
         #[test]
-        fn as_contract_ft_wildcard_with_exact_first_violated() {
+        fn as_contract_safe_ft_wildcard_with_exact_first_violated() {
             let callee = r#"
                 (define-fungible-token my-token)
 
@@ -2215,7 +2215,7 @@ mod tests {
         // ==================== with-nft ====================
 
         #[test]
-        fn as_contract_nft_ok() {
+        fn as_contract_safe_nft_ok() {
             let callee = r#"
                 (define-non-fungible-token token uint)
 
@@ -2245,7 +2245,7 @@ mod tests {
         }
 
         #[test]
-        fn as_contract_nft_wrong_id() {
+        fn as_contract_safe_nft_wrong_id() {
             let callee = r#"
                 (define-non-fungible-token token uint)
 
@@ -2300,7 +2300,7 @@ mod tests {
         }
 
         #[test]
-        fn as_contract_nft_no_allowance() {
+        fn as_contract_safe_nft_no_allowance() {
             let callee = r#"
                 (define-non-fungible-token token uint)
 
@@ -2357,7 +2357,7 @@ mod tests {
         // ==================== with-nft wildcard ====================
 
         #[test]
-        fn as_contract_nft_wildcard_ok() {
+        fn as_contract_safe_nft_wildcard_ok() {
             let callee = r#"
                 (define-non-fungible-token token uint)
 
@@ -2387,7 +2387,7 @@ mod tests {
         }
 
         #[test]
-        fn as_contract_nft_wildcard_wrong_id() {
+        fn as_contract_safe_nft_wildcard_wrong_id() {
             let callee = r#"
                 (define-non-fungible-token token uint)
 
@@ -2444,7 +2444,7 @@ mod tests {
         // ==================== with-stacking ====================
 
         #[test]
-        fn as_contract_stacking_ok() {
+        fn as_contract_safe_stacking_ok() {
             let pox4_code =
                 std::fs::read_to_string("tests/contracts/boot-contracts/pox-4.clar").unwrap();
             let wrapper = r#"
@@ -2469,7 +2469,7 @@ mod tests {
         }
 
         #[test]
-        fn as_contract_stacking_pox_indirect() {
+        fn as_contract_safe_stacking_pox_indirect() {
             let pox4_code =
                 std::fs::read_to_string("tests/contracts/boot-contracts/pox-4.clar").unwrap();
             let intermediary = r#"
@@ -2509,7 +2509,7 @@ mod tests {
         }
 
         #[test]
-        fn as_contract_stacking_and_stx_pox() {
+        fn as_contract_safe_stacking_and_stx_pox() {
             let pox4_code =
                 std::fs::read_to_string("tests/contracts/boot-contracts/pox-4.clar").unwrap();
             let wrapper = r#"
@@ -2540,7 +2540,7 @@ mod tests {
         // ==================== mixed / multiple allowances ====================
 
         #[test]
-        fn as_contract_wrong_allowance_type() {
+        fn as_contract_safe_wrong_allowance_type() {
             let callee = r#"
                 (define-fungible-token token)
 
@@ -2576,7 +2576,7 @@ mod tests {
         }
 
         #[test]
-        fn as_contract_multiple_stx_second_violation() {
+        fn as_contract_safe_multiple_stx_second_violation() {
             let callee = r#"
                 (define-public (send-stx (amount uint) (recipient principal))
                     (as-contract? ((with-stx u100) (with-stx u20))
@@ -2610,7 +2610,7 @@ mod tests {
         }
 
         #[test]
-        fn as_contract_mixed_stx_ft_nft() {
+        fn as_contract_safe_mixed_stx_ft_nft() {
             let callee = r#"
                 (define-fungible-token my-token)
                 (define-non-fungible-token my-nft uint)
@@ -2656,7 +2656,7 @@ mod tests {
         // ==================== nested as-contract? ====================
 
         #[test]
-        fn as_contract_nested_unsafe_outer_nft_inner() {
+        fn as_contract_safe_nested_unsafe_outer_nft_inner() {
             let callee = r#"
                 (define-non-fungible-token token uint)
 
@@ -2690,7 +2690,7 @@ mod tests {
         }
 
         #[test]
-        fn as_contract_nested_inner_nft_violation() {
+        fn as_contract_safe_nested_inner_nft_violation() {
             let callee = r#"
                 (define-non-fungible-token token uint)
 
@@ -2724,7 +2724,7 @@ mod tests {
         }
 
         #[test]
-        fn as_contract_nested_cross_contract() {
+        fn as_contract_safe_nested_cross_contract() {
             let callee = r#"
                 (define-non-fungible-token token uint)
 
@@ -2760,7 +2760,7 @@ mod tests {
         }
 
         #[test]
-        fn as_contract_nested_stx_outer_ft_inner() {
+        fn as_contract_safe_nested_stx_outer_ft_inner() {
             let callee = r#"
                 (define-fungible-token my-token)
 
@@ -2810,7 +2810,7 @@ mod tests {
         }
 
         #[test]
-        fn as_contract_nested_inner_ft_violation_rollback() {
+        fn as_contract_safe_nested_inner_ft_violation_rollback() {
             let callee = r#"
                 (define-fungible-token my-token)
 
@@ -2869,7 +2869,7 @@ mod tests {
         }
 
         #[test]
-        fn as_contract_nested_nft_outer_stx_inner() {
+        fn as_contract_safe_nested_nft_outer_stx_inner() {
             let callee = r#"
                 (define-non-fungible-token token uint)
 

@@ -57,11 +57,11 @@ pub fn link_host_functions(
     link_is_in_regtest_fn(linker)?;
     link_is_in_mainnet_fn(linker)?;
     link_chain_id_fn(linker)?;
-    link_enter_as_contract_pre_v4_fn(linker)?;
-    link_exit_as_contract_pre_v4_fn(linker)?;
-    link_enter_as_contract_post_v4_fn(linker)?;
-    link_exit_as_contract_post_v4_fn(linker)?;
-    link_cleanup_as_contract_post_v4_fn(linker)?;
+    link_enter_as_contract_fn(linker)?;
+    link_exit_as_contract_fn(linker)?;
+    link_enter_as_contract_safe_fn(linker)?;
+    link_exit_as_contract_safe_fn(linker)?;
+    link_cleanup_as_contract_safe_fn(linker)?;
     link_enter_restrict_assets_fn(linker)?;
     link_exit_restrict_assets_fn(linker)?;
     link_cleanup_restrict_assets_fn(linker)?;
@@ -1221,16 +1221,16 @@ fn link_chain_id_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
         })
 }
 
-/// Link host interface function, `enter_as_contract_pre_v4`, into the Wasm module.
+/// Link host interface function, `enter_as_contract`, into the Wasm module.
 /// This function is called before processing the inner-expression of
 /// `as-contract`.
-fn link_enter_as_contract_pre_v4_fn(
+fn link_enter_as_contract_fn(
     linker: &mut Linker<ClarityWasmContext>,
 ) -> Result<(), VmExecutionError> {
     linker
         .func_wrap(
             "clarity",
-            "enter_as_contract_pre_v4",
+            "enter_as_contract",
             |mut caller: Caller<'_, ClarityWasmContext>| {
                 let contract_principal: PrincipalData = caller
                     .data()
@@ -1245,22 +1245,22 @@ fn link_enter_as_contract_pre_v4_fn(
         .map(|_| ())
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
-                "enter_as_contract_pre_v4".to_string(),
+                "enter_as_contract".to_string(),
                 e,
             ))
         })
 }
 
-/// Link host interface function, `exit_as_contract_pre_v4`, into the Wasm module.
+/// Link host interface function, `exit_as_contract`, into the Wasm module.
 /// This function is after before processing the inner-expression of
 /// `as-contract`, and is used to restore the caller and sender.
-fn link_exit_as_contract_pre_v4_fn(
+fn link_exit_as_contract_fn(
     linker: &mut Linker<ClarityWasmContext>,
 ) -> Result<(), VmExecutionError> {
     linker
         .func_wrap(
             "clarity",
-            "exit_as_contract_pre_v4",
+            "exit_as_contract",
             |mut caller: Caller<'_, ClarityWasmContext>| {
                 caller.data_mut().pop_sender()?;
                 caller.data_mut().pop_caller()?;
@@ -1270,22 +1270,22 @@ fn link_exit_as_contract_pre_v4_fn(
         .map(|_| ())
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
-                "exit_as_contract_pre_v4".to_string(),
+                "exit_as_contract".to_string(),
                 e,
             ))
         })
 }
 
-/// Link host interface function, `enter_as_contract_post_v4`, into the Wasm module.
+/// Link host interface function, `enter_as_contract_safe`, into the Wasm module.
 /// This function is called before processing the allowances and inner-expression of
 /// `as-contract?`.
-fn link_enter_as_contract_post_v4_fn(
+fn link_enter_as_contract_safe_fn(
     linker: &mut Linker<ClarityWasmContext>,
 ) -> Result<(), VmExecutionError> {
     linker
         .func_wrap(
             "clarity",
-            "enter_as_contract_post_v4",
+            "enter_as_contract_safe",
             |mut caller: Caller<'_, ClarityWasmContext>| -> Option<ExternRef> {
                 let contract_principal: PrincipalData = caller
                     .data()
@@ -1303,22 +1303,22 @@ fn link_enter_as_contract_post_v4_fn(
         .map(|_| ())
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
-                "enter_as_contract_post_v4".to_string(),
+                "enter_as_contract_safe".to_string(),
                 e,
             ))
         })
 }
 
-/// Link host interface function, `exit_as_contract_post_v4`, into the Wasm module.
+/// Link host interface function, `exit_as_contract_safe`, into the Wasm module.
 /// This function is after before processing the inner-expression of
 /// `as-contract?`, and is used to restore the caller, sender and check allowances.
-fn link_exit_as_contract_post_v4_fn(
+fn link_exit_as_contract_safe_fn(
     linker: &mut Linker<ClarityWasmContext>,
 ) -> Result<(), VmExecutionError> {
     linker
         .func_wrap(
             "clarity",
-            "exit_as_contract_post_v4",
+            "exit_as_contract_safe",
             |mut caller: Caller<'_, ClarityWasmContext>, allowance_ref: Option<ExternRef>| {
                 let epoch = caller.data().global_context.epoch_id;
 
@@ -1352,23 +1352,23 @@ fn link_exit_as_contract_post_v4_fn(
         .map(|_| ())
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
-                "exit_as_contract".to_string(),
+                "exit_as_contract_safe".to_string(),
                 e,
             ))
         })
 }
 
-/// Link host interface function, `cleanup_as_contract_post_v4`, into the Wasm module.
+/// Link host interface function, `cleanup_as_contract_safe`, into the Wasm module.
 /// This function is after before processing the inner-expression of
 /// `as-contract?`, and is used to restore the caller and sender in the case where
 /// an inner-expresion failed.
-fn link_cleanup_as_contract_post_v4_fn(
+fn link_cleanup_as_contract_safe_fn(
     linker: &mut Linker<ClarityWasmContext>,
 ) -> Result<(), VmExecutionError> {
     linker
         .func_wrap(
             "clarity",
-            "cleanup_as_contract_post_v4",
+            "cleanup_as_contract_safe",
             |mut caller: Caller<'_, ClarityWasmContext>| {
                 caller.data_mut().pop_sender()?;
                 caller.data_mut().pop_caller()?;
@@ -6380,21 +6380,21 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
 
     linker.func_wrap(
         "clarity",
-        "enter_as_contract_pre_v4",
+        "enter_as_contract",
         |_: Caller<'_, ()>| {
             println!("as-contract: enter");
             Ok(())
         },
     )?;
 
-    linker.func_wrap("clarity", "exit_as_contract_pre_v4", |_: Caller<'_, ()>| {
+    linker.func_wrap("clarity", "exit_as_contract", |_: Caller<'_, ()>| {
         println!("as-contract: exit");
         Ok(())
     })?;
 
     linker.func_wrap(
         "clarity",
-        "enter_as_contract_post_v4",
+        "enter_as_contract_safe",
         |_: Caller<'_, ()>| -> Option<ExternRef> {
             println!("as-contract?: enter");
             None
@@ -6403,7 +6403,7 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
 
     linker.func_wrap(
         "clarity",
-        "exit_as_contract_post_v4",
+        "exit_as_contract_safe",
         |_: Caller<'_, ()>, _allowance_ref: Option<ExternRef>| {
             println!("as-contract?: exit");
             Ok((0i64, 0i64, 0i32))
@@ -6412,7 +6412,7 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
 
     linker.func_wrap(
         "clarity",
-        "cleanup_as_contract_post_v4",
+        "cleanup_as_contract_safe",
         |_: Caller<'_, ()>| {
             println!("as-contract?: cleanup");
             Ok(())

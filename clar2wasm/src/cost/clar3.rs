@@ -16,7 +16,7 @@ use crate::words::buff_to_integer::{BuffToIntBe, BuffToIntLe, BuffToUintBe, Buff
 use crate::words::comparison::{CmpGeq, CmpGreater, CmpLeq, CmpLess};
 use crate::words::conditionals::{And, Asserts, Filter, If, Match, Or, Try, Unwrap, UnwrapErr};
 use crate::words::consensus_buff::{FromConsensusBuff, ToConsensusBuff};
-use crate::words::contract::{AsContractPreV4, ContractCall};
+use crate::words::contract::{AsContract, ContractCall};
 use crate::words::control_flow::{Begin, UnwrapErrPanic, UnwrapPanic};
 use crate::words::conversion::{IntToAscii, IntToUtf8, StringToInt, StringToUint};
 use crate::words::data_vars::{GetDataVar, SetDataVar};
@@ -653,7 +653,7 @@ lazy_static! {
             },
         );
         map.insert(
-            AsContractPreV4.name(),
+            AsContract.name(),
             WordCost {
                 runtime: Constant(138),
                 read_count: None,
