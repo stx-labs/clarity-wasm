@@ -1370,8 +1370,12 @@ fn link_cleanup_as_contract_safe_fn(
             "clarity",
             "cleanup_as_contract_safe",
             |mut caller: Caller<'_, ClarityWasmContext>| {
-                caller.data_mut().pop_sender()?;
-                caller.data_mut().pop_caller()?;
+                // we need to restore the current caller and sender. We pop both and check if we did set
+                // them correctly before.
+                let sender = caller.data_mut().pop_sender();
+                let _ = caller.data_mut().pop_caller()?;
+                let _ = sender?;
+
                 caller.data_mut().global_context.roll_back()?;
 
                 Ok(())
@@ -6378,14 +6382,10 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
         Ok((0i64, 0i64))
     })?;
 
-    linker.func_wrap(
-        "clarity",
-        "enter_as_contract",
-        |_: Caller<'_, ()>| {
-            println!("as-contract: enter");
-            Ok(())
-        },
-    )?;
+    linker.func_wrap("clarity", "enter_as_contract", |_: Caller<'_, ()>| {
+        println!("as-contract: enter");
+        Ok(())
+    })?;
 
     linker.func_wrap("clarity", "exit_as_contract", |_: Caller<'_, ()>| {
         println!("as-contract: exit");
