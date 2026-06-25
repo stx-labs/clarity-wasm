@@ -1581,7 +1581,8 @@ mod tests {
     mod clarity_v4 {
         use clarity::util::hash::Sha512Trunc256Sum;
         use clarity::vm::types::PrincipalData;
-        use clarity_types::{types::StandardPrincipalData, ClarityName};
+        use clarity_types::types::StandardPrincipalData;
+        use clarity_types::ClarityName;
 
         use super::*;
         use crate::tools::{crosscheck, evaluate};
@@ -2978,7 +2979,10 @@ mod tests {
             "#;
             let caller = "(contract-call? .callee send-stx u100 .callee)";
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(Value::okay_true())),
             );
         }
@@ -3004,12 +3008,18 @@ mod tests {
             let expected = Value::Tuple(
                 clarity::vm::types::TupleData::from_data(vec![
                     (ClarityName::from_literal("callee-balance"), Value::UInt(0)),
-                    (ClarityName::from_literal("error-code"), Value::error(Value::UInt(0)).unwrap()),
+                    (
+                        ClarityName::from_literal("error-code"),
+                        Value::error(Value::UInt(0)).unwrap(),
+                    ),
                 ])
                 .unwrap(),
             );
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(expected)),
             );
         }
@@ -3037,12 +3047,18 @@ mod tests {
             let expected = Value::Tuple(
                 clarity::vm::types::TupleData::from_data(vec![
                     (ClarityName::from_literal("callee-balance"), Value::UInt(0)),
-                    (ClarityName::from_literal("error-code"), Value::error(Value::UInt(128)).unwrap()),
+                    (
+                        ClarityName::from_literal("error-code"),
+                        Value::error(Value::UInt(128)).unwrap(),
+                    ),
                 ])
                 .unwrap(),
             );
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(expected)),
             );
         }
@@ -3073,12 +3089,18 @@ mod tests {
             let expected = Value::Tuple(
                 clarity::vm::types::TupleData::from_data(vec![
                     (ClarityName::from_literal("callee-balance"), Value::UInt(0)),
-                    (ClarityName::from_literal("error-code"), Value::error(Value::UInt(128)).unwrap()),
+                    (
+                        ClarityName::from_literal("error-code"),
+                        Value::error(Value::UInt(128)).unwrap(),
+                    ),
                 ])
                 .unwrap(),
             );
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(expected)),
             );
         }
@@ -3106,12 +3128,18 @@ mod tests {
             let expected = Value::Tuple(
                 clarity::vm::types::TupleData::from_data(vec![
                     (ClarityName::from_literal("callee-balance"), Value::UInt(0)),
-                    (ClarityName::from_literal("error-code"), Value::error(Value::UInt(1)).unwrap()),
+                    (
+                        ClarityName::from_literal("error-code"),
+                        Value::error(Value::UInt(1)).unwrap(),
+                    ),
                 ])
                 .unwrap(),
             );
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(expected)),
             );
         }
@@ -3149,7 +3177,10 @@ mod tests {
                 (contract-call? .callee transfer-all u100 u1 u200 .callee)
             ";
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(Value::okay_true())),
             );
         }
@@ -3197,13 +3228,19 @@ mod tests {
             let expected = Value::Tuple(
                 clarity::vm::types::TupleData::from_data(vec![
                     (ClarityName::from_literal("callee-stx"), Value::UInt(0)),
-                    (ClarityName::from_literal("error-code"), Value::error(Value::UInt(0)).unwrap()),
+                    (
+                        ClarityName::from_literal("error-code"),
+                        Value::error(Value::UInt(0)).unwrap(),
+                    ),
                     (ClarityName::from_literal("sender-ft"), Value::UInt(200)),
                 ])
                 .unwrap(),
             );
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(expected)),
             );
         }
@@ -3226,7 +3263,10 @@ mod tests {
             "#;
             let caller = "(contract-call? .callee send-twice u50 u30 .callee)";
             crosscheck_multi_contract(
-                &[(ContractName::from_literal("callee"), callee), (ContractName::from_literal("caller"), caller)],
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
                 Ok(Some(Value::okay_true())),
             );
         }
