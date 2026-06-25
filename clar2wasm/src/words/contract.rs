@@ -26,6 +26,16 @@ thread_local! {
     static ALLOWANCE_CONTEXT: Cell<Option<LocalId>> = const { Cell::new(None) };
 }
 
+/// Runs `f` with the [`LocalId`] of the current `as-contract?` allowance
+/// context, which is loaded from the [`ALLOWANCE_CONTEXT`] thread-local.
+///
+/// This is the accessor used by the `With*` allowance words during code
+/// generation: it takes the local out of [`ALLOWANCE_CONTEXT`], passes it to
+/// `f`, and restores it afterwards so subsequent words in the same
+/// `as-contract?` body can read it too.
+///
+/// Returns a [`GeneratorError::InternalError`] if the context has not been set
+/// (i.e. an allowance word was generated outside of an `as-contract?` body).
 fn with_allowance_context<T, F>(mut f: F) -> Result<T, GeneratorError>
 where
     F: FnMut(LocalId) -> Result<T, GeneratorError>,
