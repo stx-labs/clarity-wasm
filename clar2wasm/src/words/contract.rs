@@ -152,7 +152,7 @@ impl ComplexWord for AsContractSafe {
             generator.traverse_expr(builder, allowance)?;
         }
 
-        // Block that will contain the entire traversal of the inner exprssions.
+        // Block that will contain the entire traversal of the inner expressions.
         let exprs_block_id = {
             let mut exprs_block = builder.dangling_instr_seq(InstrSeqType::new(
                 &mut generator.module.types,
@@ -330,7 +330,7 @@ impl ComplexWord for RestrictAssets {
             generator.traverse_expr(builder, allowance)?;
         }
 
-        // Block that will contain the entire traversal of the inner exprssions.
+        // Block that will contain the entire traversal of the inner expressions.
         let exprs_block_id = {
             let mut exprs_block = builder.dangling_instr_seq(InstrSeqType::new(
                 &mut generator.module.types,
