@@ -12,7 +12,6 @@ use clarity::vm::ClarityName;
 use walrus::ir::{BinaryOp, Instr, UnaryOp, Unop};
 use walrus::{FunctionId, GlobalId, InstrSeqBuilder, LocalId, Module};
 
-use crate::cost::OverheadCosts::{InnerTypeCheckCost, UserFunctionApplication};
 use crate::error_mapping::ErrorMap;
 use crate::wasm_generator::{GeneratorError, WasmGenerator};
 use crate::words::Word;
@@ -76,33 +75,6 @@ pub trait ChargeGenerator {
                     )))
                 }
             }
-        }
-
-        Ok(())
-    }
-
-    fn charge_contract_call_overhead(
-        &self,
-        instrs: &mut InstrSeqBuilder,
-        contract_call_arity: impl Into<Scalar>,
-        total_parameters_size: impl Into<Scalar>,
-    ) -> Result<()> {
-        let contract_call_arity = contract_call_arity.into();
-        let total_parameters_size = total_parameters_size.into();
-
-        if let Some((ctx, module)) = self.cost_context() {
-            ctx.emit(
-                instrs,
-                module,
-                &ctx.overhead_cost(&UserFunctionApplication),
-                contract_call_arity,
-            )?;
-            ctx.emit(
-                instrs,
-                module,
-                &ctx.overhead_cost(&InnerTypeCheckCost),
-                total_parameters_size,
-            )?;
         }
 
         Ok(())
@@ -177,15 +149,6 @@ pub struct ChargeContext {
     pub runtime_error: FunctionId,
 }
 
-// Doing a contract call involves costs charges.
-// But these should not be conflated with a word cost.
-// We do not want to pollute the namespace with new reserved keywords that are only used for internal management.
-#[derive(Debug, Clone, Copy)]
-pub enum OverheadCosts {
-    UserFunctionApplication,
-    InnerTypeCheckCost,
-}
-
 impl ChargeContext {
     fn word_cost(&self, name: &ClarityName) -> Option<&WordCost> {
         match self.epoch {
@@ -201,27 +164,7 @@ impl ChargeContext {
             | StacksEpochId::Epoch31
             | StacksEpochId::Epoch32 => clar3::WORD_COSTS.get(name),
             // From epoch 33 we should use clar4 word costs
-            StacksEpochId::Epoch33 | StacksEpochId::Epoch34 => todo!(),
-        }
-    }
-
-    // A contract call involves costs that are not tied to the word itself
-    // but to the internal management
-    fn overhead_cost(&self, overhead_type: &OverheadCosts) -> WordCost {
-        match self.epoch {
-            StacksEpochId::Epoch10 => panic!("clarity did not exist in epoch 1"),
-            StacksEpochId::Epoch20 => clar1::overhead_costs(overhead_type),
-            StacksEpochId::Epoch2_05 => clar2::overhead_costs(overhead_type),
-            StacksEpochId::Epoch21
-            | StacksEpochId::Epoch22
-            | StacksEpochId::Epoch23
-            | StacksEpochId::Epoch24
-            | StacksEpochId::Epoch25
-            | StacksEpochId::Epoch30
-            | StacksEpochId::Epoch31
-            | StacksEpochId::Epoch32
-            | StacksEpochId::Epoch33
-            | StacksEpochId::Epoch34 => clar3::overhead_costs(overhead_type),
+            StacksEpochId::Epoch33 | StacksEpochId::Epoch34 => clar3::WORD_COSTS.get(name),
         }
     }
 }
@@ -849,7 +792,7 @@ mod word {
         }
     }
 
-    macro_rules! epoch_for_version {
+    macro_rules! epoch_for_cost_version {
         (1) => {
             StacksEpochId::Epoch20
         };
@@ -862,17 +805,17 @@ mod word {
     }
 
     macro_rules! decl_test {
-        ($version:literal, $name:literal, $snippet:literal, $expected_cost:expr) => {
+        ($cost_version:literal, $name:literal, $snippet:literal, $expected_cost:expr) => {
             paste::paste! {
                 #[test]
-                fn [<$name _ v $version _with_cost>]() {
-                    let epoch = epoch_for_version!($version);
+                fn [<$name _ v $cost_version _with_cost>]() {
+                    let epoch = epoch_for_cost_version!($cost_version);
                     let version = ClarityVersion::default_for_epoch(epoch);
                     execute_snippet(epoch, version, $snippet, Some($expected_cost));
                 }
                 #[test]
-               fn [<$name _ v $version _without_cost>]() {
-                    let epoch = epoch_for_version!($version);
+               fn [<$name _ v $cost_version _without_cost>]() {
+                    let epoch = epoch_for_cost_version!($cost_version);
                     let version = ClarityVersion::default_for_epoch(epoch);
                     execute_snippet(epoch, version, $snippet, None);
                 }
@@ -881,25 +824,25 @@ mod word {
     }
 
     macro_rules! decl_tests {
-        ($name:literal, $snippet:literal, { $($version:literal => $cost:expr),* $(,)? }) => {
+        ($name:literal, $snippet:literal, { $($cost_version:literal => $cost:expr),* $(,)? }) => {
             $(
-                decl_test!($version, $name, $snippet, $cost);
+                decl_test!($cost_version, $name, $snippet, $cost);
             )*
         }
     }
 
     macro_rules! decl_test_with_contract_call {
-        ($version:literal, $name:literal, ($callee_name:literal, $callee_snippet:literal), ($caller_name:literal , $caller_snippet:literal), $expected_cost:expr) => {
+        ($cost_version:literal, $name:literal, ($callee_name:literal, $callee_snippet:literal), ($caller_name:literal , $caller_snippet:literal), $expected_cost:expr) => {
             paste::paste! {
                 #[test]
-                fn [<$name _ v $version _with_cost>]() {
-                    let epoch = epoch_for_version!($version);
+                fn [<$name _ v $cost_version _with_cost>]() {
+                    let epoch = epoch_for_cost_version!($cost_version);
                     let version = ClarityVersion::default_for_epoch(epoch);
                     execute_snippets(epoch, version, &[($callee_name, $callee_snippet), ($caller_name, $caller_snippet)], Some($expected_cost));
                 }
                 #[test]
-                fn [<$name _ v $version _without_cost>]() {
-                    let epoch = epoch_for_version!($version);
+                fn [<$name _ v $cost_version _without_cost>]() {
+                    let epoch = epoch_for_cost_version!($cost_version);
                     let version = ClarityVersion::default_for_epoch(epoch);
                     execute_snippets(epoch, version, &[($callee_name, $callee_snippet), ($caller_name, $caller_snippet)], None);
                 }
@@ -908,9 +851,9 @@ mod word {
     }
 
     macro_rules! decl_tests_with_contract_call{
-        ($name:literal, ($callee_name:literal, $callee_snippet:literal), ($caller_name:literal, $caller_snippet:literal), { $($version:literal => $cost:expr),* $(,)? }) => {
+        ($name:literal, ($callee_name:literal, $callee_snippet:literal), ($caller_name:literal, $caller_snippet:literal), { $($cost_version:literal => $cost:expr),* $(,)? }) => {
             $(
-                decl_test_with_contract_call!($version, $name, ($callee_name, $callee_snippet), ($caller_name, $caller_snippet), $cost);
+                decl_test_with_contract_call!($cost_version, $name, ($callee_name, $callee_snippet), ($caller_name, $caller_snippet), $cost);
             )*
         }
     }
@@ -1554,15 +1497,41 @@ mod word {
         "contract_call",
         (
             "callee",
-            "(define-public (foo (a int) (b int) (c int) (d int)) (ok 1))"
+            "(define-public (foo (a (response bool int)) (b int) (c int) (d int)) (ok 1))"
         ),
-        ("caller", "(contract-call? .callee foo 1 2 3 4)"),
+        ("caller", "(contract-call? .callee foo (ok true) 2 3 4)"),
         {
-                 1 => CostMeter { runtime: 133000, read_count: 3, read_length: 61, write_count: 0, write_length: 0 },
-                 2 => CostMeter { runtime: 981,  read_count: 3, read_length: 61, write_count: 0, write_length: 0 },
-                 3 => CostMeter { runtime: 715,  read_count: 3, read_length: 61, write_count: 0, write_length: 0 },
+                 1 => CostMeter { runtime: 151000, read_count: 3, read_length: 77, write_count: 0, write_length: 0 },
+                 2 => CostMeter { runtime: 1229,  read_count: 3, read_length: 77, write_count: 0, write_length: 0 },
+                 3 => CostMeter { runtime: 932,  read_count: 3, read_length: 77, write_count: 0, write_length: 0 },
              }
     );
+
+    // Cost result differs slightly after epoch 3_3 for contract_call
+    #[test]
+    #[ignore = "Clarity 4 costs needs to be implemented"]
+    fn contract_call_with_epoch_3_3() {
+        let epoch = StacksEpochId::Epoch33;
+        let version = ClarityVersion::Clarity4;
+        execute_snippets(
+            epoch,
+            version,
+            &[
+                (
+                    "callee",
+                    "(define-public (foo (a (response bool int)) (b int) (c int) (d int)) (ok 1))",
+                ),
+                ("caller", "(contract-call? .callee foo (ok true) 2 3 4)"),
+            ],
+            Some(CostMeter {
+                runtime: 0,
+                read_count: 0,
+                read_length: 0,
+                write_count: 0,
+                write_length: 0,
+            }),
+        );
+    }
 
     // decl_tests!("contract_of", "(contract-of contract)", {
     //     1 => CostMeter { runtime: 4000, read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
