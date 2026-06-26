@@ -1856,14 +1856,32 @@ mod tests {
             "#;
             let caller = "
                 (stx-transfer? u500 tx-sender .callee)
-                (contract-call? .callee send-stx u100 tx-sender)
+                (let ((result (contract-call? .callee send-stx u100 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM)))
+                    {result: result,
+                     sender-balance: (stx-get-balance .callee),
+                     recipient-balance: (stx-get-balance 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM)}
+                )
             ";
+            let expected = Value::Tuple(
+                clarity::vm::types::TupleData::from_data(vec![
+                    (ClarityName::from_literal("result"), Value::okay_true()),
+                    (
+                        ClarityName::from_literal("sender-balance"),
+                        Value::UInt(400),
+                    ),
+                    (
+                        ClarityName::from_literal("recipient-balance"),
+                        Value::UInt(100),
+                    ),
+                ])
+                .unwrap(),
+            );
             crosscheck_multi_contract(
                 &[
                     (ContractName::from_literal("callee"), callee),
                     (ContractName::from_literal("caller"), caller),
                 ],
-                Ok(Some(Value::okay_true())),
+                Ok(Some(expected)),
             );
         }
 
@@ -1957,17 +1975,36 @@ mod tests {
                         (try! (ft-transfer? my-token amount current-contract recipient))
                     )
                 )
+
+                (define-read-only (get-ft-balance (who principal))
+                    (ft-get-balance my-token who)
+                )
             "#;
             let caller = "
                 (contract-call? .callee mint-ft u100)
-                (contract-call? .callee transfer-ft u100 tx-sender)
+                (let ((result (contract-call? .callee transfer-ft u100 tx-sender)))
+                    {result: result,
+                     sender-balance: (contract-call? .callee get-ft-balance .callee),
+                     recipient-balance: (contract-call? .callee get-ft-balance tx-sender)}
+                )
             ";
+            let expected = Value::Tuple(
+                clarity::vm::types::TupleData::from_data(vec![
+                    (ClarityName::from_literal("result"), Value::okay_true()),
+                    (ClarityName::from_literal("sender-balance"), Value::UInt(0)),
+                    (
+                        ClarityName::from_literal("recipient-balance"),
+                        Value::UInt(100),
+                    ),
+                ])
+                .unwrap(),
+            );
             crosscheck_multi_contract(
                 &[
                     (ContractName::from_literal("callee"), callee),
                     (ContractName::from_literal("caller"), caller),
                 ],
-                Ok(Some(Value::okay_true())),
+                Ok(Some(expected)),
             );
         }
 
@@ -2241,17 +2278,38 @@ mod tests {
                         )
                     )
                 )
+
+                (define-read-only (get-nft-owner (asset uint))
+                    (nft-get-owner? token asset)
+                )
             "#;
             let caller = "
                 (contract-call? .callee mint-nft u1)
-                (contract-call? .callee transfer-token u1)
+                (let ((result (contract-call? .callee transfer-token u1)))
+                    {
+                        result: result, 
+                        owner: (contract-call? .callee get-nft-owner u1)
+                    }
+                )
             ";
+            let tx_sender =
+                Value::Principal(PrincipalData::Standard(StandardPrincipalData::transient()));
+            let expected = Value::Tuple(
+                clarity::vm::types::TupleData::from_data(vec![
+                    (ClarityName::from_literal("result"), Value::okay_true()),
+                    (
+                        ClarityName::from_literal("owner"),
+                        Value::some(tx_sender).unwrap(),
+                    ),
+                ])
+                .unwrap(),
+            );
             crosscheck_multi_contract(
                 &[
                     (ContractName::from_literal("callee"), callee),
                     (ContractName::from_literal("caller"), caller),
                 ],
-                Ok(Some(Value::okay_true())),
+                Ok(Some(expected)),
             );
         }
 
@@ -2790,24 +2848,42 @@ mod tests {
                     )
                 )
 
-                (define-read-only (get-ft-balance)
-                    (ft-get-balance my-token current-contract)
+                (define-read-only (get-ft-balance (who principal))
+                    (ft-get-balance my-token who)
                 )
             "#;
             let caller = "
                 (stx-transfer? u500 tx-sender .callee)
                 (contract-call? .callee mint-ft u200)
-                (let ((result (contract-call? .callee transfer-both u100 u50 tx-sender)))
-                    {result: result,
-                     stx-balance: (stx-get-balance .callee),
-                     ft-balance: (contract-call? .callee get-ft-balance)}
+                (let ((result (contract-call? .callee transfer-both u100 u50 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM)))
+                    {
+                        result: result,
+                        sender-stx-balance: (stx-get-balance .callee),
+                        sender-ft-balance: (contract-call? .callee get-ft-balance .callee),
+                        recipient-stx-balance: (stx-get-balance 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM),
+                        recipient-ft-balance: (contract-call? .callee get-ft-balance 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM)
+                    }
                 )
             ";
             let expected = Value::Tuple(
                 clarity::vm::types::TupleData::from_data(vec![
                     (ClarityName::from_literal("result"), Value::okay_true()),
-                    (ClarityName::from_literal("stx-balance"), Value::UInt(400)),
-                    (ClarityName::from_literal("ft-balance"), Value::UInt(150)),
+                    (
+                        ClarityName::from_literal("sender-stx-balance"),
+                        Value::UInt(400),
+                    ),
+                    (
+                        ClarityName::from_literal("sender-ft-balance"),
+                        Value::UInt(150),
+                    ),
+                    (
+                        ClarityName::from_literal("recipient-stx-balance"),
+                        Value::UInt(100),
+                    ),
+                    (
+                        ClarityName::from_literal("recipient-ft-balance"),
+                        Value::UInt(50),
+                    ),
                 ])
                 .unwrap(),
             );
