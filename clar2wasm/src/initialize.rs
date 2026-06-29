@@ -27,7 +27,6 @@ pub struct ClarityWasmContext<'a, 'b> {
     caller_stack: Vec<PrincipalData>,
     /// Stack of block hashes, used for `at-block` expressions.
     bhh_stack: Vec<StacksBlockId>,
-
     /// Contract analysis data, used for typing information, and only available
     /// when initializing a contract. Should always be `Some` when initializing
     /// a contract, and `None` otherwise.
