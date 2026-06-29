@@ -1516,13 +1516,18 @@ impl AllowanceContext {
 
     fn push(externref: &Option<ExternRef>, allowance: Allowance) -> Result<(), VmExecutionError> {
         let ctx = Self::from_externref(externref)?;
-        ctx.0.lock().unwrap().push(allowance);
+        ctx.0
+            .lock()
+            .map_err(|e| VmExecutionError::Wasm(WasmError::Expect(e.to_string())))?
+            .push(allowance);
         Ok(())
     }
 
     fn extract(externref: &Option<ExternRef>) -> Result<Vec<Allowance>, VmExecutionError> {
         let ctx = Self::from_externref(externref)?;
-        Ok(std::mem::take(&mut *ctx.0.lock().unwrap()))
+        Ok(std::mem::take(&mut *ctx.0.lock().map_err(|e| {
+            VmExecutionError::Wasm(WasmError::Expect(e.to_string()))
+        })?))
     }
 }
 
