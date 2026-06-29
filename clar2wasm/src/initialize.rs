@@ -1,16 +1,16 @@
 use clarity::vm::analysis::ContractAnalysis;
+use clarity::vm::clarity_wasm::{AccessCostMeter, CostGlobals, CostMeter};
 use clarity::vm::contexts::GlobalContext;
 use clarity::vm::errors::{RuntimeError, VmExecutionError, WasmError};
 use clarity::vm::events::*;
 use clarity::vm::types::{AssetIdentifier, BuffData, PrincipalData, QualifiedContractIdentifier};
 use clarity::vm::{CallStack, ContractContext, Value};
 use stacks_common::types::chainstate::StacksBlockId;
-use wasmtime::{Linker, Module, Store};
+use wasmtime::{AsContextMut, Linker, Module, Store};
 
-use crate::cost::{CostLinker, CostMeter};
-use crate::linker::link_host_functions;
+use crate::error_mapping;
+use crate::linker::{link_cost_globals, link_host_functions};
 use crate::wasm_utils::*;
-use crate::{error_mapping, AccessCostMeter};
 
 // The context used when making calls into the Wasm module.
 pub struct ClarityWasmContext<'a, 'b> {
@@ -31,9 +31,11 @@ pub struct ClarityWasmContext<'a, 'b> {
     /// when initializing a contract. Should always be `Some` when initializing
     /// a contract, and `None` otherwise.
     pub contract_analysis: Option<&'a ContractAnalysis>,
+    pub cost_globals: Option<CostGlobals>,
 }
 
 impl<'a, 'b> ClarityWasmContext<'a, 'b> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new_init(
         global_context: &'a mut GlobalContext<'b>,
         contract_context: &'a mut ContractContext,
@@ -42,6 +44,7 @@ impl<'a, 'b> ClarityWasmContext<'a, 'b> {
         caller: Option<PrincipalData>,
         sponsor: Option<PrincipalData>,
         contract_analysis: Option<&'a ContractAnalysis>,
+        cost_globals: Option<CostGlobals>,
     ) -> Self {
         ClarityWasmContext {
             global_context,
@@ -55,6 +58,7 @@ impl<'a, 'b> ClarityWasmContext<'a, 'b> {
             caller_stack: vec![],
             bhh_stack: vec![],
             contract_analysis,
+            cost_globals,
         }
     }
 
@@ -79,6 +83,7 @@ impl<'a, 'b> ClarityWasmContext<'a, 'b> {
             caller_stack: vec![],
             bhh_stack: vec![],
             contract_analysis,
+            cost_globals: None,
         }
     }
 
@@ -347,6 +352,7 @@ pub fn initialize_contract(
         Some(publisher),
         sponsor.clone(),
         Some(contract_analysis),
+        None,
     );
     let module = init_context
         .contract_context()
@@ -356,11 +362,12 @@ pub fn initialize_contract(
         })?;
     let mut store = Store::new(&engine, init_context);
     let mut linker = Linker::new(&engine);
-    // Link in the host interface functions.
+    // Link in the host interface functions and globals.
     link_host_functions(&mut linker)?;
-    linker
-        .define_cost_globals(&mut store)
-        .map_err(|e| VmExecutionError::Wasm(WasmError::UnableToLoadModule(e)))?;
+    store.data_mut().cost_globals = Some(
+        link_cost_globals(&mut linker, &mut store.as_context_mut())
+            .map_err(|e| VmExecutionError::Wasm(WasmError::UnableToLoadModule(e.into())))?,
+    );
 
     let instance = linker
         .instantiate(&mut store, &module)

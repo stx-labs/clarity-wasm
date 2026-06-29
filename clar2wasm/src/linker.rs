@@ -1,6 +1,7 @@
 use std::io::{Cursor, Write as _};
 
 use clarity::vm::callables::{DefineType, DefinedFunction};
+use clarity::vm::clarity_wasm::{Cost, CostGlobals};
 use clarity::vm::contexts::{ExecutionState, InvocationContext};
 use clarity::vm::costs::{constants as cost_constants, CostTracker};
 use clarity::vm::database::{ClarityDatabase, STXBalance, StoreType};
@@ -23,14 +24,56 @@ use stacks_common::types::chainstate::StacksBlockId;
 use stacks_common::util::hash::{Keccak256Hash, Sha512Sum, Sha512Trunc256Sum};
 use stacks_common::util::secp256k1::{secp256k1_recover, secp256k1_verify, Secp256k1PublicKey};
 use wasmtime::{
-    AsContextMut, Caller, Engine, ExternRef, Instance, Linker, Memory, Module, Store, Val,
+    AsContextMut, Caller, Engine, ExternRef, Global, GlobalType, Instance, Linker, Memory, Module,
+    Store, Val,
 };
 
-use crate::cost::CostLinker;
 use crate::initialize::ClarityWasmContext;
 use crate::wasm_utils::*;
 
-/// Link the host interface functions for into the Wasm module.
+pub fn link_cost_globals<T>(
+    linker: &mut Linker<T>,
+    store: &mut impl AsContextMut<Data = T>,
+) -> Result<CostGlobals, VmExecutionError> {
+    let runtime = link_global(linker, store, Cost::Runtime.as_str(), Val::I64(i64::MAX))?;
+    let read_count = link_global(linker, store, Cost::ReadCount.as_str(), Val::I64(i64::MAX))?;
+    let read_length = link_global(linker, store, Cost::ReadLength.as_str(), Val::I64(i64::MAX))?;
+    let write_count = link_global(linker, store, Cost::WriteCount.as_str(), Val::I64(i64::MAX))?;
+    let write_length = link_global(
+        linker,
+        store,
+        Cost::WriteLength.as_str(),
+        Val::I64(i64::MAX),
+    )?;
+    Ok(CostGlobals {
+        runtime,
+        read_count,
+        read_length,
+        write_count,
+        write_length,
+    })
+}
+
+fn link_global<T>(
+    linker: &mut Linker<T>,
+    store: &mut impl AsContextMut<Data = T>,
+    name: &str,
+    value: Val,
+) -> Result<Global, VmExecutionError> {
+    let the_global = Global::new(
+        store.as_context_mut(),
+        GlobalType::new(wasmtime::ValType::I64, wasmtime::Mutability::Var),
+        value,
+    )
+    .map_err(|e| VmExecutionError::Wasm(WasmError::UnableToLoadModule(e)))?;
+
+    linker
+        .define(&mut store.as_context_mut(), "clarity", name, the_global)
+        .map_err(|e| VmExecutionError::Wasm(WasmError::UnableToLoadModule(e)))?;
+    Ok(the_global)
+}
+
+/// Link the host interface functions into the Wasm module.
 pub fn link_host_functions(
     linker: &mut Linker<ClarityWasmContext>,
 ) -> Result<(), VmExecutionError> {
@@ -5186,6 +5229,15 @@ fn link_contract_call_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
                         &args_sizes,
                     )?;
 
+                // We get the current cost values from the caller's globals.
+                let mut cost_globals = caller
+                    .data()
+                    .cost_globals
+                    .ok_or(WasmError::GlobalNotFound("cost globals not found".into()))?;
+                // We set the cost meter in the global context. global context which is shared by all environments.
+                caller.data_mut().global_context.cost_meter =
+                    cost_globals.to_cost_meter(&mut caller.as_context_mut())?;
+
                 let mut exec_state = ExecutionState {
                     global_context: caller.data_mut().global_context,
                     call_stack: &mut call_stack,
@@ -5214,6 +5266,11 @@ fn link_contract_call_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
                         &args,
                     )
                 }?;
+
+                // The cost meter in we get back from the global context is updated in stacks-core/clarity/src/vm/clarity_wasm.rs::call_function().
+                // We then simply retrieve it to update the current WASM's cost global with the updated costs.
+                let updated_cost_meter = caller.data_mut().global_context.cost_meter;
+                cost_globals.from_cost_meter(&mut caller.as_context_mut(), &updated_cost_meter)?;
 
                 // Write the result to the return buffer
                 let return_ty = if trait_id_length == 0 {
@@ -7065,7 +7122,7 @@ pub fn load_stdlib() -> Result<(Instance, Store<()>), wasmtime::Error> {
     let mut store = Store::new(&engine, ());
 
     let mut linker = dummy_linker(&engine)?;
-    linker.define_cost_globals(&mut store)?;
+    link_cost_globals(&mut linker, &mut store.as_context_mut())?;
 
     let module = Module::new(&engine, standard_lib)?;
     let instance = linker.instantiate(&mut store, &module)?;

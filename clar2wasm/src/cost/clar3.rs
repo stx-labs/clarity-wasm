@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use clarity::vm::ClarityName;
 use lazy_static::lazy_static;
+use Caf::*;
 
 use super::{Caf, WordCost};
 use crate::words::arithmetic::{Add, Div, Log2, Modulo, Mul, Power, Sqrti, Sub};
@@ -47,7 +48,6 @@ use crate::words::Word;
 
 lazy_static! {
     pub(super) static ref WORD_COSTS: HashMap<ClarityName, WordCost> = {
-        use Caf::*;
 
         let mut map = HashMap::new();
 
