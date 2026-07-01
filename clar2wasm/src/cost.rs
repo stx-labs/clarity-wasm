@@ -6,17 +6,37 @@
 mod clar1;
 mod clar2;
 mod clar3;
+mod clar4;
 
 use clarity::types::StacksEpochId;
 use clarity::vm::ClarityName;
+use clarity_types::ClarityTypeError;
 use walrus::ir::{BinaryOp, Instr, UnaryOp, Unop};
 use walrus::{FunctionId, GlobalId, InstrSeqBuilder, LocalId, Module};
 
 use crate::error_mapping::ErrorMap;
 use crate::wasm_generator::{GeneratorError, WasmGenerator};
-use crate::words::Word;
+use crate::words::{ComplexWord, Word};
 
 type Result<T, E = GeneratorError> = std::result::Result<T, E>;
+
+/// helper function to either charge a cost inside a result
+/// or throw a signature type size check error
+pub fn charge_ok_or_throw_runtime_error(
+    cost: &Result<u32, ClarityTypeError>,
+    generator: &mut WasmGenerator,
+    builder: &mut walrus::InstrSeqBuilder,
+    word: &dyn ComplexWord,
+) -> Result<(), GeneratorError> {
+    if let Ok(cost) = cost {
+        word.charge(generator, builder, *cost)?;
+    } else {
+        builder
+            .i32_const(ErrorMap::SignatureTypeSizeCheckError as i32)
+            .call(generator.func_by_name("stdlib.runtime-error"));
+    }
+    Ok(())
+}
 
 /// Extension trait allowing for words to generate cost tracking code
 /// during traversal.
@@ -163,8 +183,8 @@ impl ChargeContext {
             | StacksEpochId::Epoch30
             | StacksEpochId::Epoch31
             | StacksEpochId::Epoch32 => clar3::WORD_COSTS.get(name),
-            // From epoch 33 we should use clar4 word costs
-            StacksEpochId::Epoch33 | StacksEpochId::Epoch34 => todo!(),
+            StacksEpochId::Epoch33 => clar4::WORD_COSTS.get(name),
+            StacksEpochId::Epoch34 => todo!(),
         }
     }
 }
@@ -801,6 +821,9 @@ mod word {
         };
         (3) => {
             StacksEpochId::Epoch31
+        };
+        (4) => {
+            StacksEpochId::Epoch33
         };
     }
 
@@ -1504,34 +1527,119 @@ mod word {
                  1 => CostMeter { runtime: 151000, read_count: 3, read_length: 77, write_count: 0, write_length: 0 },
                  2 => CostMeter { runtime: 1229,  read_count: 3, read_length: 77, write_count: 0, write_length: 0 },
                  3 => CostMeter { runtime: 932,  read_count: 3, read_length: 77, write_count: 0, write_length: 0 },
+                 4 => CostMeter { runtime: 902,  read_count: 3, read_length: 77, write_count: 0, write_length: 0 },
              }
     );
 
-    // Cost result differs slightly after epoch 3_3 for contract_call
-    #[test]
-    #[ignore = "Clarity 4 costs needs to be implemented"]
-    fn contract_call_with_epoch_3_3() {
-        let epoch = StacksEpochId::Epoch33;
-        let version = ClarityVersion::Clarity4;
-        execute_snippets(
-            epoch,
-            version,
-            &[
-                (
-                    "callee",
-                    "(define-public (foo (a (response bool int)) (b int) (c int) (d int)) (ok 1))",
-                ),
-                ("caller", "(contract-call? .callee foo (ok true) 2 3 4)"),
-            ],
-            Some(CostMeter {
-                runtime: 0,
-                read_count: 0,
-                read_length: 0,
-                write_count: 0,
-                write_length: 0,
-            }),
-        );
-    }
+    decl_tests!("to_ascii_bool", "(to-ascii? true)", {
+        4 => CostMeter { runtime: 166, read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
+    });
+
+    decl_tests!("to_ascii_uint", "(to-ascii? u1)", {
+        4 => CostMeter { runtime: 406, read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
+    });
+
+    decl_tests!("to_ascii_int", "(to-ascii? 1)", {
+        4 => CostMeter { runtime: 406, read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
+    });
+
+    decl_tests!("to_ascii_buffer", "(to-ascii? 0x68656c6c6f21)", {
+        4 => CostMeter { runtime: 310, read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
+    });
+
+    decl_tests!("to_ascii_string_utf8", "(to-ascii? u\"And this is an UTF-8 string \\u{1f601}\")", {
+        4 => CostMeter { runtime: 2070, read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
+    });
+
+    decl_tests!("to_ascii_principal", "(to-ascii? 'ST1HTBVD3JG9C05J7HBJTHGR0GGW7KXW28M5JS8QE)", {
+        4 => CostMeter { runtime: 2518, read_count: 0, read_length: 0, write_count: 0, write_length: 0 },
+    });
+
+    decl_tests_with_contract_call!(
+        "contract_hash",
+        (
+            "callee",
+            "(define-read-only (something)
+                (ok u1)
+            )"
+        ),
+        ("caller", "(contract-hash? .callee)"),
+        {
+                 4 => CostMeter { runtime: 180,  read_count: 1, read_length: 32, write_count: 0, write_length: 0 },
+             }
+    );
+
+    decl_tests_with_contract_call!(
+        "restrict_assets_one_allowance",
+        (
+            "callee",
+            "(define-public (send-stx (amount uint) (recipient principal))
+                        (restrict-assets? tx-sender ((with-stx u100))
+                            (try! (stx-transfer? amount tx-sender recipient))
+                        )
+                    )"
+        ),
+        ("caller", "(contract-call? .callee send-stx u100 .callee)"),
+        {
+                 4 => CostMeter { runtime: 6616,  read_count: 4, read_length: 259, write_count: 1, write_length: 1 },
+             }
+    );
+
+    decl_tests_with_contract_call!(
+        "restrict_assets_two_allowances",
+        (
+            "callee",
+            "(define-public (send-stx (amount uint) (recipient principal))
+                        (restrict-assets? tx-sender ((with-stx u51) (with-stx u51))
+                            (try! (stx-transfer? amount tx-sender recipient))
+                        )
+                    )"
+        ),
+        ("caller", "(contract-call? .callee send-stx u100 .callee)"),
+        {
+            4 => CostMeter { runtime: 6755,  read_count: 4, read_length: 273, write_count: 1, write_length: 1 },
+             }
+    );
+
+    decl_tests_with_contract_call!(
+        "contract_call_safe_one_allowance",
+        (
+            "callee",
+            "(define-public (send-stx (amount uint) (recipient principal))
+                        (as-contract? ((with-stx u100))
+                            (try! (stx-transfer? amount current-contract recipient))
+                        )
+                    )
+                "
+        ),
+        ("caller",
+            "(stx-transfer? u500 tx-sender .callee)
+            (contract-call? .callee send-stx u100 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM)"
+        ),
+        {
+                 4 => CostMeter { runtime: 11404, read_count: 5, read_length: 270, write_count: 2, write_length: 2 },
+             }
+    );
+
+    decl_tests_with_contract_call!(
+        "contract_call_safe_two_allowances",
+        (
+            "callee",
+            "(define-public (send-stx (amount uint) (recipient principal))
+                        (as-contract? ((with-stx u100) (with-stx u100))
+                            (try! (stx-transfer? amount current-contract recipient))
+                        )
+                    )
+                "
+        ),
+        ("caller",
+            "(stx-transfer? u500 tx-sender .callee)
+            (contract-call? .callee send-stx u100 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM)"
+        ),
+        {
+                 4 => CostMeter { runtime: 11545, read_count: 5, read_length: 286, write_count: 2, write_length: 2 },
+             }
+    );
 
     // decl_tests!("contract_of", "(contract-of contract)", {
     //     1 => CostMeter { runtime: 4000, read_count: 0, read_length: 0, write_count: 0, write_length: 0 },

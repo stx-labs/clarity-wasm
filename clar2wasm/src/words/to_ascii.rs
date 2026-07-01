@@ -5,6 +5,7 @@ use walrus::ir::{BinaryOp, ExtendedLoad, LoadKind, MemArg, StoreKind, UnaryOp};
 use walrus::LocalId;
 
 use crate::check_args;
+use crate::cost::charge_ok_or_throw_runtime_error;
 use crate::wasm_generator::GeneratorError;
 use crate::wasm_utils::ArgumentCountCheck;
 use crate::words::{ComplexWord, Word};
@@ -32,10 +33,13 @@ impl ComplexWord for ToAscii {
             // the check above makes sure we have exactly one argument.
             unreachable!()
         };
-        let arg_ty = generator.get_expr_type(arg).ok_or_else(|| {
-            GeneratorError::TypeError("to-ascii? 's argument should be typed".to_owned())
-        })?;
-
+        let arg_ty = generator
+            .get_expr_type(arg)
+            .ok_or_else(|| {
+                GeneratorError::TypeError("to-ascii? 's argument should be typed".to_owned())
+            })?
+            .clone();
+        charge_ok_or_throw_runtime_error(&arg_ty.size(), generator, builder, self)?;
         match arg_ty {
             TypeSignature::BoolType => to_ascii_bool(generator, builder, expr, arg),
             TypeSignature::IntType => to_ascii_int(generator, builder, expr, arg),
