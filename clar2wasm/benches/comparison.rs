@@ -14,6 +14,7 @@ use clarity::vm::ast::build_ast_with_diagnostics;
 use clarity::vm::contexts::{ExecutionState, GlobalContext, InvocationContext};
 use clarity::vm::costs::LimitedCostTracker;
 use clarity::vm::database::{ClarityDatabase, MemoryBackingStore};
+use clarity::vm::time_tracker::TimeTracker;
 use clarity::vm::types::{QualifiedContractIdentifier, StandardPrincipalData, TupleData};
 use clarity::vm::{
     eval_all, CallStack, ClarityName, ClarityVersion, ContractContext, ContractName, Value,
@@ -74,6 +75,7 @@ where
         StacksEpochId::latest(),
         ClarityVersion::latest(),
         true,
+        TimeTracker::unlimited(),
     )
     .expect("Failed to run analysis");
 
