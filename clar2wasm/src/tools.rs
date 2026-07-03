@@ -625,7 +625,10 @@ fn execute_crosscheck(
 
 pub fn crosscheck(snippet: &str, expected: Result<Option<Value>, VmExecutionError>) {
     if let Some(eval) = execute_crosscheck(
-        TestEnvironment::new(dbg!(TestConfig::latest_epoch()), dbg!(TestConfig::clarity_version())),
+        TestEnvironment::new(
+            dbg!(TestConfig::latest_epoch()),
+            dbg!(TestConfig::clarity_version()),
+        ),
         snippet,
         |_| {},
     ) {

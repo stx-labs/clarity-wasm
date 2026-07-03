@@ -426,13 +426,13 @@ mod tests {
     ))]
     #[cfg(test)]
     mod clarity_v1_v2_v3 {
+        use clarity::types::StacksEpochId;
         use clarity::vm::errors::EarlyReturnError::UnwrapFailed;
         use clarity::vm::errors::VmExecutionError::EarlyReturn;
         use clarity_types::types::ResponseData;
         use clarity_types::Value::{self, Response};
-        use clarity::types::StacksEpochId;
 
-        use crate::tools::{crosscheck_with_epoch};
+        use crate::tools::crosscheck_with_epoch;
 
         #[test]
         fn at_block_needs_cleanup() {

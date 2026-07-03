@@ -185,7 +185,7 @@ proptest! {
         crosscheck_with_epoch(
             &format!("(at-block {buf} {value})"),
             Ok(Some(value.into())),
-           clarity::types::StacksEpochId::Epoch33 
+           clarity::types::StacksEpochId::Epoch33
         )
     }
 }
