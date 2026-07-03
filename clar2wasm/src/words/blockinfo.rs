@@ -417,7 +417,7 @@ mod tests {
     use clarity::vm::{ClarityVersion, Value};
     use clarity_types::ClarityName;
 
-    use crate::tools::{evaluate, TestEnvironment};
+    use crate::tools::{evaluate, evaluate_at, TestEnvironment};
 
     #[cfg(any(
         feature = "test-clarity-v1",
@@ -430,11 +430,11 @@ mod tests {
         use clarity::vm::errors::VmExecutionError::EarlyReturn;
         use clarity_types::types::ResponseData;
         use clarity_types::Value::{self, Response};
+        use clarity::types::StacksEpochId;
 
-        use crate::tools::crosscheck;
+        use crate::tools::{crosscheck_with_epoch};
 
         #[test]
-        #[ignore = "test system needs to be improved relative to versioning and epochs"]
         fn at_block_needs_cleanup() {
             let snippet = "
                 (define-private (foo)
@@ -445,11 +445,14 @@ mod tests {
                 (foo)
             ";
 
-            crosscheck(snippet, Ok(Some(Value::err_uint(42))));
+            crosscheck_with_epoch(
+                snippet,
+                Ok(Some(Value::err_uint(42))),
+                StacksEpochId::Epoch33,
+            );
         }
 
         #[test]
-        #[ignore = "test system needs to be improved relative to versioning and epochs"]
         fn at_block_needs_cleanup_top_level() {
             let snippet = "
                 (at-block 0x0000000000000000000000000000000000000000000000000000000000000000
@@ -457,7 +460,7 @@ mod tests {
                 )
             ";
 
-            crosscheck(
+            crosscheck_with_epoch(
                 snippet,
                 Err(EarlyReturn(UnwrapFailed(Box::new(Response(
                     ResponseData {
@@ -465,6 +468,7 @@ mod tests {
                         data: Box::new(clarity_types::Value::UInt(42)),
                     },
                 ))))),
+                StacksEpochId::Epoch33,
             );
         }
     }
@@ -994,10 +998,11 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "test system needs to be improved relative to versioning and epochs"]
     fn at_block_less_than_two_args() {
-        let result = evaluate(
+        let result = evaluate_at(
             "(at-block 0xb5e076ab7609c7f8c763b5c571d07aea80b06b41452231b1437370f4964ed66e)",
+            StacksEpochId::Epoch33,
+            ClarityVersion::Clarity4,
         );
         assert!(result.is_err());
         assert!(result
@@ -1007,10 +1012,11 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "test system needs to be improved relative to versioning and epochs"]
     fn at_block_more_than_two_args() {
-        let result = evaluate(
+        let result = evaluate_at(
             "(at-block 0xb5e076ab7609c7f8c763b5c571d07aea80b06b41452231b1437370f4964ed66e u0 u0)",
+            StacksEpochId::Epoch33,
+            ClarityVersion::Clarity4,
         );
         assert!(result.is_err());
         assert!(result
@@ -1020,18 +1026,21 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "test system needs to be improved relative to versioning and epochs"]
     fn at_block_var() {
-        let e = evaluate(
+        let e = evaluate_at(
                 "
 (define-data-var data int 1)
 (at-block 0xb5e076ab7609c7f8c763b5c571d07aea80b06b41452231b1437370f4964ed66e (var-get data)) ;; block 0
 ",
-            )
+            StacksEpochId::Epoch33,
+            ClarityVersion::Clarity4
+        )
             .unwrap_err();
         assert_eq!(
             e,
-            VmExecutionError::Wasm(clarity::vm::errors::WasmError::DefineFunctionCalledInRunMode,),
+            VmExecutionError::Wasm(clarity::vm::errors::WasmError::NotInDatabase(
+                "Value data".into()
+            )),
         );
     }
 

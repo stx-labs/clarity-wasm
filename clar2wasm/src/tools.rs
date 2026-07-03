@@ -51,16 +51,10 @@ impl TestEnvironment {
         network: Network,
         emit_cost_code: bool,
     ) -> Self {
-        let (epoch, version) = if !Self::epoch_and_clarity_match(epoch, version) {
-            let valid_version = ClarityVersion::default_for_epoch(epoch);
-            println!(
-                "[WARN] Provided epoch ({epoch}) and Clarity version ({version}) do not match. \
-                 Defaulting to epoch ({epoch}) and Clarity version ({valid_version})."
-            );
-            (epoch, valid_version)
-        } else {
-            (epoch, version)
-        };
+        assert!(
+            Self::epoch_and_clarity_match(epoch, version),
+            "[ERR] Provided epoch ({epoch}) and Clarity version ({version}) do not match."
+        );
 
         let constants = StacksConstants::default();
         let burn_datastore = BurnDatastore::new(constants.clone());
@@ -198,26 +192,7 @@ impl TestEnvironment {
         match (epoch, version) {
             // For Epoch10, no clarity version is supported.
             (StacksEpochId::Epoch10, _) => false,
-
-            // For epochs 20, 2_05, 21, 22, 23, 24, and 25,
-            // Clarity1 and Clarity2 are supported but Clarity3 is not.
-            (
-                StacksEpochId::Epoch20
-                | StacksEpochId::Epoch2_05
-                | StacksEpochId::Epoch21
-                | StacksEpochId::Epoch22
-                | StacksEpochId::Epoch23
-                | StacksEpochId::Epoch24
-                | StacksEpochId::Epoch25,
-                version,
-            ) => version <= ClarityVersion::Clarity2,
-
-            // For epochs 30, 31 and 32, all clarity versions are supported.
-            (StacksEpochId::Epoch30 | StacksEpochId::Epoch31 | StacksEpochId::Epoch32, _) => true,
-
-            (StacksEpochId::Epoch33, version) => version >= ClarityVersion::Clarity4,
-
-            (StacksEpochId::Epoch34, version) => version >= ClarityVersion::Clarity5,
+            (epoch, version) => version <= ClarityVersion::default_for_epoch(epoch),
         }
     }
 
@@ -650,7 +625,7 @@ fn execute_crosscheck(
 
 pub fn crosscheck(snippet: &str, expected: Result<Option<Value>, VmExecutionError>) {
     if let Some(eval) = execute_crosscheck(
-        TestEnvironment::new(TestConfig::latest_epoch(), TestConfig::clarity_version()),
+        TestEnvironment::new(dbg!(TestConfig::latest_epoch()), dbg!(TestConfig::clarity_version())),
         snippet,
         |_| {},
     ) {

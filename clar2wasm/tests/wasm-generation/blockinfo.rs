@@ -1,4 +1,4 @@
-use clar2wasm::tools::{crosscheck, crosscheck_compare_only_advancing_tip};
+use clar2wasm::tools::{crosscheck_compare_only_advancing_tip, crosscheck_with_epoch};
 use proptest::proptest;
 
 use crate::{buffer, PropValue};
@@ -27,7 +27,6 @@ mod clarity_v1 {
         #![proptest_config(runtime_config())]
 
         #[test]
-        #[ignore = "test system needs to be improved relative to versioning and epochs"]
         fn crossprop_blockinfo_within_controlled_range(block_height in 1..=STACKS_BLOCK_HEIGHT_LIMIT, tip in 1..=80u32) {
             for info in &BLOCK_INFO_V1 {
                 crosscheck_compare_only_advancing_tip(&format!("(get-block-info? {info} u{block_height})"), tip)
@@ -51,7 +50,6 @@ mod clarity_v2 {
         #![proptest_config(runtime_config())]
 
         #[test]
-        #[ignore = "test system needs to be improved relative to versioning and epochs"]
         fn crossprop_blockinfo_within_controlled_range(block_height in 1..=STACKS_BLOCK_HEIGHT_LIMIT, tip in 1..=80u32) {
             for info in BLOCK_INFO_V1.iter().chain(BLOCK_INFO_V2.iter()) {
                 crosscheck_compare_only_advancing_tip(&format!("(get-block-info? {info} u{block_height})"), tip)
@@ -64,7 +62,7 @@ mod clarity_v2 {
 // Module with tests that should only be executed
 // when running Clarity::V3.
 //
-#[cfg(not(any(feature = "test-clarity-v1", feature = "test-clarity-v2",)))]
+#[cfg(feature = "test-clarity-v3")]
 mod clarity_v3 {
     use clar2wasm::tools::crosscheck_with_epoch;
     use clarity::types::StacksEpochId;
@@ -102,7 +100,6 @@ mod clarity_v3 {
         }
 
         #[test]
-        #[ignore = "test system needs to be improved relative to versioning and epochs"]
         fn crosscheck_at_block_no_leak(
             value in PropValue::any(),
             buf in buffer(32)
@@ -179,15 +176,16 @@ mod clarity_v1_v2 {
 proptest! {
     #![proptest_config(super::runtime_config())]
 
-    #[ignore = "test system needs to be improved relative to versioning and epochs"]
+    #[cfg(feature = "test-clarity-v3")]
     #[test]
     fn crosscheck_at_block(
         value in PropValue::any(),
         buf in buffer(32)
     ) {
-        crosscheck(
+        crosscheck_with_epoch(
             &format!("(at-block {buf} {value})"),
-            Ok(Some(value.into()))
+            Ok(Some(value.into())),
+           clarity::types::StacksEpochId::Epoch33 
         )
     }
 }

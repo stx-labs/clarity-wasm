@@ -508,11 +508,10 @@ proptest! {
     #![proptest_config(super::runtime_config())]
 
     #[test]
-    #[ignore = "test system needs to be improved relative to versioning and epochs"]
     fn asserts_false(throw_val in PropValue::any()) {
         crosscheck(
             &format!("(asserts! false {throw_val})"),
-            Err(VmExecutionError::EarlyReturn(EarlyReturnError::UnwrapFailed(Box::new(Value::from(throw_val))))),
+            Err(VmExecutionError::EarlyReturn(EarlyReturnError::AssertionFailed(Box::new(Value::from(throw_val))))),
         );
     }
 }
@@ -540,7 +539,6 @@ proptest! {
     #![proptest_config(super::runtime_config())]
 
     #[test]
-    #[ignore = "test system needs to be improved relative to versioning and epochs"]
     fn asserts_with_begin_false(
         (throw_val, val) in prop_signature()
             .prop_flat_map(|t| (PropValue::from_type(t.clone()), PropValue::from_type(t))),
@@ -554,7 +552,7 @@ proptest! {
 
         crosscheck(
             &snippet,
-            Err(VmExecutionError::EarlyReturn(EarlyReturnError::UnwrapFailed(Box::new(Value::from(throw_val))))),
+            Err(VmExecutionError::EarlyReturn(EarlyReturnError::AssertionFailed(Box::new(Value::from(throw_val))))),
         );
     }
 }

@@ -164,7 +164,6 @@ proptest! {
     #![proptest_config(super::runtime_config())]
 
     #[test]
-    #[ignore = "test system needs to be improved relative to versioning and epochs"]
     fn as_contract_can_return_any_value(
         value in PropValue::any()
     ) {
