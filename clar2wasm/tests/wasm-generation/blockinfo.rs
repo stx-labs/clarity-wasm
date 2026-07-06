@@ -1,8 +1,7 @@
 use clar2wasm::tools::crosscheck_compare_only_advancing_tip;
 use proptest::proptest;
-use crate::runtime_config;
 
-use crate::{buffer, PropValue};
+use crate::{buffer, runtime_config, PropValue};
 
 #[allow(dead_code)]
 const BLOCK_INFO_V1: [&str; 5] = [
