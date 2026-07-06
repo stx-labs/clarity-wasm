@@ -411,6 +411,8 @@ impl ComplexWord for GetTenureInfo {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use clarity::types::StacksEpochId;
     use clarity::vm::errors::VmExecutionError;
     use clarity::vm::types::{OptionalData, PrincipalData, TupleData};
@@ -1036,11 +1038,9 @@ mod tests {
             ClarityVersion::Clarity4
         )
             .unwrap_err();
-        assert_eq!(
+        assert_matches!(
             e,
-            VmExecutionError::Wasm(clarity::vm::errors::WasmError::NotInDatabase(
-                "Value data".into()
-            )),
+            VmExecutionError::Wasm(clarity::vm::errors::WasmError::NotInDatabase(s)) if s.eq("Value data")
         );
     }
 
