@@ -1,5 +1,6 @@
-use clar2wasm::tools::{crosscheck_compare_only_advancing_tip, crosscheck_with_epoch};
+use clar2wasm::tools::crosscheck_compare_only_advancing_tip;
 use proptest::proptest;
+use crate::runtime_config;
 
 use crate::{buffer, PropValue};
 
@@ -21,7 +22,6 @@ const STACKS_BLOCK_HEIGHT_LIMIT: u32 = 100;
 #[cfg(feature = "test-clarity-v1")]
 mod clarity_v1 {
     use super::*;
-    use crate::runtime_config;
 
     proptest! {
         #![proptest_config(runtime_config())]
@@ -42,7 +42,6 @@ mod clarity_v1 {
 #[cfg(feature = "test-clarity-v2")]
 mod clarity_v2 {
     use super::*;
-    use crate::runtime_config;
 
     const BLOCK_INFO_V2: [&str; 3] = ["block-reward", "miner-spend-total", "miner-spend-winner"];
 
@@ -69,7 +68,6 @@ mod clarity_v3 {
     use clarity::vm::Value;
 
     use super::*;
-    use crate::runtime_config;
 
     const STACKS_BLOCK_INFO: [&str; 3] = ["id-header-hash", "header-hash", "time"];
     const TENURE_INFO: [&str; 7] = [
@@ -113,6 +111,23 @@ mod clarity_v3 {
             );
         }
     }
+
+    proptest! {
+        #![proptest_config(runtime_config())]
+
+        #[cfg(feature = "test-clarity-v3")]
+        #[test]
+        fn crosscheck_at_block(
+            value in PropValue::any(),
+            buf in buffer(32)
+        ) {
+            crosscheck_with_epoch(
+                &format!("(at-block {buf} {value})"),
+                Ok(Some(value.into())),
+               clarity::types::StacksEpochId::Epoch33
+            )
+        }
+    }
 }
 
 //
@@ -122,7 +137,6 @@ mod clarity_v3 {
 #[cfg(not(feature = "test-clarity-v1"))]
 mod clarity_v2_v3 {
     use super::*;
-    use crate::runtime_config;
 
     const BURN_BLOCK_INFO: [&str; 2] = ["header-hash", "pox-addrs"];
     const BURN_BLOCK_HEIGHT_LIMIT: u32 = 100;
@@ -152,7 +166,6 @@ mod clarity_v1_v2 {
     use clarity::vm::Value;
 
     use super::*;
-    use crate::runtime_config;
 
     proptest! {
         #![proptest_config(runtime_config())]
@@ -170,22 +183,5 @@ mod clarity_v1_v2 {
                 StacksEpochId::Epoch24,
             );
         }
-    }
-}
-
-proptest! {
-    #![proptest_config(super::runtime_config())]
-
-    #[cfg(feature = "test-clarity-v3")]
-    #[test]
-    fn crosscheck_at_block(
-        value in PropValue::any(),
-        buf in buffer(32)
-    ) {
-        crosscheck_with_epoch(
-            &format!("(at-block {buf} {value})"),
-            Ok(Some(value.into())),
-           clarity::types::StacksEpochId::Epoch33
-        )
     }
 }
