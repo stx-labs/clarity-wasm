@@ -1,6 +1,7 @@
 use clar2wasm::tools::crosscheck_compare_only_advancing_tip;
 use proptest::proptest;
 
+#[allow(unused_imports)]
 use crate::{buffer, runtime_config, PropValue};
 
 #[allow(dead_code)]
@@ -12,6 +13,7 @@ const BLOCK_INFO_V1: [&str; 5] = [
     "time",
 ];
 
+#[allow(dead_code)]
 const STACKS_BLOCK_HEIGHT_LIMIT: u32 = 100;
 
 //
@@ -109,12 +111,7 @@ mod clarity_v3 {
                 StacksEpochId::Epoch30,
             );
         }
-    }
 
-    proptest! {
-        #![proptest_config(runtime_config())]
-
-        #[cfg(feature = "test-clarity-v3")]
         #[test]
         fn crosscheck_at_block(
             value in PropValue::any(),
