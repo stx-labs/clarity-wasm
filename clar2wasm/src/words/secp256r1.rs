@@ -163,3 +163,363 @@ impl ComplexWord for Verify {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[cfg(not(any(
+    feature = "test-clarity-v1",
+    feature = "test-clarity-v2",
+    feature = "test-clarity-v3"
+)))]
+mod tests {
+
+    use crate::tools::evaluate;
+
+    #[test]
+    fn less_than_three_args() {
+        let result = evaluate(
+                "(secp256r1-verify \
+                 0xde5b9eb9e7c5592930eb2e30a01369c36586d872082ed8181ee83d2a0ec20f04 \
+                 0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000)",
+            );
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("expecting 3 arguments, got 2"));
+    }
+
+    #[test]
+    fn more_than_three_args() {
+        let result = evaluate(
+                "(secp256r1-verify \
+                 0xde5b9eb9e7c5592930eb2e30a01369c36586d872082ed8181ee83d2a0ec20f04 \
+                 0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 \
+                 0x000000000000000000000000000000000000000000000000000000000000000000 \
+                 0x000000000000000000000000000000000000000000000000000000000000000000)",
+            );
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("expecting 3 arguments, got 4"));
+    }
+
+    /// Clarity 4: the message hash is SHA256-hashed again before verification
+    /// (*double hashing*).
+    #[cfg(feature = "test-clarity-v4")]
+    mod clarity_v4 {
+        use clarity::types::StacksEpochId;
+        use clarity::util::hash::to_hex;
+        use clarity::util::secp256r1::{Secp256r1PrivateKey, Secp256r1PublicKey};
+        use clarity::vm::errors::{RuntimeCheckErrorKind, VmExecutionError};
+        use clarity::vm::types::{
+            BuffData, BufferLength, SequenceData, SequenceSubtype, TypeSignature,
+        };
+        use clarity::vm::Value;
+
+        use crate::tools::crosscheck_with_epoch;
+
+        // TODO Remove this
+        /// Epoch 33 is the latest epoch that still accepts Clarity 4;
+        /// the `test-clarity-v4` feature makes `crosscheck_with_epoch`
+        /// resolve the version to Clarity 4.
+        fn crosscheck_v4(snippet: &str, expected: Result<Option<Value>, VmExecutionError>) {
+            crosscheck_with_epoch(snippet, expected, StacksEpochId::Epoch33);
+        }
+
+        #[test]
+        fn message_too_short() {
+            let short_msg = vec![0xabu8; 31];
+            let sig = vec![0u8; 64];
+            let pubkey = vec![0u8; 33];
+            crosscheck_v4(
+                &format!(
+                    "(secp256r1-verify 0x{} 0x{} 0x{})",
+                    to_hex(&short_msg),
+                    to_hex(&sig),
+                    to_hex(&pubkey)
+                ),
+                Err(VmExecutionError::RuntimeCheck(
+                    RuntimeCheckErrorKind::TypeValueError(
+                        Box::new(TypeSignature::SequenceType(SequenceSubtype::BufferType(
+                            BufferLength::try_from(32_u32).unwrap(),
+                        ))),
+                        Value::Sequence(SequenceData::Buffer(BuffData { data: short_msg }))
+                            .to_error_string(),
+                    ),
+                )),
+            );
+        }
+
+        #[test]
+        fn signature_too_short() {
+            // A signature that is shorter than 64 bytes is not a runtime error:
+            // the word returns `false`.
+            let msg = vec![0u8; 32];
+            let short_sig = vec![0u8; 63];
+            let pubkey = vec![0u8; 33];
+            crosscheck_v4(
+                &format!(
+                    "(secp256r1-verify 0x{} 0x{} 0x{})",
+                    to_hex(&msg),
+                    to_hex(&short_sig),
+                    to_hex(&pubkey)
+                ),
+                Ok(Some(Value::Bool(false))),
+            );
+        }
+
+        #[test]
+        fn public_key_too_short() {
+            let msg = vec![0u8; 32];
+            let sig = vec![0u8; 64];
+            let short_pubkey = vec![0xcdu8; 32];
+            crosscheck_v4(
+                &format!(
+                    "(secp256r1-verify 0x{} 0x{} 0x{})",
+                    to_hex(&msg),
+                    to_hex(&sig),
+                    to_hex(&short_pubkey)
+                ),
+                Err(VmExecutionError::RuntimeCheck(
+                    RuntimeCheckErrorKind::TypeValueError(
+                        Box::new(TypeSignature::SequenceType(SequenceSubtype::BufferType(
+                            BufferLength::try_from(33_u32).unwrap(),
+                        ))),
+                        Value::Sequence(SequenceData::Buffer(BuffData { data: short_pubkey }))
+                            .to_error_string(),
+                    ),
+                )),
+            );
+        }
+
+        #[test]
+        fn valid_signature() {
+            let privk = Secp256r1PrivateKey::from_seed(&[1u8; 32]);
+            let pubk = Secp256r1PublicKey::from_private(&privk);
+            let msg = [0x11u8; 32];
+            // `sign` double-hashes, matching the Clarity 4 verification.
+            let sig = privk.sign(&msg).unwrap();
+            crosscheck_v4(
+                &format!(
+                    "(secp256r1-verify 0x{} 0x{} 0x{})",
+                    to_hex(&msg),
+                    to_hex(&sig.0),
+                    to_hex(&pubk.to_bytes_compressed())
+                ),
+                Ok(Some(Value::Bool(true))),
+            );
+        }
+
+        #[test]
+        fn wrong_message() {
+            let privk = Secp256r1PrivateKey::from_seed(&[1u8; 32]);
+            let pubk = Secp256r1PublicKey::from_private(&privk);
+            let msg = [0x11u8; 32];
+            let sig = privk.sign(&msg).unwrap();
+            let wrong_msg = [0x22u8; 32];
+            crosscheck_v4(
+                &format!(
+                    "(secp256r1-verify 0x{} 0x{} 0x{})",
+                    to_hex(&wrong_msg),
+                    to_hex(&sig.0),
+                    to_hex(&pubk.to_bytes_compressed())
+                ),
+                Ok(Some(Value::Bool(false))),
+            );
+        }
+
+        #[test]
+        fn wrong_key() {
+            let privk = Secp256r1PrivateKey::from_seed(&[1u8; 32]);
+            let msg = [0x11u8; 32];
+            let sig = privk.sign(&msg).unwrap();
+            let other_pub =
+                Secp256r1PublicKey::from_private(&Secp256r1PrivateKey::from_seed(&[2u8; 32]));
+            crosscheck_v4(
+                &format!(
+                    "(secp256r1-verify 0x{} 0x{} 0x{})",
+                    to_hex(&msg),
+                    to_hex(&sig.0),
+                    to_hex(&other_pub.to_bytes_compressed())
+                ),
+                Ok(Some(Value::Bool(false))),
+            );
+        }
+
+        #[test]
+        fn simple_hash_signature_is_rejected() {
+            // A signature produced for the simple-hashing scheme (`sign_digest`)
+            // must not verify under the double-hashing scheme.
+            let privk = Secp256r1PrivateKey::from_seed(&[1u8; 32]);
+            let pubk = Secp256r1PublicKey::from_private(&privk);
+            let msg = [0x11u8; 32];
+            let sig = privk.sign_digest(&msg).unwrap();
+            crosscheck_v4(
+                &format!(
+                    "(secp256r1-verify 0x{} 0x{} 0x{})",
+                    to_hex(&msg),
+                    to_hex(&sig.0),
+                    to_hex(&pubk.to_bytes_compressed())
+                ),
+                Ok(Some(Value::Bool(false))),
+            );
+        }
+    }
+
+    #[cfg(not(any(
+        feature = "test-clarity-v1",
+        feature = "test-clarity-v2",
+        feature = "test-clarity-v3",
+        feature = "test-clarity-v4"
+    )))]
+    mod clarity_ge_v5 {
+        use clarity::util::hash::to_hex;
+        use clarity::util::secp256r1::{Secp256r1PrivateKey, Secp256r1PublicKey};
+        use clarity::vm::errors::{RuntimeCheckErrorKind, VmExecutionError};
+        use clarity::vm::types::{
+            BuffData, BufferLength, SequenceData, SequenceSubtype, TypeSignature,
+        };
+        use clarity::vm::Value;
+
+        use crate::tools::crosscheck;
+
+        #[test]
+        fn message_too_short() {
+            let short_msg = vec![0xabu8; 31];
+            let sig = vec![0u8; 64];
+            let pubkey = vec![0u8; 33];
+            crosscheck(
+                &format!(
+                    "(secp256r1-verify 0x{} 0x{} 0x{})",
+                    to_hex(&short_msg),
+                    to_hex(&sig),
+                    to_hex(&pubkey)
+                ),
+                Err(VmExecutionError::RuntimeCheck(
+                    RuntimeCheckErrorKind::TypeValueError(
+                        Box::new(TypeSignature::SequenceType(SequenceSubtype::BufferType(
+                            BufferLength::try_from(32_u32).unwrap(),
+                        ))),
+                        Value::Sequence(SequenceData::Buffer(BuffData { data: short_msg }))
+                            .to_error_string(),
+                    ),
+                )),
+            );
+        }
+
+        #[test]
+        fn signature_too_short() {
+            // A signature that is shorter than 64 bytes is not a runtime error:
+            // the word returns `false`.
+            let msg = vec![0u8; 32];
+            let short_sig = vec![0u8; 63];
+            let pubkey = vec![0u8; 33];
+            crosscheck(
+                &format!(
+                    "(secp256r1-verify 0x{} 0x{} 0x{})",
+                    to_hex(&msg),
+                    to_hex(&short_sig),
+                    to_hex(&pubkey)
+                ),
+                Ok(Some(Value::Bool(false))),
+            );
+        }
+
+        #[test]
+        fn public_key_too_short() {
+            let msg = vec![0u8; 32];
+            let sig = vec![0u8; 64];
+            let short_pubkey = vec![0xcdu8; 32];
+            crosscheck(
+                &format!(
+                    "(secp256r1-verify 0x{} 0x{} 0x{})",
+                    to_hex(&msg),
+                    to_hex(&sig),
+                    to_hex(&short_pubkey)
+                ),
+                Err(VmExecutionError::RuntimeCheck(
+                    RuntimeCheckErrorKind::TypeValueError(
+                        Box::new(TypeSignature::SequenceType(SequenceSubtype::BufferType(
+                            BufferLength::try_from(33_u32).unwrap(),
+                        ))),
+                        Value::Sequence(SequenceData::Buffer(BuffData { data: short_pubkey }))
+                            .to_error_string(),
+                    ),
+                )),
+            );
+        }
+
+        #[test]
+        fn valid_signature() {
+            let privk = Secp256r1PrivateKey::from_seed(&[1u8; 32]);
+            let pubk = Secp256r1PublicKey::from_private(&privk);
+            let msg = [0x11u8; 32];
+            let sig = privk.sign_digest(&msg).unwrap();
+            crosscheck(
+                &format!(
+                    "(secp256r1-verify 0x{} 0x{} 0x{})",
+                    to_hex(&msg),
+                    to_hex(&sig.0),
+                    to_hex(&pubk.to_bytes_compressed())
+                ),
+                Ok(Some(Value::Bool(true))),
+            );
+        }
+
+        #[test]
+        fn wrong_message() {
+            let privk = Secp256r1PrivateKey::from_seed(&[1u8; 32]);
+            let pubk = Secp256r1PublicKey::from_private(&privk);
+            let msg = [0x11u8; 32];
+            let sig = privk.sign_digest(&msg).unwrap();
+            let wrong_msg = [0x22u8; 32];
+            crosscheck(
+                &format!(
+                    "(secp256r1-verify 0x{} 0x{} 0x{})",
+                    to_hex(&wrong_msg),
+                    to_hex(&sig.0),
+                    to_hex(&pubk.to_bytes_compressed())
+                ),
+                Ok(Some(Value::Bool(false))),
+            );
+        }
+
+        #[test]
+        fn wrong_key() {
+            let privk = Secp256r1PrivateKey::from_seed(&[1u8; 32]);
+            let msg = [0x11u8; 32];
+            let sig = privk.sign_digest(&msg).unwrap();
+            let other_pub =
+                Secp256r1PublicKey::from_private(&Secp256r1PrivateKey::from_seed(&[2u8; 32]));
+            crosscheck(
+                &format!(
+                    "(secp256r1-verify 0x{} 0x{} 0x{})",
+                    to_hex(&msg),
+                    to_hex(&sig.0),
+                    to_hex(&other_pub.to_bytes_compressed())
+                ),
+                Ok(Some(Value::Bool(false))),
+            );
+        }
+
+        #[test]
+        fn double_hash_signature_is_rejected() {
+            // A signature produced for the double-hashing scheme (`sign`) must
+            // not verify under the simple-hashing scheme.
+            let privk = Secp256r1PrivateKey::from_seed(&[1u8; 32]);
+            let pubk = Secp256r1PublicKey::from_private(&privk);
+            let msg = [0x11u8; 32];
+            let sig = privk.sign(&msg).unwrap();
+            crosscheck(
+                &format!(
+                    "(secp256r1-verify 0x{} 0x{} 0x{})",
+                    to_hex(&msg),
+                    to_hex(&sig.0),
+                    to_hex(&pubk.to_bytes_compressed())
+                ),
+                Ok(Some(Value::Bool(false))),
+            );
+        }
+    }
+}
