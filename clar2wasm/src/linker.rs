@@ -1,5 +1,6 @@
 use std::io::{Cursor, Write as _};
 
+use clarity::util::secp256r1::{secp256r1_verify, secp256r1_verify_digest};
 use clarity::vm::callables::{DefineType, DefinedFunction};
 use clarity::vm::clarity_wasm::{Cost, CostGlobals};
 use clarity::vm::contexts::{ExecutionState, InvocationContext};
@@ -165,6 +166,8 @@ pub fn link_host_functions(
     link_sha512_256_fn(linker)?;
     link_secp256k1_recover_fn(linker)?;
     link_secp256k1_verify_fn(linker)?;
+    link_secp256r1_verify_double_hash_fn(linker)?;
+    link_secp256r1_verify_simple_hash_fn(linker)?;
     link_principal_of_fn(linker)?;
     link_save_constant_fn(linker)?;
     link_load_constant_fn(linker)?;
@@ -5944,6 +5947,88 @@ fn link_secp256k1_verify_fn(
         })
 }
 
+fn link_secp256r1_verify_double_hash_fn(
+    linker: &mut Linker<ClarityWasmContext>,
+) -> Result<(), VmExecutionError> {
+    linker
+        .func_wrap(
+            "clarity",
+            "secp256r1_verify_double_hash",
+            |mut caller: Caller<'_, ClarityWasmContext>,
+             msg_offset: i32,
+             msg_length: i32,
+             sig_offset: i32,
+             sig_length: i32,
+             pk_offset: i32,
+             pk_length: i32| {
+                // Get the memory from the caller
+                let memory = caller
+                    .get_export("memory")
+                    .and_then(|export| export.into_memory())
+                    .ok_or(VmExecutionError::Wasm(WasmError::MemoryNotFound))?;
+
+                // Read the message bytes from the memory
+                let msg_bytes = read_bytes_from_wasm(memory, &mut caller, msg_offset, msg_length)?;
+
+                // Read the signature bytes from the memory
+                let sig_bytes = read_bytes_from_wasm(memory, &mut caller, sig_offset, sig_length)?;
+
+                // Read the public-key bytes from the memory
+                let pk_bytes = read_bytes_from_wasm(memory, &mut caller, pk_offset, pk_length)?;
+
+                Ok(secp256r1_verify(&msg_bytes, &sig_bytes, &pk_bytes).is_ok() as i32)
+            },
+        )
+        .map(|_| ())
+        .map_err(|e| {
+            VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
+                "secp256r1_verify_double_hash".to_string(),
+                e,
+            ))
+        })
+}
+
+fn link_secp256r1_verify_simple_hash_fn(
+    linker: &mut Linker<ClarityWasmContext>,
+) -> Result<(), VmExecutionError> {
+    linker
+        .func_wrap(
+            "clarity",
+            "secp256r1_verify_simple_hash",
+            |mut caller: Caller<'_, ClarityWasmContext>,
+             msg_offset: i32,
+             msg_length: i32,
+             sig_offset: i32,
+             sig_length: i32,
+             pk_offset: i32,
+             pk_length: i32| {
+                // Get the memory from the caller
+                let memory = caller
+                    .get_export("memory")
+                    .and_then(|export| export.into_memory())
+                    .ok_or(VmExecutionError::Wasm(WasmError::MemoryNotFound))?;
+
+                // Read the message bytes from the memory
+                let msg_bytes = read_bytes_from_wasm(memory, &mut caller, msg_offset, msg_length)?;
+
+                // Read the signature bytes from the memory
+                let sig_bytes = read_bytes_from_wasm(memory, &mut caller, sig_offset, sig_length)?;
+
+                // Read the public-key bytes from the memory
+                let pk_bytes = read_bytes_from_wasm(memory, &mut caller, pk_offset, pk_length)?;
+
+                Ok(secp256r1_verify_digest(&msg_bytes, &sig_bytes, &pk_bytes).is_ok() as i32)
+            },
+        )
+        .map(|_| ())
+        .map_err(|e| {
+            VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
+                "secp256r1_verify_simple_hash".to_string(),
+                e,
+            ))
+        })
+}
+
 /// Link host interface function, `principal_of`, into the Wasm module.
 /// This function is called for the Clarity expression, `principal-of?`.
 fn link_principal_of_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExecutionError> {
@@ -7061,6 +7146,34 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
          _pk_offset: i32,
          _pk_length: i32| {
             println!("secp256k1_verify");
+            Ok(0i32)
+        },
+    )?;
+
+    linker.func_wrap(
+        "clarity",
+        "secp256r1_verify_double_hash",
+        |_msg_offset: i32,
+         _msg_length: i32,
+         _sig_offset: i32,
+         _sig_length: i32,
+         _pk_offset: i32,
+         _pk_length: i32| {
+            println!("secp256r1_verify_double_hash");
+            Ok(0i32)
+        },
+    )?;
+
+    linker.func_wrap(
+        "clarity",
+        "secp256r1_verify_simple_hash",
+        |_msg_offset: i32,
+         _msg_length: i32,
+         _sig_offset: i32,
+         _sig_length: i32,
+         _pk_offset: i32,
+         _pk_length: i32| {
+            println!("secp256r1_verify_simple_hash");
             Ok(0i32)
         },
     )?;
