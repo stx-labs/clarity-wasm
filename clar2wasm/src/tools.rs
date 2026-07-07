@@ -510,6 +510,7 @@ impl TestConfig {
             _ if cfg!(feature = "test-clarity-v2") => ClarityVersion::Clarity2,
             _ if cfg!(feature = "test-clarity-v3") => ClarityVersion::Clarity3,
             _ if cfg!(feature = "test-clarity-v4") => ClarityVersion::Clarity4,
+            _ if cfg!(feature = "test-clarity-v5") => ClarityVersion::Clarity5,
             _ => ClarityVersion::latest(),
         }
     }
