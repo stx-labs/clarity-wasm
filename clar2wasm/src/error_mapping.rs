@@ -6,15 +6,15 @@ use clarity::vm::errors::{
 };
 use clarity::vm::types::ResponseData;
 use clarity::vm::{ClarityVersion, Value};
-use clarity_types::types::{ASCIIData, CharType};
+use clarity_types::types::{ASCIIData, CharType, TypeSignature};
 use clarity_types::{ClarityName, ClarityTypeError};
 use walrus::InstrSeqBuilder;
 use wasmtime::{AsContextMut, Instance, Trap};
 
 use crate::wasm_generator::{GeneratorError, WasmGenerator};
 use crate::wasm_utils::{
-    get_global, read_bytes_from_wasm, read_from_wasm_indirect, read_identifier_from_wasm,
-    signature_from_string,
+    get_global, read_bytes_from_wasm, read_from_wasm, read_from_wasm_indirect,
+    read_identifier_from_wasm, signature_from_string,
 };
 
 const LOG2_ERROR_MESSAGE: &str = "log2 must be passed a positive integer";
@@ -90,6 +90,13 @@ pub enum ErrorMap {
     /// Indicates an attempt to use a function with too many arguments
     SequenceElementArityMismatch = 16,
 
+    /// Value should be a buffer of a different size
+    /// Arguments:
+    ///  - expected buffer size in $runtime-error-value-offset
+    ///  - actual buffer offset in $runtime-error-arg-offset
+    ///  - actual buffer size in $runtime-error-arg-len
+    IncorrectBufferSize = 17,
+
     /// Indicates a runtime cost overrun
     CostOverrunRuntime = 100,
 
@@ -137,6 +144,7 @@ impl From<i32> for ErrorMap {
             14 => ErrorMap::ArgumentCountAtLeast,
             15 => ErrorMap::ArgumentCountAtMost,
             16 => ErrorMap::SequenceElementArityMismatch,
+            17 => ErrorMap::IncorrectBufferSize,
             100 => ErrorMap::CostOverrunRuntime,
             101 => ErrorMap::CostOverrunReadCount,
             102 => ErrorMap::CostOverrunReadLength,
@@ -315,6 +323,37 @@ fn from_runtime_error_code(
             VmExecutionError::RuntimeCheck(
                 ClarityTypeError::SequenceElementArityMismatch { expected, found }.into(),
             )
+        }
+        ErrorMap::IncorrectBufferSize => {
+            let expected_size =
+                get_global_i32(&instance, &mut store, "runtime-error-value-offset") as u32;
+            let actual_offset = get_global_i32(&instance, &mut store, "runtime-error-arg-offset");
+            let actual_length = get_global_i32(&instance, &mut store, "runtime-error-arg-len");
+
+            let memory = instance
+                .get_memory(&mut store, "memory")
+                .unwrap_or_else(|| panic!("Could not find wasm instance memory"));
+
+            let actual_buffer = read_from_wasm(
+                memory,
+                &mut store,
+                &TypeSignature::BUFFER_MAX,
+                actual_offset,
+                actual_length,
+                *epoch_id,
+            )
+            .unwrap_or_else(|e| panic!("Could not read thrown value from memory: {e}"));
+            RuntimeCheckErrorKind::TypeValueError(
+                Box::new(TypeSignature::SequenceType(
+                    clarity_types::types::SequenceSubtype::BufferType(
+                        expected_size.try_into().unwrap_or_else(|e| {
+                            panic!("Passed an invalid size for an expected buffer error: {e}")
+                        }),
+                    ),
+                )),
+                actual_buffer.to_error_string(),
+            )
+            .into()
         }
         ErrorMap::CostOverrunRuntime => VmExecutionError::from(CostErrors::CostOverflow),
         ErrorMap::CostOverrunReadCount => VmExecutionError::from(CostErrors::CostOverflow),
