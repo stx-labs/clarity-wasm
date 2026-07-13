@@ -144,11 +144,13 @@ impl ComplexWord for ImplTrait {
 #[cfg(test)]
 mod tests {
     use clarity::types::StacksEpochId;
+    #[allow(unused_imports)]
     use clarity::vm::types::{
         CallableData, QualifiedContractIdentifier, StandardPrincipalData, TraitIdentifier,
     };
     use clarity::vm::{ClarityName, ContractName, Value};
 
+    #[allow(unused_imports)]
     use crate::tools::{
         crosscheck, crosscheck_expect_failure, crosscheck_multi_contract, TestEnvironment,
     };
@@ -286,6 +288,8 @@ mod tests {
             )));
     }
 
+    // See issue #818
+    #[cfg(not(feature = "test-clarity-v1"))]
     #[test]
     fn trait_list() {
         // NOTE: this also tests `print` of `Callable`

@@ -426,7 +426,7 @@ impl TestEnvironment {
 
 impl Default for TestEnvironment {
     fn default() -> Self {
-        Self::new(StacksEpochId::Epoch33, ClarityVersion::Clarity4)
+        Self::new(TestConfig::latest_epoch(), TestConfig::clarity_version())
     }
 }
 
@@ -517,6 +517,13 @@ impl TestConfig {
     /// Latest Stacks epoch.
     pub fn latest_epoch() -> StacksEpochId {
         StacksEpochId::latest()
+    }
+
+    pub fn epoch_for_version(version: ClarityVersion) -> StacksEpochId {
+        match version {
+            ClarityVersion::Clarity1 => StacksEpochId::Epoch2_05,
+            _ => StacksEpochId::latest(),
+        }
     }
 }
 
@@ -624,20 +631,12 @@ fn execute_crosscheck(
 }
 
 pub fn crosscheck(snippet: &str, expected: Result<Option<Value>, VmExecutionError>) {
-    if let Some(eval) = execute_crosscheck(
-        TestEnvironment::new(
-            dbg!(TestConfig::latest_epoch()),
-            dbg!(TestConfig::clarity_version()),
-        ),
+    crosscheck_with_epoch_and_version(
         snippet,
-        |_| {},
-    ) {
-        assert_eq!(
-            eval.compiled, expected,
-            "value is not the expected {:?}",
-            eval.compiled
-        );
-    }
+        expected,
+        TestConfig::latest_epoch(),
+        TestConfig::clarity_version(),
+    );
 }
 
 pub fn crosscheck_with_amount(
@@ -748,10 +747,25 @@ pub fn crosscheck_with_epoch(
     epoch: StacksEpochId,
 ) {
     if let Some(eval) = execute_crosscheck(
-        TestEnvironment::new(epoch, dbg!(TestConfig::clarity_version())),
+        TestEnvironment::new(epoch, TestConfig::clarity_version()),
         snippet,
         |_| {},
     ) {
+        assert_eq!(
+            eval.compiled, expected,
+            "value is not the expected {:?}",
+            eval.compiled
+        );
+    }
+}
+
+pub fn crosscheck_with_epoch_and_version(
+    snippet: &str,
+    expected: Result<Option<Value>, VmExecutionError>,
+    epoch: StacksEpochId,
+    version: ClarityVersion,
+) {
+    if let Some(eval) = execute_crosscheck(TestEnvironment::new(epoch, version), snippet, |_| {}) {
         assert_eq!(
             eval.compiled, expected,
             "value is not the expected {:?}",
@@ -765,17 +779,7 @@ pub fn crosscheck_with_clarity_version(
     expected: Result<Option<Value>, VmExecutionError>,
     version: ClarityVersion,
 ) {
-    if let Some(eval) = execute_crosscheck(
-        TestEnvironment::new(TestConfig::latest_epoch(), version),
-        snippet,
-        |_| {},
-    ) {
-        assert_eq!(
-            eval.compiled, expected,
-            "value is not the expected {:?}",
-            eval.compiled
-        );
-    }
+    crosscheck_with_epoch_and_version(snippet, expected, TestConfig::latest_epoch(), version)
 }
 
 pub fn crosscheck_validate<V: Fn(Value)>(snippet: &str, validator: V) {
@@ -1185,22 +1189,37 @@ mod tests {
 
         let e = interpret(snippet_no_wrap).expect_err("Snippet should err due to bug");
         assert!(KnownBug::has_list_of_qualified_principal_issue(&e));
-        crosscheck(snippet_no_wrap, Ok(None)); // we don't care about the expected result
+        crosscheck_with_epoch_and_version(
+            snippet_no_wrap,
+            Ok(None),
+            TestConfig::latest_epoch(),
+            TestConfig::clarity_version(),
+        ); // we don't care about the expected result
 
         let e = interpret_at(
             snippet_no_wrap,
-            StacksEpochId::latest(),
-            ClarityVersion::Clarity1,
+            TestConfig::latest_epoch(),
+            TestConfig::clarity_version(),
         )
         .expect_err("Snippet should err due to bug");
         assert!(KnownBug::has_list_of_qualified_principal_issue(&e));
-        crosscheck(snippet_no_wrap, Ok(None)); // we don't care about the expected result
+        crosscheck_with_epoch_and_version(
+            snippet_no_wrap,
+            Ok(None),
+            TestConfig::latest_epoch(),
+            TestConfig::clarity_version(),
+        ); // we don't care about the expected result
 
         let snippet_simple = r#"(index-of (list (some 'S53AR76V04QBY9CKZFQZ6FZF0730CEQS2AH761HTX.FoUtMZdXvouVYyvtvceMcRGotjQlzb)) (some 'S53AR76V04QBY9CKZFQZ6FZF0730CEQS2AH761HTX.FoUtMZdXvouVYyvtvceMcRGotjQlzb))"#;
 
         let e = interpret(snippet_simple).expect_err("Snippet should err due to bug");
         assert!(KnownBug::has_list_of_qualified_principal_issue(&e));
-        crosscheck(snippet_simple, Ok(None)); // we don't care about the expected result
+        crosscheck_with_epoch_and_version(
+            snippet_simple,
+            Ok(None),
+            TestConfig::latest_epoch(),
+            TestConfig::clarity_version(),
+        ); // we don't care about the expected result
 
         let e = interpret_at(
             snippet_simple,
@@ -1209,13 +1228,23 @@ mod tests {
         )
         .expect_err("Snippet should err due to bug");
         assert!(KnownBug::has_list_of_qualified_principal_issue(&e));
-        crosscheck(snippet_simple, Ok(None)); // we don't care about the expected result
+        crosscheck_with_epoch_and_version(
+            snippet_simple,
+            Ok(None),
+            TestConfig::latest_epoch(),
+            TestConfig::clarity_version(),
+        ); // we don't care about the expected result
 
         let snippet_no_rgx_2nd_match = r#"(index-of (list (ok 'S932CK89GTZ50W6ZHYT9FR8A625KMXTBN4FDHXFNW.a) (ok 'SH3MZSPN84M1NC77YFD2EV36NAS4EW9RNBXF4TGY3.A) (ok 'SME80C5G10ZJGHJA8Q1R4WH99ZV794GPH050DG87.A) (err u1409580484) (err u78298087165342409770641973297847909482) (ok 'ST1305A3CKDY8C2M3K9E7D8ZESND3W9RV4G7TSEAH.sSzXanZZmDqBadhzkhYweAFAdHVzWrlqToalG) (ok 'S61F1MAGPTM4Y3WEYE757PTZEGRY5D3FV2BG53STB.VXSrEfeDQmDpUQpbLcpTcpHhytHKnXQnbLLhw) (ok 'S939MQP0630GPK1S5RRKWDEXT5X8DEBW5T5PHXBTA.pBvEuNMOoLNHAkBpAyWkOgMQRXsuqs) (err u130787449693949619415771523117179796343) (ok 'SZ1NX5BPB8JTT5FZ86FD4R2H2A4FRSZYYYADEZPVM.GNlVpg)) (ok 'S61F1MAGPTM4Y3WEYE757PTZEGRY5D3FV2BG53STB.VXSrEfeDQmDpUQpbLcpTcpHhytHKnXQnbLLhw))"#;
 
         let e = interpret(snippet_no_rgx_2nd_match).expect_err("Snippet should err due to bug");
         assert!(KnownBug::has_list_of_qualified_principal_issue(&e));
-        crosscheck(snippet_simple, Ok(None)); // we don't care about the expected result
+        crosscheck_with_epoch_and_version(
+            snippet_simple,
+            Ok(None),
+            TestConfig::latest_epoch(),
+            TestConfig::clarity_version(),
+        ); // we don't care about the expected result
 
         // Those tests below use `replace-at`, which didn't exist in Clarity 1
         #[cfg(not(feature = "test-clarity-v1"))]

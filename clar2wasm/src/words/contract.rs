@@ -838,6 +838,7 @@ mod tests {
     use clarity::vm::Value;
     use clarity_types::ContractName;
 
+    #[allow(unused_imports)]
     use crate::tools::{
         crosscheck_multi_contract, crosscheck_multi_contract_with_env, TestEnvironment,
     };
@@ -1455,6 +1456,8 @@ mod tests {
         assert_eq!(val.unwrap(), Value::Int(-123));
     }
 
+    // Not run in v1 because at that point traits could not be used in all the places where a built-in type could
+    #[cfg(not(feature = "test-clarity-v1"))]
     #[test]
     fn multi_dynamic_define_impl_call() {
         let foo_trait = "
@@ -1498,6 +1501,8 @@ mod tests {
 
     /// This is the same test as [multi_dynamic_define_impl_call], but it checks that it still works
     /// when we deal with the linked functions defined in stacks-core (duplication issue).
+    // Not run in v1 because at that point traits could not be used in all the places where a built-in type could
+    #[cfg(not(feature = "test-clarity-v1"))]
     #[test]
     fn multi_dynamic_define_impl_call_duplication_issue() {
         let foo_trait = "
