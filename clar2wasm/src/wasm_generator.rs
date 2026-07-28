@@ -2284,9 +2284,8 @@ mod tests {
 
     #[test]
     fn end_of_standard_data_is_correct() {
-        const STANDARD_LIB_PATH: &str = concat!(env!("OUT_DIR"), "/standard.wasm");
-        let standard_lib_wasm = std::fs::read(STANDARD_LIB_PATH).expect("Failed to read WASM file");
-        let module = Module::from_buffer(&standard_lib_wasm).unwrap();
+        let standard_lib_wasm: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/standard.wasm"));
+        let module = Module::from_buffer(standard_lib_wasm).unwrap();
         let initial_data_size: usize = module.data.iter().map(|d| d.value.len()).sum();
 
         assert!((initial_data_size as u32) == END_OF_STANDARD_DATA);
