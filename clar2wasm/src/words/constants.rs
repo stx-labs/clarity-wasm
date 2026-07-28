@@ -1,4 +1,6 @@
-use clarity::vm::{ClarityName, SymbolicExpression, SymbolicExpressionType};
+use clarity::types::StacksEpochId;
+use clarity::vm::types::PrincipalData;
+use clarity::vm::{ClarityName, SymbolicExpression, SymbolicExpressionType, Value};
 use walrus::{ActiveData, DataKind, ValType};
 
 use super::{ComplexWord, Word};
@@ -107,6 +109,35 @@ impl ComplexWord for DefineConstant {
         builder.call(generator.func_by_name("stdlib.save_constant"));
 
         generator.constants.insert(name.to_string(), value_ty);
+        if generator.contract_analysis.epoch >= StacksEpochId::Epoch34 {
+            // If the constant is bound to a contract principal, remember its
+            // contract identifier so that `contract-call?` targeting this constant
+            // can be lowered as a static dispatch. This covers both a direct
+            // principal literal (`(define-constant a .contract)`) and a constant
+            // aliasing another such constant (`(define-constant b a)`), which is
+            // already recorded because constants are processed in source order.
+            match &value.expr {
+                SymbolicExpressionType::LiteralValue(Value::Principal(
+                    PrincipalData::Contract(contract_identifier),
+                )) => {
+                    generator
+                        .constant_contract_principals
+                        .insert(name.to_string(), contract_identifier.clone());
+                }
+                SymbolicExpressionType::Atom(other) => {
+                    if let Some(contract_identifier) = generator
+                        .constant_contract_principals
+                        .get(other.as_str())
+                        .cloned()
+                    {
+                        generator
+                            .constant_contract_principals
+                            .insert(name.to_string(), contract_identifier);
+                    }
+                }
+                _ => {}
+            }
+        }
 
         Ok(())
     }

@@ -1,13 +1,18 @@
+use std::assert_matches;
 use std::fmt::Write;
 
-use clar2wasm::tools::{as_oom_check_snippet, crosscheck_multi_contract, TestConfig};
+use clar2wasm::tools::{
+    as_oom_check_snippet, crosscheck_multi_contract, TestConfig, TestEnvironment,
+};
 use clar2wasm::wasm_utils::signature_from_string;
+use clarity::types::StacksEpochId;
 #[cfg(not(any(
     feature = "test-clarity-v1",
     feature = "test-clarity-v2",
     feature = "test-clarity-v3"
 )))]
 use clarity::util::hash::Sha512Trunc256Sum;
+use clarity::vm::errors::{VmExecutionError, WasmError};
 use clarity::vm::types::{ResponseData, TupleData};
 use clarity::vm::{ClarityName, ContractName, Value};
 use proptest::prelude::*;
@@ -839,4 +844,101 @@ proptest! {
             Ok(Some(expected)),
         );
     }
+}
+
+#[cfg(any(
+    feature = "test-clarity-v2",
+    feature = "test-clarity-v3",
+    feature = "test-clarity-v4"
+))]
+#[test]
+fn contract_call_constant_pre_34_fails() {
+    let callee = r#"(define-public (foo) (ok u42))"#;
+    let caller = r#"
+            (define-constant cst .callee)
+            (contract-call? cst foo)
+        "#;
+    let mut env = TestEnvironment::new(StacksEpochId::Epoch33, TestConfig::clarity_version());
+    assert_matches!(
+        [
+            (ContractName::from_literal("callee"), callee),
+            (ContractName::from_literal("caller"), caller),
+        ]
+        .iter()
+        .map(|(name, snippet)| env.init_contract_with_snippet(name, snippet))
+        .collect::<Vec<_>>()
+        .last()
+        .unwrap()
+        .as_ref()
+        .unwrap_err(),
+        VmExecutionError::Wasm(WasmError::WasmGeneratorError(_))
+    );
+}
+
+#[cfg(any(
+    feature = "test-clarity-v2",
+    feature = "test-clarity-v3",
+    feature = "test-clarity-v4"
+))]
+#[test]
+fn contract_call_constant_of_constant_pre_34_fails() {
+    let callee = r#"(define-public (foo) (ok u42))"#;
+    let caller = r#"
+            (define-constant cst1 .callee)
+            (define-constant cst2 cst1)
+            (contract-call? cst2 foo)
+        "#;
+
+    let mut env = TestEnvironment::new(StacksEpochId::Epoch33, TestConfig::clarity_version());
+    assert_matches!(
+        [
+            (ContractName::from_literal("callee"), callee),
+            (ContractName::from_literal("caller"), caller),
+        ]
+        .iter()
+        .map(|(name, snippet)| env.init_contract_with_snippet(name, snippet))
+        .collect::<Vec<_>>()
+        .last()
+        .unwrap()
+        .as_ref()
+        .unwrap_err(),
+        VmExecutionError::Wasm(WasmError::WasmGeneratorError(_))
+    );
+}
+
+#[cfg(not(feature = "test-clarity-v1"))]
+#[test]
+fn contract_call_constant_post_34_succeeds() {
+    let callee = r#"(define-public (foo) (ok u42))"#;
+    let caller = r#"
+            (define-constant cst .callee)
+            (contract-call? cst foo)
+        "#;
+
+    crosscheck_multi_contract(
+        &[
+            (ContractName::from_literal("callee"), callee),
+            (ContractName::from_literal("caller"), caller),
+        ],
+        Ok(Some(Value::okay(Value::UInt(42)).unwrap())),
+    );
+}
+
+#[cfg(not(feature = "test-clarity-v1",))]
+#[test]
+fn contract_call_constant_of_constant_post_34_succeeds() {
+    let callee = r#"(define-public (foo) (ok u42))"#;
+    let caller = r#"
+            (define-constant cst1 .callee)
+            (define-constant cst2 cst1)
+            (contract-call? cst2 foo)
+        "#;
+
+    crosscheck_multi_contract(
+        &[
+            (ContractName::from_literal("callee"), callee),
+            (ContractName::from_literal("caller"), caller),
+        ],
+        Ok(Some(Value::okay(Value::UInt(42)).unwrap())),
+    );
 }
