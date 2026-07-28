@@ -216,6 +216,7 @@ impl WasmGenerator {
             memory,
             &mut store,
             StacksEpochId::latest(),
+            ClarityVersion::latest(),
         )
         .expect("error in execution")
         .0

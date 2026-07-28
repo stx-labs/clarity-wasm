@@ -413,8 +413,16 @@ pub fn initialize_contract(
         let memory = instance
             .get_memory(&mut store, "memory")
             .ok_or(VmExecutionError::Wasm(WasmError::MemoryNotFound))?;
-        wasm_to_clarity_value(return_type, 0, &results, memory, &mut &mut store, epoch)
-            .map(|(val, _offset)| val)?
+        wasm_to_clarity_value(
+            return_type,
+            0,
+            &results,
+            memory,
+            &mut &mut store,
+            epoch,
+            clarity_version,
+        )
+        .map(|(val, _offset)| val)?
     } else {
         None
     };

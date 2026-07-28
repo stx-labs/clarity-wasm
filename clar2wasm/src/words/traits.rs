@@ -146,7 +146,10 @@ mod tests {
     use clarity::types::StacksEpochId;
     use clarity::vm::types::{StandardPrincipalData, TraitIdentifier};
     use clarity::vm::{ClarityName, ContractName, Value};
+    use clarity_types::types::PrincipalData;
+    use clarity_types::ClarityVersion;
 
+    use crate::tools::TestConfig;
     #[allow(unused_imports)]
     use crate::tools::{
         crosscheck, crosscheck_expect_failure, crosscheck_multi_contract, TestEnvironment,
@@ -285,8 +288,6 @@ mod tests {
             )));
     }
 
-    // See issue #818
-    #[cfg(not(feature = "test-clarity-v1"))]
     #[test]
     fn trait_list() {
         // NOTE: this also tests `print` of `Callable`
@@ -312,11 +313,17 @@ mod tests {
             issuer: StandardPrincipalData::transient(),
             name: ContractName::from_literal("my-trait-contract"),
         };
-        crosscheck_multi_contract(
-            &[
-                (first_contract_name, first_snippet),
-                (second_contract_name, second_snippet),
-            ],
+        let expected = if TestConfig::clarity_version() == ClarityVersion::Clarity1 {
+            Ok(Some(
+                Value::cons_list(
+                    (0..2)
+                        .map(|_| Value::Principal(PrincipalData::Contract(contract_id.clone())))
+                        .collect(),
+                    &StacksEpochId::latest(),
+                )
+                .unwrap(),
+            ))
+        } else {
             Ok(Some(
                 Value::cons_list(
                     (0..2)
@@ -333,7 +340,14 @@ mod tests {
                     &StacksEpochId::latest(),
                 )
                 .unwrap(),
-            )),
+            ))
+        };
+        crosscheck_multi_contract(
+            &[
+                (first_contract_name, first_snippet),
+                (second_contract_name, second_snippet),
+            ],
+            expected,
         );
     }
 

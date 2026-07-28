@@ -461,8 +461,15 @@ fn short_return_value(
     let value_ty = signature_from_string(&type_ser_str, *clarity_version, *epoch_id)
         .unwrap_or_else(|e| panic!("Could not recover thrown value: {e}"));
 
-    read_from_wasm_indirect(memory, store, &value_ty, val_offset, *epoch_id)
-        .unwrap_or_else(|e| panic!("Could not read thrown value from memory: {e}"))
+    read_from_wasm_indirect(
+        memory,
+        store,
+        &value_ty,
+        val_offset,
+        *epoch_id,
+        *clarity_version,
+    )
+    .unwrap_or_else(|e| panic!("Could not read thrown value from memory: {e}"))
 }
 
 /// Retrieves the argument lengths from the runtime error global variables.

@@ -90,6 +90,7 @@ pub fn wasm_to_clarity_value(
     memory: Memory,
     store: &mut impl AsContextMut,
     epoch: StacksEpochId,
+    clarity_version: ClarityVersion,
 ) -> Result<(Option<Value>, usize), VmExecutionError> {
     match type_sig {
         TypeSignature::IntType => {
@@ -142,6 +143,7 @@ pub fn wasm_to_clarity_value(
                         memory,
                         store,
                         epoch,
+                        clarity_version,
                     )?;
                     Some(Value::some(value.ok_or(VmExecutionError::Wasm(
                         WasmError::Expect(
@@ -171,6 +173,7 @@ pub fn wasm_to_clarity_value(
                         memory,
                         store,
                         epoch,
+                        clarity_version,
                     )?;
                     Some(Value::okay(ok.ok_or(VmExecutionError::Wasm(
                         WasmError::Expect(
@@ -185,6 +188,7 @@ pub fn wasm_to_clarity_value(
                         memory,
                         store,
                         epoch,
+                        clarity_version,
                     )?;
                     Some(Value::error(err.ok_or(VmExecutionError::Wasm(
                         WasmError::Expect("Failed to construct Err value from inner value".into()),
@@ -245,7 +249,15 @@ pub fn wasm_to_clarity_value(
                 .i32()
                 .ok_or(VmExecutionError::Wasm(WasmError::ValueTypeMismatch))?;
 
-            let value = read_from_wasm(memory, store, type_sig, offset, length, epoch)?;
+            let value = read_from_wasm(
+                memory,
+                store,
+                type_sig,
+                offset,
+                length,
+                epoch,
+                clarity_version,
+            )?;
             Ok((Some(value), 2))
         }
         TypeSignature::PrincipalType
@@ -314,8 +326,15 @@ pub fn wasm_to_clarity_value(
             let mut index = value_index;
             let mut data_map = Vec::new();
             for (name, ty) in t.get_type_map() {
-                let (value, increment) =
-                    wasm_to_clarity_value(ty, index, buffer, memory, store, epoch)?;
+                let (value, increment) = wasm_to_clarity_value(
+                    ty,
+                    index,
+                    buffer,
+                    memory,
+                    store,
+                    epoch,
+                    clarity_version,
+                )?;
                 data_map.push((
                     name.clone(),
                     value.ok_or_else(|| {
@@ -347,6 +366,7 @@ pub fn read_from_wasm_indirect(
     ty: &TypeSignature,
     mut offset: i32,
     epoch: StacksEpochId,
+    clarity_version: ClarityVersion,
 ) -> Result<Value, VmExecutionError> {
     let mut length = get_type_size(ty);
 
@@ -356,7 +376,7 @@ pub fn read_from_wasm_indirect(
         (offset, length) = read_indirect_offset_and_length(memory, store, offset)?;
     };
 
-    read_from_wasm(memory, store, ty, offset, length, epoch)
+    read_from_wasm(memory, store, ty, offset, length, epoch, clarity_version)
 }
 
 /// Read a value from the Wasm memory at `offset` with `length`, given the
@@ -368,6 +388,7 @@ pub fn read_from_wasm(
     offset: i32,
     length: i32,
     epoch: StacksEpochId,
+    clarity_version: ClarityVersion,
 ) -> Result<Value, VmExecutionError> {
     match ty {
         TypeSignature::UIntType => {
@@ -464,18 +485,19 @@ pub fn read_from_wasm(
                     issuer: principal,
                     name: ContractName::try_from(contract_name)?,
                 };
-                Ok(
-                    if let TypeSignature::CallableType(CallableSubtype::Trait(trait_identifier)) =
-                        ty
-                    {
-                        Value::CallableContract(CallableData {
-                            contract_identifier: qualified_id,
-                            trait_identifier: Some(trait_identifier.clone()),
-                        })
-                    } else {
-                        Value::Principal(PrincipalData::Contract(qualified_id))
-                    },
-                )
+                Ok(if clarity_version == ClarityVersion::Clarity1 {
+                    Value::Principal(PrincipalData::Contract(qualified_id))
+                } else if let TypeSignature::CallableType(CallableSubtype::Trait(
+                    trait_identifier,
+                )) = ty
+                {
+                    Value::CallableContract(CallableData {
+                        contract_identifier: qualified_id,
+                        trait_identifier: Some(trait_identifier.clone()),
+                    })
+                } else {
+                    Value::Principal(PrincipalData::Contract(qualified_id))
+                })
             }
         }
         TypeSignature::SequenceType(SequenceSubtype::BufferType(_b)) => {
@@ -492,7 +514,14 @@ pub fn read_from_wasm(
             let mut buffer: Vec<Value> = Vec::new();
             let mut current_offset = offset;
             while current_offset < end {
-                let elem = read_from_wasm_indirect(memory, store, elem_ty, current_offset, epoch)?;
+                let elem = read_from_wasm_indirect(
+                    memory,
+                    store,
+                    elem_ty,
+                    current_offset,
+                    epoch,
+                    clarity_version,
+                )?;
                 buffer.push(elem);
                 current_offset += elem_length;
             }
@@ -515,8 +544,14 @@ pub fn read_from_wasm(
             let mut current_offset = offset;
             for (field_key, field_ty) in type_sig.get_type_map() {
                 let field_length = get_type_size(field_ty);
-                let field_value =
-                    read_from_wasm_indirect(memory, store, field_ty, current_offset, epoch)?;
+                let field_value = read_from_wasm_indirect(
+                    memory,
+                    store,
+                    field_ty,
+                    current_offset,
+                    epoch,
+                    clarity_version,
+                )?;
                 data.push((field_key.clone(), field_value));
                 current_offset += field_length;
             }
@@ -547,6 +582,7 @@ pub fn read_from_wasm(
                         &response_type.1,
                         current_offset,
                         epoch,
+                        clarity_version,
                     )?;
                     Value::error(err_value)
                         .map_err(|_| VmExecutionError::Wasm(WasmError::ValueTypeMismatch))
@@ -558,6 +594,7 @@ pub fn read_from_wasm(
                         &response_type.0,
                         current_offset,
                         epoch,
+                        clarity_version,
                     )?;
                     Value::okay(ok_value)
                         .map_err(|_| VmExecutionError::Wasm(WasmError::ValueTypeMismatch))
@@ -585,8 +622,14 @@ pub fn read_from_wasm(
             match indicator {
                 0 => Ok(Value::none()),
                 1 => {
-                    let value =
-                        read_from_wasm_indirect(memory, store, type_sig, current_offset, epoch)?;
+                    let value = read_from_wasm_indirect(
+                        memory,
+                        store,
+                        type_sig,
+                        current_offset,
+                        epoch,
+                        clarity_version,
+                    )?;
                     Ok(Value::some(value)
                         .map_err(|_| VmExecutionError::Wasm(WasmError::ValueTypeMismatch))?)
                 }

@@ -224,6 +224,7 @@ fn link_define_variable_fn(
                     (value_offset, value_length) =
                         read_indirect_offset_and_length(memory, &mut caller, value_offset)?;
                 }
+                let clarity_version = *caller.data_mut().contract_context().get_clarity_version();
                 let value = read_from_wasm(
                     memory,
                     &mut caller,
@@ -231,6 +232,7 @@ fn link_define_variable_fn(
                     value_offset,
                     value_length,
                     epoch,
+                    clarity_version,
                 )?;
 
                 caller
@@ -822,6 +824,7 @@ fn link_set_variable_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), V
                     (value_offset, value_length) =
                         read_indirect_offset_and_length(memory, &mut caller, value_offset)?;
                 }
+                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 let value = read_from_wasm(
                     memory,
                     &mut caller,
@@ -829,6 +832,7 @@ fn link_set_variable_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), V
                     value_offset,
                     value_length,
                     epoch,
+                    clarity_version,
                 )?;
 
                 // TODO: Include this cost
@@ -1474,6 +1478,7 @@ fn link_exit_restrict_assets_fn(
                     .and_then(|export| export.into_memory())
                     .ok_or(WasmError::MemoryNotFound)?;
                 let epoch = caller.data().global_context.epoch_id;
+                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 let owner = read_from_wasm(
                     memory,
                     &mut caller,
@@ -1481,6 +1486,7 @@ fn link_exit_restrict_assets_fn(
                     asset_owner_offset,
                     asset_owner_length,
                     epoch,
+                    clarity_version,
                 )?
                 .expect_principal()?;
                 let allowances = AllowanceContext::extract(&allowance_ref)?;
@@ -1625,6 +1631,7 @@ fn link_with_ft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExec
 
                 let epoch = caller.data().global_context.epoch_id;
 
+                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 let token_name_value = read_from_wasm(
                     memory,
                     &mut caller,
@@ -1632,6 +1639,7 @@ fn link_with_ft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExec
                     token_name_offset,
                     token_name_length,
                     epoch,
+                    clarity_version,
                 )?;
                 let token_name = token_name_value.expect_ascii()?;
 
@@ -1644,6 +1652,7 @@ fn link_with_ft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExec
                     contract_id_offset,
                     contract_id_length,
                     epoch,
+                    clarity_version,
                 )?;
                 let contract_id = match &contract_principal {
                     Value::Principal(PrincipalData::Contract(contract_id)) => contract_id,
@@ -1716,6 +1725,7 @@ fn link_with_nft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
 
                 let epoch = caller.data().global_context.epoch_id;
 
+                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // we cannot just read an identifier due to the '*' case.
                 let token_name = read_from_wasm(
                     memory,
@@ -1724,10 +1734,12 @@ fn link_with_nft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                     token_name_offset,
                     token_name_length,
                     epoch,
+                    clarity_version,
                 )?
                 .expect_ascii()?;
                 let asset_name = ClarityName::try_from(token_name.clone())?;
 
+                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // Read the contract principal first — needed for both wildcard
                 // and non-wildcard paths.
                 let contract_principal = read_from_wasm(
@@ -1737,6 +1749,7 @@ fn link_with_nft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                     contract_id_offset,
                     contract_id_length,
                     epoch,
+                    clarity_version,
                 )?;
                 let contract_id = match &contract_principal {
                     Value::Principal(PrincipalData::Contract(contract_id)) => contract_id,
@@ -1803,6 +1816,8 @@ fn link_with_nft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                 let entry_size = key_type.size()?;
                 let max_list_len = (MAX_VALUE_SIZE.saturating_sub(entry_size + 5)) / entry_size;
 
+                let clarity_version = *caller.data().contract_context().get_clarity_version();
+
                 // We use read_from_wasm (not read_identifier_from_wasm) because
                 // this is a typed list of NFT key values, not a string identifier.
                 // The wildcard ("*") case also requires this since the key type
@@ -1816,6 +1831,7 @@ fn link_with_nft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                     identifiers_offset,
                     identifiers_length,
                     epoch,
+                    clarity_version,
                 )?;
                 let allowed_identifiers = identifiers_value.expect_list()?;
 
@@ -1928,6 +1944,7 @@ fn link_stx_get_balance_fn(
 
                 let epoch = caller.data_mut().global_context.epoch_id;
 
+                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // Read the principal from the Wasm memory
                 let value = read_from_wasm(
                     memory,
@@ -1936,6 +1953,7 @@ fn link_stx_get_balance_fn(
                     principal_offset,
                     principal_length,
                     epoch,
+                    clarity_version,
                 )?;
                 let principal = value_as_principal(&value)?;
 
@@ -1979,6 +1997,7 @@ fn link_stx_account_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Vm
 
                 let epoch = caller.data_mut().global_context.epoch_id;
 
+                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // Read the principal from the Wasm memory
                 let value = read_from_wasm(
                     memory,
@@ -1987,6 +2006,7 @@ fn link_stx_account_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Vm
                     principal_offset,
                     principal_length,
                     epoch,
+                    clarity_version,
                 )?;
                 let principal = value_as_principal(&value)?;
 
@@ -2063,6 +2083,7 @@ fn link_stx_burn_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
 
                 let epoch = caller.data_mut().global_context.epoch_id;
 
+                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // Read the principal from the Wasm memory
                 let value = read_from_wasm(
                     memory,
@@ -2071,6 +2092,7 @@ fn link_stx_burn_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                     principal_offset,
                     principal_length,
                     epoch,
+                    clarity_version,
                 )?;
                 let from = value_as_principal(&value)?;
 
@@ -2161,6 +2183,7 @@ fn link_stx_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), V
 
                 let epoch = caller.data_mut().global_context.epoch_id;
 
+                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // Read the sender principal from the Wasm memory
                 let value = read_from_wasm(
                     memory,
@@ -2169,6 +2192,7 @@ fn link_stx_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), V
                     sender_offset,
                     sender_length,
                     epoch,
+                    clarity_version,
                 )?;
                 let sender = value_as_principal(&value)?;
 
@@ -2180,9 +2204,11 @@ fn link_stx_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), V
                     recipient_offset,
                     recipient_length,
                     epoch,
+                    clarity_version,
                 )?;
                 let recipient = value_as_principal(&value)?;
 
+                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // Read the memo from the Wasm memory
                 let memo = if memo_length > 0 {
                     let value = read_from_wasm(
@@ -2194,6 +2220,7 @@ fn link_stx_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), V
                         memo_offset,
                         memo_length,
                         epoch,
+                        clarity_version,
                     )?;
                     value_as_buffer(value)?
                 } else {
@@ -2341,6 +2368,7 @@ fn link_ft_get_balance_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(),
                     caller.data().contract_context().contract_identifier.clone();
                 let epoch = caller.data_mut().global_context.epoch_id;
 
+                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // Read the owner principal from the Wasm memory
                 let value = read_from_wasm(
                     memory,
@@ -2349,6 +2377,7 @@ fn link_ft_get_balance_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(),
                     owner_offset,
                     owner_length,
                     epoch,
+                    clarity_version,
                 )?;
                 let owner = value_as_principal(&value)?;
 
@@ -2414,6 +2443,7 @@ fn link_ft_burn_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExec
                 // Compute the amount
                 let amount = ((amount_hi as u128) << 64) | ((amount_lo as u64) as u128);
 
+                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // Read the sender principal from the Wasm memory
                 let value = read_from_wasm(
                     memory,
@@ -2422,6 +2452,7 @@ fn link_ft_burn_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExec
                     sender_offset,
                     sender_length,
                     epoch,
+                    clarity_version,
                 )?;
                 let burner = value_as_principal(&value)?;
 
@@ -2540,6 +2571,7 @@ fn link_ft_mint_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExec
                 // Compute the amount
                 let amount = ((amount_hi as u128) << 64) | ((amount_lo as u64) as u128);
 
+                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // Read the sender principal from the Wasm memory
                 let value = read_from_wasm(
                     memory,
@@ -2548,6 +2580,7 @@ fn link_ft_mint_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExec
                     sender_offset,
                     sender_length,
                     epoch,
+                    clarity_version,
                 )?;
                 let to_principal = value_as_principal(&value)?;
 
@@ -2668,6 +2701,7 @@ fn link_ft_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Vm
                 // Compute the amount
                 let amount = ((amount_hi as u128) << 64) | ((amount_lo as u64) as u128);
 
+                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // Read the sender principal from the Wasm memory
                 let value = read_from_wasm(
                     memory,
@@ -2676,6 +2710,7 @@ fn link_ft_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Vm
                     sender_offset,
                     sender_length,
                     epoch,
+                    clarity_version,
                 )?;
                 let from_principal = value_as_principal(&value)?;
 
@@ -2687,6 +2722,7 @@ fn link_ft_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Vm
                     recipient_offset,
                     recipient_length,
                     epoch,
+                    clarity_version,
                 )?;
                 let to_principal = value_as_principal(&value)?;
 
@@ -2858,6 +2894,7 @@ fn link_nft_get_owner_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
                     (asset_offset, asset_length) =
                         read_indirect_offset_and_length(memory, &mut caller, asset_offset)?;
                 }
+                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 let asset = read_from_wasm(
                     memory,
                     &mut caller,
@@ -2865,6 +2902,7 @@ fn link_nft_get_owner_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
                     asset_offset,
                     asset_length,
                     epoch,
+                    clarity_version,
                 )?;
 
                 let _asset_size = asset.serialized_size()? as u64;
@@ -2964,6 +3002,7 @@ fn link_nft_burn_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                     (asset_offset, asset_length) =
                         read_indirect_offset_and_length(memory, &mut caller, asset_offset)?;
                 }
+                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 let asset = read_from_wasm(
                     memory,
                     &mut caller,
@@ -2971,8 +3010,10 @@ fn link_nft_burn_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                     asset_offset,
                     asset_length,
                     epoch,
+                    clarity_version,
                 )?;
 
+                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // Read the sender principal from the Wasm memory
                 let value = read_from_wasm(
                     memory,
@@ -2981,6 +3022,7 @@ fn link_nft_burn_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                     sender_offset,
                     sender_length,
                     epoch,
+                    clarity_version,
                 )?;
                 let sender_principal = value_as_principal(&value)?;
 
@@ -3106,6 +3148,7 @@ fn link_nft_mint_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                     (asset_offset, asset_length) =
                         read_indirect_offset_and_length(memory, &mut caller, asset_offset)?;
                 }
+                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 let asset = read_from_wasm(
                     memory,
                     &mut caller,
@@ -3113,8 +3156,10 @@ fn link_nft_mint_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                     asset_offset,
                     asset_length,
                     epoch,
+                    clarity_version,
                 )?;
 
+                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // Read the recipient principal from the Wasm memory
                 let value = read_from_wasm(
                     memory,
@@ -3123,6 +3168,7 @@ fn link_nft_mint_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                     recipient_offset,
                     recipient_length,
                     epoch,
+                    clarity_version,
                 )?;
                 let to_principal = value_as_principal(&value)?;
 
@@ -3240,6 +3286,7 @@ fn link_nft_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), V
                     (asset_offset, asset_length) =
                         read_indirect_offset_and_length(memory, &mut caller, asset_offset)?;
                 }
+                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 let asset = read_from_wasm(
                     memory,
                     &mut caller,
@@ -3247,6 +3294,7 @@ fn link_nft_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), V
                     asset_offset,
                     asset_length,
                     epoch,
+                    clarity_version,
                 )?;
 
                 // Read the sender principal from the Wasm memory
@@ -3257,9 +3305,11 @@ fn link_nft_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), V
                     sender_offset,
                     sender_length,
                     epoch,
+                    clarity_version,
                 )?;
                 let from_principal = value_as_principal(&value)?;
 
+                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // Read the recipient principal from the Wasm memory
                 let value = read_from_wasm(
                     memory,
@@ -3268,6 +3318,7 @@ fn link_nft_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), V
                     recipient_offset,
                     recipient_length,
                     epoch,
+                    clarity_version,
                 )?;
                 let to_principal = value_as_principal(&value)?;
 
@@ -3411,6 +3462,7 @@ fn link_map_get_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExec
                     (key_offset, key_length) =
                         read_indirect_offset_and_length(memory, &mut caller, key_offset)?;
                 }
+                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 let key = read_from_wasm(
                     memory,
                     &mut caller,
@@ -3418,6 +3470,7 @@ fn link_map_get_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExec
                     key_offset,
                     key_length,
                     epoch,
+                    clarity_version,
                 )?;
 
                 let result = caller.data_mut().global_context.database.fetch_entry(
@@ -3515,6 +3568,7 @@ fn link_map_set_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExec
                     (key_offset, key_length) =
                         read_indirect_offset_and_length(memory, &mut caller, key_offset)?;
                 }
+                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 let key = read_from_wasm(
                     memory,
                     &mut caller,
@@ -3522,6 +3576,7 @@ fn link_map_set_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExec
                     key_offset,
                     key_length,
                     epoch,
+                    clarity_version,
                 )?;
 
                 // Read in the value from the Wasm memory
@@ -3536,6 +3591,7 @@ fn link_map_set_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExec
                     value_offset,
                     value_length,
                     epoch,
+                    clarity_version,
                 )?;
 
                 // Store the value in the map in the global context
@@ -3634,6 +3690,7 @@ fn link_map_insert_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmE
                     (key_offset, key_length) =
                         read_indirect_offset_and_length(memory, &mut caller, key_offset)?;
                 }
+                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 let key = read_from_wasm(
                     memory,
                     &mut caller,
@@ -3641,6 +3698,7 @@ fn link_map_insert_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmE
                     key_offset,
                     key_length,
                     epoch,
+                    clarity_version,
                 )?;
 
                 // Read in the value from the Wasm memory
@@ -3655,6 +3713,7 @@ fn link_map_insert_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmE
                     value_offset,
                     value_length,
                     epoch,
+                    clarity_version,
                 )?;
 
                 // Insert the value into the map
@@ -3749,6 +3808,7 @@ fn link_map_delete_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmE
                     (key_offset, key_length) =
                         read_indirect_offset_and_length(memory, &mut caller, key_offset)?;
                 }
+                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 let key = read_from_wasm(
                     memory,
                     &mut caller,
@@ -3756,6 +3816,7 @@ fn link_map_delete_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmE
                     key_offset,
                     key_length,
                     epoch,
+                    clarity_version,
                 )?;
 
                 // Delete the key from the map in the global context
@@ -5160,6 +5221,7 @@ fn link_contract_call_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
 
                 let epoch = caller.data_mut().global_context.epoch_id;
 
+                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // Read the contract identifier from the Wasm memory
                 let contract_val = read_from_wasm(
                     memory,
@@ -5168,6 +5230,7 @@ fn link_contract_call_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
                     contract_offset,
                     contract_length,
                     epoch,
+                    clarity_version,
                 )?;
                 let contract_id = match &contract_val {
                     Value::Principal(PrincipalData::Contract(contract_id)) => contract_id,
@@ -5202,8 +5265,14 @@ fn link_contract_call_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
                 let mut arg_offset = args_offset;
                 // Read the arguments from the Wasm memory
                 for arg_ty in function.get_arg_types() {
-                    let arg =
-                        read_from_wasm_indirect(memory, &mut caller, arg_ty, arg_offset, epoch)?;
+                    let arg = read_from_wasm_indirect(
+                        memory,
+                        &mut caller,
+                        arg_ty,
+                        arg_offset,
+                        epoch,
+                        clarity_version,
+                    )?;
                     args_sizes.push(arg.size()? as u64);
                     args.push(arg);
 
@@ -5348,6 +5417,7 @@ fn link_contract_hash_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
 
                 let epoch = caller.data_mut().global_context.epoch_id;
 
+                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // Read the contract identifier from the Wasm memory
                 let contract_val = read_from_wasm(
                     memory,
@@ -5356,6 +5426,7 @@ fn link_contract_hash_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
                     contract_offset,
                     contract_length,
                     epoch,
+                    clarity_version,
                 )?;
 
                 // (response (buff 32) uint)
@@ -5552,11 +5623,17 @@ fn link_print_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExecut
                 )?;
 
                 let epoch = caller.data().global_context.epoch_id;
-                let version = caller.data().contract_context().get_clarity_version();
+                let version = *caller.data().contract_context().get_clarity_version();
 
-                let value_ty = signature_from_string(&serialized_ty, *version, epoch)?;
-                let clarity_val =
-                    read_from_wasm_indirect(memory, &mut caller, &value_ty, value_offset, epoch)?;
+                let value_ty = signature_from_string(&serialized_ty, version, epoch)?;
+                let clarity_val = read_from_wasm_indirect(
+                    memory,
+                    &mut caller,
+                    &value_ty,
+                    value_offset,
+                    epoch,
+                    version,
+                )?;
 
                 caller.data_mut().register_print_event(clarity_val)?;
 
@@ -5586,6 +5663,7 @@ fn link_enter_at_block_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(),
                     .ok_or(VmExecutionError::Wasm(WasmError::MemoryNotFound))?;
                 let epoch = caller.data_mut().global_context.epoch_id;
 
+                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 let block_hash = read_from_wasm(
                     memory,
                     &mut caller,
@@ -5593,6 +5671,7 @@ fn link_enter_at_block_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(),
                     block_hash_offset,
                     block_hash_length,
                     epoch,
+                    clarity_version,
                 )?;
 
                 let bhh = match block_hash {
@@ -6048,6 +6127,7 @@ fn link_principal_of_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), V
 
                 let epoch = caller.data_mut().global_context.epoch_id;
 
+                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // Read the public key from the memory
                 let key_val = read_from_wasm(
                     memory,
@@ -6056,6 +6136,7 @@ fn link_principal_of_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), V
                     key_offset,
                     key_length,
                     epoch,
+                    clarity_version,
                 )?;
 
                 let pub_key = match key_val {
@@ -6081,9 +6162,7 @@ fn link_principal_of_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), V
                 if let Ok(pub_key) = Secp256k1PublicKey::from_slice(pub_key) {
                     // Note: Clarity1 had a bug in how the address is computed (issues/2619).
                     // We want to preserve the old behavior unless the version is greater.
-                    let addr = if *caller.data().contract_context().get_clarity_version()
-                        > ClarityVersion::Clarity1
-                    {
+                    let addr = if clarity_version > ClarityVersion::Clarity1 {
                         pubkey_to_address_v2(pub_key, caller.data().global_context.mainnet)?
                     } else {
                         pubkey_to_address_v1(pub_key)?
@@ -6154,8 +6233,15 @@ fn link_save_constant_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
                     .get_variable_type(const_name.as_str())
                     .ok_or(VmExecutionError::Wasm(WasmError::DefinesNotFound))?;
 
-                let value =
-                    read_from_wasm_indirect(memory, &mut caller, value_ty, value_offset, epoch)?;
+                let clarity_version = *caller.data().contract_context().get_clarity_version();
+                let value = read_from_wasm_indirect(
+                    memory,
+                    &mut caller,
+                    value_ty,
+                    value_offset,
+                    epoch,
+                    clarity_version,
+                )?;
 
                 // Insert constant name and expression value into a persistent data structure.
                 caller
@@ -6250,6 +6336,7 @@ fn link_principal_to_string_ascii(
 
                 let epoch = caller.data().global_context.epoch_id;
 
+                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 let principal = read_from_wasm(
                     memory,
                     &mut caller,
@@ -6257,6 +6344,7 @@ fn link_principal_to_string_ascii(
                     principal_offset,
                     principal_length,
                     epoch,
+                    clarity_version,
                 )?;
 
                 let result_beg = result_offset as usize;
