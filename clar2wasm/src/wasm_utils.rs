@@ -1455,7 +1455,7 @@ mod tests {
         #[test]
         fn serialize_deserialize_trait_id(
             issuer in (0u8..32, proptest::array::uniform20(any::<u8>()))
-                .prop_map(|(v, bs)| StandardPrincipalData::new_unsafe(v, bs)),
+                .prop_map(|(v, bs)| StandardPrincipalData::new(v, bs).unwrap()),
             contract_name in "[a-zA-Z]([a-zA-Z0-9]|[-_]){0,127}"
                 .prop_map(|name| ContractName::try_from(name).unwrap()),
             trait_name in "[a-zA-Z]([a-zA-Z0-9]|[-_!?+<>=/*]){0,127}"

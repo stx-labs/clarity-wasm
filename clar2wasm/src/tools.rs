@@ -872,13 +872,13 @@ pub fn crosscheck_expect_failure(snippet: &str) {
         interpreted.is_err(),
         "Interpreted didn't err: {}\ninterpreted: {:?}",
         snippet,
-        &interpreted,
+        interpreted,
     );
     assert!(
         compiled.is_err(),
         "Compiled didn't err: {}\ncompiled: {:?}",
         snippet,
-        &compiled,
+        compiled,
     );
 }
 
