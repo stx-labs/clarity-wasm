@@ -253,6 +253,7 @@ proptest! {
         );
     }
 
+    #[cfg(not(feature = "test-clarity-v1"))]
     #[test]
     #[ignore]
     fn contract_dynamic_call_accepts_any_args_trait_in_let(
@@ -329,6 +330,7 @@ proptest! {
         );
     }
 
+    #[cfg(not(feature = "test-clarity-v1"))]
     #[test]
     #[ignore]
     fn contract_dynamic_call_accepts_any_args_trait_in_match_some(
@@ -406,6 +408,7 @@ proptest! {
         );
     }
 
+    #[cfg(not(feature = "test-clarity-v1"))]
     #[test]
     #[ignore]
     fn contract_dynamic_call_accepts_any_args_trait_in_match_ok(
@@ -483,6 +486,7 @@ proptest! {
         );
     }
 
+    #[cfg(not(feature = "test-clarity-v1"))]
     #[test]
     #[ignore]
     fn contract_dynamic_call_accepts_any_args_trait_in_match_err(
