@@ -9,12 +9,6 @@ use crate::wasm_generator::GeneratorError;
 use crate::wasm_utils::ArgumentCountCheck;
 use crate::words::{ComplexWord, Word};
 
-/// Creates a string ASCII type with the specified length, mapping an invalid
-/// length to a `GeneratorError`.
-fn ascii_type(len: u32) -> Result<TypeSignature, GeneratorError> {
-    TypeSignature::new_ascii_type(len.into()).map_err(|e| GeneratorError::TypeError(e.to_string()))
-}
-
 #[derive(Debug)]
 pub struct ToAscii;
 
@@ -68,7 +62,7 @@ fn to_ascii_bool(
 ) -> Result<(), crate::wasm_generator::GeneratorError> {
     // we should allocate a string of size 5 in memory for either the strings "true" or "false"
     // however, we will use 8 bytes so that we can write u64 values directly to memory.
-    let (offset, _len) = generator.create_call_stack_local(builder, &ascii_type(8)?, false, true);
+    let (offset, _len) = generator.create_call_stack_bytes(builder, 8);
 
     // we traverse the argument and store the boolean result in a local
     let res = generator.borrow_local(walrus::ValType::I32);
@@ -117,7 +111,7 @@ fn to_ascii_uint(
 ) -> Result<(), crate::wasm_generator::GeneratorError> {
     // the biggest uint we could write will have the length of u128::MAX: 39 characters.
     // We also need a space for the character 'u'
-    let (offset, _len) = generator.create_call_stack_local(builder, &ascii_type(40)?, false, true);
+    let (offset, _len) = generator.create_call_stack_bytes(builder, 40);
 
     let lo = generator.borrow_local(walrus::ValType::I64);
     let hi = generator.borrow_local(walrus::ValType::I64);
@@ -173,7 +167,7 @@ fn to_ascii_int(
     let memory = generator.get_memory()?;
 
     // the biggest int we could write will have the length of i128::MIN: 40 characters, including the '-'.
-    let (offset, _len) = generator.create_call_stack_local(builder, &ascii_type(40)?, false, true);
+    let (offset, _len) = generator.create_call_stack_bytes(builder, 40);
 
     let lo = generator.borrow_local(walrus::ValType::I64);
     let hi = generator.borrow_local(walrus::ValType::I64);
@@ -402,7 +396,7 @@ fn to_ascii_buffer(
         }
     };
     let (result_offset, _len) =
-        generator.create_call_stack_local(builder, &ascii_type(2 * arg_size + 2)?, false, true);
+        generator.create_call_stack_bytes(builder, (2 * arg_size + 2) as i32);
     let result_length = generator.borrow_local(walrus::ValType::I32);
 
     let current_offset = generator.borrow_local(walrus::ValType::I32);
@@ -555,8 +549,7 @@ fn to_ascii_string_utf8(
             ))
         }
     };
-    let (result_offset, _len) =
-        generator.create_call_stack_local(builder, &ascii_type(arg_size)?, false, true);
+    let (result_offset, _len) = generator.create_call_stack_bytes(builder, arg_size as i32);
     let result_length = generator.borrow_local(walrus::ValType::I32);
 
     let current_offset = generator.borrow_local(walrus::ValType::I32);
@@ -658,13 +651,9 @@ fn to_ascii_principal(
     _expr: &clarity::vm::SymbolicExpression,
     arg: &clarity::vm::SymbolicExpression,
 ) -> Result<(), crate::wasm_generator::GeneratorError> {
-    let (result_offset, length) = generator.create_call_stack_local(
-        builder,
-        // size is 41 for the max size of a standard contract + the dot + the max len of a contract name
-        &ascii_type(41 + 1 + MAX_STRING_LEN as u32)?,
-        false,
-        true,
-    );
+    // size is 41 for the max size of a standard contract + the dot + the max len of a contract name
+    let (result_offset, length) =
+        generator.create_call_stack_bytes(builder, 41 + 1 + MAX_STRING_LEN as i32);
 
     let principal_to_string_ascii = generator.func_by_name("stdlib.principal_to_string_ascii");
 
