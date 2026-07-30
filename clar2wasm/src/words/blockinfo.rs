@@ -990,7 +990,10 @@ mod tests {
                             ])
                             .unwrap()
                         ),
-                        (clarity_types::ClarityName::from_literal("payout"), Value::UInt(0))
+                        (
+                            clarity_types::ClarityName::from_literal("payout"),
+                            Value::UInt(0)
+                        )
                     ])
                     .unwrap()
                     .into()
@@ -1000,7 +1003,12 @@ mod tests {
         );
     }
 
-    #[cfg(any(feature = "test-clarity-v1", feature = "test-clarity-v2", feature = "test-clarity-v3", feature = "test-clarity-v4"))]
+    #[cfg(any(
+        feature = "test-clarity-v1",
+        feature = "test-clarity-v2",
+        feature = "test-clarity-v3",
+        feature = "test-clarity-v4"
+    ))]
     #[test]
     fn at_block_less_than_two_args() {
         use crate::tools::TestConfig;
@@ -1017,7 +1025,12 @@ mod tests {
             .contains("expecting 2 arguments, got 1"));
     }
 
-    #[cfg(any(feature = "test-clarity-v1", feature = "test-clarity-v2", feature = "test-clarity-v3", feature = "test-clarity-v4"))]
+    #[cfg(any(
+        feature = "test-clarity-v1",
+        feature = "test-clarity-v2",
+        feature = "test-clarity-v3",
+        feature = "test-clarity-v4"
+    ))]
     #[test]
     fn at_block_more_than_two_args() {
         use crate::tools::TestConfig;
