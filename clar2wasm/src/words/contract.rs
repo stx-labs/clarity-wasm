@@ -838,10 +838,7 @@ mod tests {
     use clarity::vm::Value;
     use clarity_types::ContractName;
 
-    #[allow(unused_imports)]
-    use crate::tools::{
-        crosscheck_multi_contract, crosscheck_multi_contract_with_env, TestEnvironment,
-    };
+    use crate::tools::{crosscheck_multi_contract_with_env, TestEnvironment};
 
     #[cfg(not(feature = "test-clarity-v4"))]
     mod clarity_v1_v2_v3 {
@@ -1489,7 +1486,7 @@ mod tests {
             (call-do-it (some .foo-impl))
             ";
 
-        crosscheck_multi_contract(
+        crate::tools::crosscheck_multi_contract(
             &[
                 (ContractName::from_literal("foo"), foo_trait),
                 (ContractName::from_literal("foo-impl"), foo_impl),
@@ -1534,7 +1531,7 @@ mod tests {
 
         let bar = "(contract-call? .call-foo call-do-it (some .foo-impl))";
 
-        crosscheck_multi_contract(
+        crate::tools::crosscheck_multi_contract(
             &[
                 (ContractName::from_literal("foo"), foo_trait),
                 (ContractName::from_literal("foo-impl"), foo_impl),
@@ -1590,7 +1587,7 @@ mod tests {
         use clarity_types::ClarityName;
 
         use super::*;
-        use crate::tools::{crosscheck, evaluate};
+        use crate::tools::{crosscheck, crosscheck_multi_contract, evaluate};
 
         #[test]
         fn as_contract_safe_switches_sender_and_caller() {

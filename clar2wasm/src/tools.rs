@@ -746,17 +746,7 @@ pub fn crosscheck_with_epoch(
     expected: Result<Option<Value>, VmExecutionError>,
     epoch: StacksEpochId,
 ) {
-    if let Some(eval) = execute_crosscheck(
-        TestEnvironment::new(epoch, TestConfig::clarity_version()),
-        snippet,
-        |_| {},
-    ) {
-        assert_eq!(
-            eval.compiled, expected,
-            "value is not the expected {:?}",
-            eval.compiled
-        );
-    }
+    crosscheck_with_epoch_and_version(snippet, expected, epoch, TestConfig::clarity_version());
 }
 
 pub fn crosscheck_with_epoch_and_version(
