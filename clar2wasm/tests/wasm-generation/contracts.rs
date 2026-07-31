@@ -18,7 +18,6 @@ proptest! {
     #![proptest_config(super::runtime_config())]
 
     #[test]
-    #[ignore]
     fn contract_call_accepts_any_args(
         (tys, values)
             in prop::collection::vec(
@@ -65,7 +64,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore]
     fn contract_call_returns_any_value_from_argument(
         (ty, value) in prop_signature().prop_ind_flat_map2(|ty| PropValue::from_type(ty.clone())).no_shrink()
     ) {
@@ -97,7 +95,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore]
     fn contract_call_can_use_all_arguments(
         (tys, values)
             in prop::collection::vec(
@@ -255,7 +252,6 @@ proptest! {
 
     #[cfg(not(feature = "test-clarity-v1"))]
     #[test]
-    #[ignore]
     fn contract_dynamic_call_accepts_any_args_trait_in_let(
         (tys, values)
             in prop::collection::vec(
@@ -332,7 +328,6 @@ proptest! {
 
     #[cfg(not(feature = "test-clarity-v1"))]
     #[test]
-    #[ignore]
     fn contract_dynamic_call_accepts_any_args_trait_in_match_some(
         (tys, values)
             in prop::collection::vec(
@@ -410,7 +405,6 @@ proptest! {
 
     #[cfg(not(feature = "test-clarity-v1"))]
     #[test]
-    #[ignore]
     fn contract_dynamic_call_accepts_any_args_trait_in_match_ok(
         (tys, values)
             in prop::collection::vec(
@@ -488,7 +482,6 @@ proptest! {
 
     #[cfg(not(feature = "test-clarity-v1"))]
     #[test]
-    #[ignore]
     fn contract_dynamic_call_accepts_any_args_trait_in_match_err(
         (tys, values)
             in prop::collection::vec(
@@ -734,7 +727,6 @@ proptest! {
     #![proptest_config(super::runtime_config())]
 
     #[test]
-    #[ignore]
     fn contract_call_no_oom_one_arg(
         (ty, val) in prop_signature().prop_ind_flat_map2(PropValue::from_type)
     ) {
@@ -773,7 +765,6 @@ proptest! {
     }
 
    #[test]
-   #[ignore]
     fn contract_call_no_oom_many_arg(
         (types, values) in
             prop::collection::vec(
