@@ -838,9 +838,7 @@ mod tests {
     use clarity::vm::Value;
     use clarity_types::ContractName;
 
-    use crate::tools::{
-        crosscheck_multi_contract, crosscheck_multi_contract_with_env, TestEnvironment,
-    };
+    use crate::tools::{crosscheck_multi_contract_with_env, TestEnvironment};
 
     #[cfg(not(feature = "test-clarity-v4"))]
     mod clarity_v1_v2_v3 {
@@ -1455,6 +1453,8 @@ mod tests {
         assert_eq!(val.unwrap(), Value::Int(-123));
     }
 
+    // Not run in v1 because at that point traits could not be used in all the places where a built-in type could
+    #[cfg(not(feature = "test-clarity-v1"))]
     #[test]
     fn multi_dynamic_define_impl_call() {
         let foo_trait = "
@@ -1486,7 +1486,7 @@ mod tests {
             (call-do-it (some .foo-impl))
             ";
 
-        crosscheck_multi_contract(
+        crate::tools::crosscheck_multi_contract(
             &[
                 (ContractName::from_literal("foo"), foo_trait),
                 (ContractName::from_literal("foo-impl"), foo_impl),
@@ -1498,6 +1498,8 @@ mod tests {
 
     /// This is the same test as [multi_dynamic_define_impl_call], but it checks that it still works
     /// when we deal with the linked functions defined in stacks-core (duplication issue).
+    // Not run in v1 because at that point traits could not be used in all the places where a built-in type could
+    #[cfg(not(feature = "test-clarity-v1"))]
     #[test]
     fn multi_dynamic_define_impl_call_duplication_issue() {
         let foo_trait = "
@@ -1529,7 +1531,7 @@ mod tests {
 
         let bar = "(contract-call? .call-foo call-do-it (some .foo-impl))";
 
-        crosscheck_multi_contract(
+        crate::tools::crosscheck_multi_contract(
             &[
                 (ContractName::from_literal("foo"), foo_trait),
                 (ContractName::from_literal("foo-impl"), foo_impl),
@@ -1585,7 +1587,7 @@ mod tests {
         use clarity_types::ClarityName;
 
         use super::*;
-        use crate::tools::{crosscheck, evaluate};
+        use crate::tools::{crosscheck, crosscheck_multi_contract, evaluate};
 
         #[test]
         fn as_contract_safe_switches_sender_and_caller() {

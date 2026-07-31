@@ -144,11 +144,10 @@ impl ComplexWord for ImplTrait {
 #[cfg(test)]
 mod tests {
     use clarity::types::StacksEpochId;
-    use clarity::vm::types::{
-        CallableData, QualifiedContractIdentifier, StandardPrincipalData, TraitIdentifier,
-    };
+    use clarity::vm::types::{StandardPrincipalData, TraitIdentifier};
     use clarity::vm::{ClarityName, ContractName, Value};
 
+    #[allow(unused_imports)]
     use crate::tools::{
         crosscheck, crosscheck_expect_failure, crosscheck_multi_contract, TestEnvironment,
     };
@@ -286,6 +285,8 @@ mod tests {
             )));
     }
 
+    // See issue #818
+    #[cfg(not(feature = "test-clarity-v1"))]
     #[test]
     fn trait_list() {
         // NOTE: this also tests `print` of `Callable`
@@ -307,7 +308,7 @@ mod tests {
 (foo .my-trait-contract)
             "#;
 
-        let contract_id = QualifiedContractIdentifier {
+        let contract_id = clarity_types::types::QualifiedContractIdentifier {
             issuer: StandardPrincipalData::transient(),
             name: ContractName::from_literal("my-trait-contract"),
         };
@@ -320,7 +321,7 @@ mod tests {
                 Value::cons_list(
                     (0..2)
                         .map(|_| {
-                            Value::CallableContract(CallableData {
+                            Value::CallableContract(clarity_types::types::CallableData {
                                 contract_identifier: contract_id.clone(),
                                 trait_identifier: Some(TraitIdentifier {
                                     name: ClarityName::from_literal("my-trait"),

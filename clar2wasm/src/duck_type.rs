@@ -370,8 +370,10 @@ mod tests {
         ListTypeData, ResponseData, SequenceSubtype, TupleData, TupleTypeSignature, TypeSignature,
     };
     use clarity::vm::{ClarityName, Value};
+    #[allow(unused_imports)]
     use clarity_types::ContractName;
 
+    #[allow(unused_imports)]
     use crate::tools::crosscheck_multi_contract;
     use crate::wasm_generator::WasmGenerator;
 
@@ -621,6 +623,8 @@ mod tests {
         duck_type_test(&value, &og_ty, &target_ty);
     }
 
+    // The redefinition of t with type foo-trait clashes with definition of the trait t in foo contract for clarity v1
+    #[cfg(not(feature = "test-clarity-v1"))]
     #[test]
     fn duck_typing_principal_and_callable() {
         let foo = "

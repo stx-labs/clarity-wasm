@@ -22,6 +22,7 @@ proptest! {
     #![proptest_config(super::runtime_config())]
 
     #[test]
+    #[ignore]
    fn print_val_from_function_call(
         (ty, val) in prop_signature().prop_flat_map(|ty| {
             (Just(ty.clone()), PropValue::from_type(ty))

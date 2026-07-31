@@ -2306,7 +2306,7 @@ mod tests {
         assert!(crate::tools::evaluate_at(
             snippet,
             clarity::types::StacksEpochId::Epoch20,
-            clarity::vm::version::ClarityVersion::latest(),
+            clarity::vm::version::ClarityVersion::Clarity1,
         )
         .is_ok());
     }
