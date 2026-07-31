@@ -2214,7 +2214,6 @@ mod tests {
     use clarity_types::{ClarityName, ContractName};
     use walrus::Module;
 
-    use crate::tools::crosscheck_multi_contract;
     // Tests that don't relate to specific words
     use crate::{
         compile,
@@ -2477,7 +2476,7 @@ mod tests {
             ])
             .unwrap(),
         )));
-        crosscheck_multi_contract(&[callee, caller], expected);
+        crate::tools::crosscheck_multi_contract(&[callee, caller], expected);
     }
 
     #[cfg(feature = "test-clarity-v1")]
@@ -2511,6 +2510,6 @@ mod tests {
             ))
             .unwrap(),
         ));
-        crosscheck_multi_contract(&[callee, caller], expected);
+        crate::tools::crosscheck_multi_contract(&[callee, caller], expected);
     }
 }
