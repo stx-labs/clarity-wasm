@@ -14,7 +14,7 @@ sha2 = { version = "0.10.7" }
 chrono = { version = "0.4.20" }
 rusqlite = { version = "0.31.0" }
 
-clarity = { git="https://github.com/stacks-network/stacks-core", branch="feat/clarity-wasm-develop", features = ["testing"] }
+clarity = { git="https://github.com/stacks-network/stacks-core", branch="feat/clarity-wasm-develop" }
 stacks-common = { git="https://github.com/stacks-network/stacks-core", branch="feat/clarity-wasm-develop" }
 clarity-types = { git="https://github.com/stacks-network/stacks-core", branch="feat/clarity-wasm-develop" }
 
