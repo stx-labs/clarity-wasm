@@ -142,7 +142,7 @@ impl std::fmt::Display for PropValue {
             ))) => {
                 write!(f, "\"")?;
                 for b in data {
-                    if [b'\\', b'"'].contains(b) {
+                    if b"\\\"".contains(b) {
                         write!(f, "\\")?;
                     }
                     write!(f, "{}", *b as char)?;

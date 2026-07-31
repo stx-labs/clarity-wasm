@@ -411,13 +411,13 @@ impl ComplexWord for GetTenureInfo {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use clarity::types::StacksEpochId;
     use clarity::vm::errors::VmExecutionError;
-    use clarity::vm::types::{OptionalData, PrincipalData, TupleData};
     use clarity::vm::{ClarityVersion, Value};
-    use clarity_types::ClarityName;
 
-    use crate::tools::{evaluate, TestEnvironment};
+    use crate::tools::{evaluate, evaluate_at, TestEnvironment};
 
     #[cfg(any(
         feature = "test-clarity-v1",
@@ -426,15 +426,15 @@ mod tests {
     ))]
     #[cfg(test)]
     mod clarity_v1_v2_v3 {
+        use clarity::types::StacksEpochId;
         use clarity::vm::errors::EarlyReturnError::UnwrapFailed;
         use clarity::vm::errors::VmExecutionError::EarlyReturn;
         use clarity_types::types::ResponseData;
         use clarity_types::Value::{self, Response};
 
-        use crate::tools::crosscheck;
+        use crate::tools::{crosscheck_with_epoch_and_version, TestConfig};
 
         #[test]
-        #[ignore = "test system needs to be improved relative to versioning and epochs"]
         fn at_block_needs_cleanup() {
             let snippet = "
                 (define-private (foo)
@@ -445,11 +445,16 @@ mod tests {
                 (foo)
             ";
 
-            crosscheck(snippet, Ok(Some(Value::err_uint(42))));
+            // This test is fixed to epoch 3.3 because the at_block removal is epoch gated
+            crosscheck_with_epoch_and_version(
+                snippet,
+                Ok(Some(Value::err_uint(42))),
+                StacksEpochId::Epoch33,
+                TestConfig::clarity_version(),
+            );
         }
 
         #[test]
-        #[ignore = "test system needs to be improved relative to versioning and epochs"]
         fn at_block_needs_cleanup_top_level() {
             let snippet = "
                 (at-block 0x0000000000000000000000000000000000000000000000000000000000000000
@@ -457,7 +462,7 @@ mod tests {
                 )
             ";
 
-            crosscheck(
+            crosscheck_with_epoch_and_version(
                 snippet,
                 Err(EarlyReturn(UnwrapFailed(Box::new(Response(
                     ResponseData {
@@ -465,6 +470,8 @@ mod tests {
                         data: Box::new(clarity_types::Value::UInt(42)),
                     },
                 ))))),
+                StacksEpochId::Epoch33,
+                TestConfig::clarity_version(),
             );
         }
     }
@@ -480,15 +487,11 @@ mod tests {
         use clarity::vm::ClarityVersion;
 
         use super::*;
-        use crate::tools::crosscheck_with_epoch;
+        use crate::tools::{crosscheck, crosscheck_with_epoch_and_version, TestConfig};
 
         #[test]
         fn get_block_info_non_existent() {
-            crosscheck_with_epoch(
-                "(get-block-info? time u9999999)",
-                Ok(Some(Value::none())),
-                StacksEpochId::Epoch25,
-            );
+            crosscheck("(get-block-info? time u9999999)", Ok(Some(Value::none())));
         }
 
         #[test]
@@ -501,24 +504,22 @@ mod tests {
                 (ok burn-block-height))
             ";
 
-            crosscheck_with_epoch(
+            crosscheck_with_epoch_and_version(
                 &format!("{snpt} (block)"),
                 evaluate("(ok u0)"),
-                StacksEpochId::Epoch24,
+                StacksEpochId::Epoch25,
+                TestConfig::clarity_version(),
             );
-            crosscheck_with_epoch(
-                &format!("{snpt} (burn-block)"),
-                evaluate("(ok u0)"),
-                StacksEpochId::Epoch24,
-            );
+            crosscheck(&format!("{snpt} (burn-block)"), evaluate("(ok u0)"));
         }
 
         #[test]
         fn at_block() {
-            crosscheck_with_epoch(
+            crosscheck_with_epoch_and_version(
                 "(at-block 0x0000000000000000000000000000000000000000000000000000000000000000 block-height)",
                 Ok(Some(Value::UInt(0xFFFFFFFF))),
                 StacksEpochId::Epoch24,
+                TestConfig::clarity_version()
             )
         }
 
@@ -553,7 +554,7 @@ mod tests {
             let expected = Err(VmExecutionError::RuntimeCheck(
                 clarity::vm::errors::RuntimeCheckErrorKind::IncorrectArgumentCount(2, 3),
             ));
-            crosscheck_with_epoch(snippet, expected, StacksEpochId::Epoch24);
+            crosscheck(snippet, expected);
         }
     }
 
@@ -567,14 +568,15 @@ mod tests {
         use clarity::vm::ClarityVersion;
 
         use super::*;
-        use crate::tools::{crosscheck_with_env, crosscheck_with_epoch};
+        use crate::tools::{crosscheck_with_env, crosscheck_with_epoch_and_version, TestConfig};
 
         //- At Block
         #[test]
         fn at_block_with_stacks_block_height() {
-            crosscheck_with_epoch("(at-block 0x0000000000000000000000000000000000000000000000000000000000000000 stacks-block-height)",
+            crosscheck_with_epoch_and_version("(at-block 0x0000000000000000000000000000000000000000000000000000000000000000 stacks-block-height)",
                 Ok(Some(Value::UInt(0xFFFFFFFF))),
                 StacksEpochId::Epoch30,
+                TestConfig::clarity_version()
             )
         }
 
@@ -697,7 +699,8 @@ mod tests {
             // get_miner_address function the return value should be the same.
             let expected = Ok(Some(
                 Value::some(Value::Principal(
-                    PrincipalData::parse("ST000000000000000000002AMW42H").unwrap(),
+                    clarity_types::types::PrincipalData::parse("ST000000000000000000002AMW42H")
+                        .unwrap(),
                 ))
                 .unwrap(),
             ));
@@ -844,7 +847,8 @@ mod tests {
             result,
             Some(
                 Value::some(Value::Principal(
-                    PrincipalData::parse("ST000000000000000000002AMW42H").unwrap()
+                    clarity_types::types::PrincipalData::parse("ST000000000000000000002AMW42H")
+                        .unwrap()
                 ))
                 .unwrap()
             )
@@ -866,7 +870,7 @@ mod tests {
             .evaluate("(get-block-info? time u0)")
             .expect("Failed to init contract.");
         let block_time_val = match result {
-            Some(Value::Optional(OptionalData { data: Some(data) })) => *data,
+            Some(Value::Optional(clarity_types::types::OptionalData { data: Some(data) })) => *data,
             _ => panic!("expected value"),
         };
         let block_time = match block_time_val {
@@ -955,6 +959,7 @@ mod tests {
             .contains("expecting 2 arguments, got 3"));
     }
 
+    #[cfg(not(feature = "test-clarity-v1"))]
     #[test]
     fn get_burn_block_info_pox_addrs() {
         let mut env = TestEnvironment::default();
@@ -966,24 +971,29 @@ mod tests {
             result,
             Some(
                 Value::some(
-                    TupleData::from_data(vec![
+                    clarity_types::types::TupleData::from_data(vec![
                         (
-                            ClarityName::from_literal("addrs"),
-                            Value::cons_list_unsanitized(vec![TupleData::from_data(vec![
-                                (
-                                    ClarityName::from_literal("hashbytes"),
-                                    Value::buff_from([0; 32].to_vec()).unwrap()
-                                ),
-                                (
-                                    ClarityName::from_literal("version"),
-                                    Value::buff_from_byte(0)
-                                )
+                            clarity_types::ClarityName::from_literal("addrs"),
+                            Value::cons_list_unsanitized(vec![
+                                clarity_types::types::TupleData::from_data(vec![
+                                    (
+                                        clarity_types::ClarityName::from_literal("hashbytes"),
+                                        Value::buff_from([0; 32].to_vec()).unwrap()
+                                    ),
+                                    (
+                                        clarity_types::ClarityName::from_literal("version"),
+                                        Value::buff_from_byte(0)
+                                    )
+                                ])
+                                .unwrap()
+                                .into()
                             ])
                             .unwrap()
-                            .into()])
-                            .unwrap()
                         ),
-                        (ClarityName::from_literal("payout"), Value::UInt(0))
+                        (
+                            clarity_types::ClarityName::from_literal("payout"),
+                            Value::UInt(0)
+                        )
                     ])
                     .unwrap()
                     .into()
@@ -993,11 +1003,20 @@ mod tests {
         );
     }
 
+    #[cfg(any(
+        feature = "test-clarity-v1",
+        feature = "test-clarity-v2",
+        feature = "test-clarity-v3",
+        feature = "test-clarity-v4"
+    ))]
     #[test]
-    #[ignore = "test system needs to be improved relative to versioning and epochs"]
     fn at_block_less_than_two_args() {
-        let result = evaluate(
+        use crate::tools::TestConfig;
+
+        let result = evaluate_at(
             "(at-block 0xb5e076ab7609c7f8c763b5c571d07aea80b06b41452231b1437370f4964ed66e)",
+            StacksEpochId::Epoch33,
+            TestConfig::clarity_version(),
         );
         assert!(result.is_err());
         assert!(result
@@ -1006,11 +1025,20 @@ mod tests {
             .contains("expecting 2 arguments, got 1"));
     }
 
+    #[cfg(any(
+        feature = "test-clarity-v1",
+        feature = "test-clarity-v2",
+        feature = "test-clarity-v3",
+        feature = "test-clarity-v4"
+    ))]
     #[test]
-    #[ignore = "test system needs to be improved relative to versioning and epochs"]
     fn at_block_more_than_two_args() {
-        let result = evaluate(
+        use crate::tools::TestConfig;
+
+        let result = evaluate_at(
             "(at-block 0xb5e076ab7609c7f8c763b5c571d07aea80b06b41452231b1437370f4964ed66e u0 u0)",
+            StacksEpochId::Epoch33,
+            TestConfig::clarity_version(),
         );
         assert!(result.is_err());
         assert!(result
@@ -1020,18 +1048,19 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "test system needs to be improved relative to versioning and epochs"]
     fn at_block_var() {
-        let e = evaluate(
+        let e = evaluate_at(
                 "
 (define-data-var data int 1)
 (at-block 0xb5e076ab7609c7f8c763b5c571d07aea80b06b41452231b1437370f4964ed66e (var-get data)) ;; block 0
 ",
-            )
+            StacksEpochId::Epoch33,
+            ClarityVersion::Clarity4
+        )
             .unwrap_err();
-        assert_eq!(
+        assert_matches!(
             e,
-            VmExecutionError::Wasm(clarity::vm::errors::WasmError::DefineFunctionCalledInRunMode,),
+            VmExecutionError::Wasm(clarity::vm::errors::WasmError::NotInDatabase(s)) if s.eq("Value data")
         );
     }
 

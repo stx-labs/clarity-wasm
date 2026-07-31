@@ -2556,7 +2556,7 @@ mod tests {
     #[test]
     fn map_repeated() {
         crosscheck(
-            &"(map + (list 1 2 3) (list 1 2 3) (list 1 2 3))".repeat(700),
+            &"(map + (list 1 2 3) (list 1 2 3) (list 1 2 3)) ".repeat(700),
             Ok(Some(
                 Value::cons_list_unsanitized(vec![Value::Int(3), Value::Int(6), Value::Int(9)])
                     .unwrap(),
