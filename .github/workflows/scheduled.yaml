@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        clarity_version: [1, 2, 3]
+        clarity_version: [1, 2, 3, 4, 5]
     name: Clarity::V${{ matrix.clarity_version }} Property Tests
     env:
       PROPTEST_CASES: 100

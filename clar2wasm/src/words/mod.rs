@@ -34,6 +34,7 @@ pub mod principal;
 pub mod print;
 pub mod responses;
 pub mod secp256k1;
+pub mod secp256r1;
 pub mod sequences;
 pub mod stx;
 pub mod to_ascii;
@@ -115,6 +116,7 @@ pub(crate) static COMPLEX_WORDS: &[&'static dyn ComplexWord] = &[
     &responses::IsOk,
     &secp256k1::Recover,
     &secp256k1::Verify,
+    &secp256r1::Verify,
     &sequences::Append,
     &sequences::AsMaxLen,
     &sequences::Concat,

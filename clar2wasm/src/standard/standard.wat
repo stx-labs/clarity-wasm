@@ -315,6 +315,24 @@
                                                                  (param $pk_offset i32)
                                                                  (param $pk_length i32)
                                                                  (result i32)))
+
+    (import "clarity" "secp256r1_verify_double_hash" (func $stdlib.secp256r1_verify_double_hash 
+                                                                 (param $msg_offset i32)
+                                                                 (param $msg_length i32)
+                                                                 (param $sig_offset i32)
+                                                                 (param $sig_length i32)
+                                                                 (param $pk_offset i32)
+                                                                 (param $pk_length i32)
+                                                                 (result i32)))
+
+    (import "clarity" "secp256r1_verify_simple_hash" (func $stdlib.secp256r1_verify_simple_hash
+                                                                 (param $msg_offset i32)
+                                                                 (param $msg_length i32)
+                                                                 (param $sig_offset i32)
+                                                                 (param $sig_length i32)
+                                                                 (param $pk_offset i32)
+                                                                 (param $pk_length i32)
+                                                                 (result i32)))
     (import "clarity" "principal_of" (func $stdlib.principal_of (param $key_offset i32)
                                                                 (param $key_length i32)
                                                                 (param $principal_offset i32)
