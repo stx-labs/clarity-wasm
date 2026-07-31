@@ -208,7 +208,6 @@ mod tests {
     /// (*double hashing*).
     #[cfg(feature = "test-clarity-v4")]
     mod clarity_v4 {
-        use clarity::types::StacksEpochId;
         use clarity::util::hash::to_hex;
         use clarity::util::secp256r1::{Secp256r1PrivateKey, Secp256r1PublicKey};
         use clarity::vm::errors::{RuntimeCheckErrorKind, VmExecutionError};
@@ -217,22 +216,14 @@ mod tests {
         };
         use clarity::vm::Value;
 
-        use crate::tools::crosscheck_with_epoch;
-
-        // TODO Remove this
-        /// Epoch 33 is the latest epoch that still accepts Clarity 4;
-        /// the `test-clarity-v4` feature makes `crosscheck_with_epoch`
-        /// resolve the version to Clarity 4.
-        fn crosscheck_v4(snippet: &str, expected: Result<Option<Value>, VmExecutionError>) {
-            crosscheck_with_epoch(snippet, expected, StacksEpochId::Epoch33);
-        }
+        use crate::tools::crosscheck;
 
         #[test]
         fn message_too_short() {
             let short_msg = vec![0xabu8; 31];
             let sig = vec![0u8; 64];
             let pubkey = vec![0u8; 33];
-            crosscheck_v4(
+            crosscheck(
                 &format!(
                     "(secp256r1-verify 0x{} 0x{} 0x{})",
                     to_hex(&short_msg),
@@ -258,7 +249,7 @@ mod tests {
             let msg = vec![0u8; 32];
             let short_sig = vec![0u8; 63];
             let pubkey = vec![0u8; 33];
-            crosscheck_v4(
+            crosscheck(
                 &format!(
                     "(secp256r1-verify 0x{} 0x{} 0x{})",
                     to_hex(&msg),
@@ -274,7 +265,7 @@ mod tests {
             let msg = vec![0u8; 32];
             let sig = vec![0u8; 64];
             let short_pubkey = vec![0xcdu8; 32];
-            crosscheck_v4(
+            crosscheck(
                 &format!(
                     "(secp256r1-verify 0x{} 0x{} 0x{})",
                     to_hex(&msg),
@@ -300,7 +291,7 @@ mod tests {
             let msg = [0x11u8; 32];
             // `sign` double-hashes, matching the Clarity 4 verification.
             let sig = privk.sign(&msg).unwrap();
-            crosscheck_v4(
+            crosscheck(
                 &format!(
                     "(secp256r1-verify 0x{} 0x{} 0x{})",
                     to_hex(&msg),
@@ -318,7 +309,7 @@ mod tests {
             let msg = [0x11u8; 32];
             let sig = privk.sign(&msg).unwrap();
             let wrong_msg = [0x22u8; 32];
-            crosscheck_v4(
+            crosscheck(
                 &format!(
                     "(secp256r1-verify 0x{} 0x{} 0x{})",
                     to_hex(&wrong_msg),
@@ -336,7 +327,7 @@ mod tests {
             let sig = privk.sign(&msg).unwrap();
             let other_pub =
                 Secp256r1PublicKey::from_private(&Secp256r1PrivateKey::from_seed(&[2u8; 32]));
-            crosscheck_v4(
+            crosscheck(
                 &format!(
                     "(secp256r1-verify 0x{} 0x{} 0x{})",
                     to_hex(&msg),
@@ -355,7 +346,7 @@ mod tests {
             let pubk = Secp256r1PublicKey::from_private(&privk);
             let msg = [0x11u8; 32];
             let sig = privk.sign_digest(&msg).unwrap();
-            crosscheck_v4(
+            crosscheck(
                 &format!(
                     "(secp256r1-verify 0x{} 0x{} 0x{})",
                     to_hex(&msg),
