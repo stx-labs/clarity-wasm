@@ -1575,6 +1575,174 @@ mod tests {
         );
     }
 
+    /// Tests for the runtime checks performed by `contract-call?` for
+    /// dynamic dispatch, mirroring the interpreter's checks in
+    /// `special_contract_call`.
+    ///
+    /// Passing a non-conforming contract as a trait argument is caught by
+    /// the static analysis when the argument appears in the source code, so
+    /// these tests instead call a public function directly, with the trait
+    /// argument passed as a value (as a transaction would), ensuring that
+    /// the runtime checks are actually exercised.
+    mod dynamic_dispatch_runtime_checks {
+        use clarity::vm::errors::{RuntimeCheckErrorKind, VmExecutionError};
+        use clarity::vm::types::{
+            CallableData, QualifiedContractIdentifier, StandardPrincipalData, TraitIdentifier,
+            TypeSignature,
+        };
+        use clarity::vm::Value;
+        use clarity_types::{ClarityName, ContractName};
+
+        use crate::tools::crosscheck_multi_contract_call_public;
+
+        /// Defines `test-trait`.
+        const TRAIT_DEF: &str = "(define-trait test-trait ((get-1 (uint) (response uint uint))))";
+
+        /// Dispatches `get-1` on the trait argument. Also implements the
+        /// trait itself, so that dispatching to this contract fails due to
+        /// the circular reference, and nothing else.
+        const DISPATCHER: &str = "
+            (use-trait test-trait .trait-def.test-trait)
+            (define-public (wrapped-get-1 (contract <test-trait>))
+                (contract-call? contract get-1 u0))
+            (define-public (get-1 (x uint)) (ok u1))";
+
+        fn contract_id(name: &'static str) -> QualifiedContractIdentifier {
+            QualifiedContractIdentifier::new(
+                StandardPrincipalData::transient(),
+                ContractName::from_literal(name),
+            )
+        }
+
+        /// Build a `test-trait` value referencing the given contract, as the
+        /// transaction-processing path does for trait arguments.
+        fn trait_value(name: &'static str) -> Value {
+            Value::CallableContract(CallableData {
+                contract_identifier: contract_id(name),
+                trait_identifier: Some(TraitIdentifier {
+                    name: ClarityName::from_literal("test-trait"),
+                    contract_identifier: contract_id("trait-def"),
+                }),
+            })
+        }
+
+        /// Deploy the dispatching contract and a target contract, then call
+        /// `wrapped-get-1`, passing the target contract as the trait
+        /// argument.
+        fn crosscheck_dispatch_to_target(target: &str, expected: Result<Value, VmExecutionError>) {
+            crosscheck_multi_contract_call_public(
+                &[
+                    (ContractName::from_literal("trait-def"), TRAIT_DEF),
+                    (ContractName::from_literal("dispatcher"), DISPATCHER),
+                    (ContractName::from_literal("target"), target),
+                ],
+                ("dispatcher", "wrapped-get-1", &[trait_value("target")]),
+                expected,
+            );
+        }
+
+        #[test]
+        fn conforming_implementation_succeeds() {
+            crosscheck_dispatch_to_target(
+                "(define-public (get-1 (x uint)) (ok u1))",
+                Ok(Value::okay(Value::UInt(1)).unwrap()),
+            );
+        }
+
+        #[test]
+        fn explicit_implementation_short_circuits_checks() {
+            crosscheck_dispatch_to_target(
+                "(impl-trait .trait-def.test-trait)
+                 (define-public (get-1 (x uint)) (ok u1))",
+                Ok(Value::okay(Value::UInt(1)).unwrap()),
+            );
+        }
+
+        #[test]
+        fn missing_function_is_bad_trait_implementation() {
+            crosscheck_dispatch_to_target(
+                "(define-public (get-2 (x uint)) (ok u1))",
+                Err(VmExecutionError::RuntimeCheck(
+                    RuntimeCheckErrorKind::BadTraitImplementation(
+                        "test-trait".to_string(),
+                        "get-1".to_string(),
+                    ),
+                )),
+            );
+        }
+
+        #[test]
+        fn mismatched_args_is_bad_trait_implementation() {
+            crosscheck_dispatch_to_target(
+                "(define-public (get-1 (x int)) (ok u1))",
+                Err(VmExecutionError::RuntimeCheck(
+                    RuntimeCheckErrorKind::BadTraitImplementation(
+                        "test-trait".to_string(),
+                        "get-1".to_string(),
+                    ),
+                )),
+            );
+        }
+
+        #[test]
+        fn mismatched_return_types_must_match() {
+            let expected_ty =
+                TypeSignature::new_response(TypeSignature::UIntType, TypeSignature::UIntType)
+                    .unwrap();
+            let actual_ty = TypeSignature::type_of(&Value::okay(Value::Int(1)).unwrap()).unwrap();
+            crosscheck_dispatch_to_target(
+                "(define-public (get-1 (x uint)) (ok 1))",
+                Err(VmExecutionError::RuntimeCheck(
+                    RuntimeCheckErrorKind::ReturnTypesMustMatch(
+                        Box::new(expected_ty),
+                        Box::new(actual_ty),
+                    ),
+                )),
+            );
+        }
+
+        #[test]
+        fn private_function_is_no_such_public_function() {
+            crosscheck_dispatch_to_target(
+                "(define-private (get-1 (x uint)) (ok u1))",
+                Err(VmExecutionError::RuntimeCheck(
+                    RuntimeCheckErrorKind::NoSuchPublicFunction(
+                        contract_id("target").to_string(),
+                        "get-1".to_string(),
+                    ),
+                )),
+            );
+        }
+
+        #[test]
+        fn nonexistent_contract_is_no_such_contract() {
+            crosscheck_multi_contract_call_public(
+                &[
+                    (ContractName::from_literal("trait-def"), TRAIT_DEF),
+                    (ContractName::from_literal("dispatcher"), DISPATCHER),
+                ],
+                ("dispatcher", "wrapped-get-1", &[trait_value("nonexistent")]),
+                Err(VmExecutionError::RuntimeCheck(
+                    RuntimeCheckErrorKind::NoSuchContract(contract_id("nonexistent").to_string()),
+                )),
+            );
+        }
+
+        #[test]
+        fn dispatch_to_self_is_circular_reference() {
+            crosscheck_multi_contract_call_public(
+                &[
+                    (ContractName::from_literal("trait-def"), TRAIT_DEF),
+                    (ContractName::from_literal("dispatcher"), DISPATCHER),
+                ],
+                ("dispatcher", "wrapped-get-1", &[trait_value("dispatcher")]),
+                Err(VmExecutionError::RuntimeCheck(
+                    RuntimeCheckErrorKind::CircularReference(vec!["dispatcher".to_string()]),
+                )),
+            );
+        }
+    }
+
     #[cfg(not(any(
         feature = "test-clarity-v1",
         feature = "test-clarity-v2",
