@@ -1581,9 +1581,10 @@ mod tests {
     ///
     /// Passing a non-conforming contract as a trait argument is caught by
     /// the static analysis when the argument appears in the source code, so
-    /// these tests instead call a public function directly, with the trait
-    /// argument passed as a value (as a transaction would), ensuring that
-    /// the runtime checks are actually exercised.
+    /// these tests instead pass the trait argument as a value through
+    /// `ExecutionState::execute_contract`, the same stacks-core entry point
+    /// used by transaction processing, ensuring that the runtime checks are
+    /// actually exercised.
     mod dynamic_dispatch_runtime_checks {
         use clarity::vm::errors::{RuntimeCheckErrorKind, VmExecutionError};
         use clarity::vm::types::{
@@ -1593,7 +1594,7 @@ mod tests {
         use clarity::vm::Value;
         use clarity_types::{ClarityName, ContractName};
 
-        use crate::tools::crosscheck_multi_contract_call_public;
+        use crate::tools::crosscheck_multi_contract_execute_public;
 
         /// Defines `test-trait`.
         const TRAIT_DEF: &str = "(define-trait test-trait ((get-1 (uint) (response uint uint))))";
@@ -1630,7 +1631,7 @@ mod tests {
         /// `wrapped-get-1`, passing the target contract as the trait
         /// argument.
         fn crosscheck_dispatch_to_target(target: &str, expected: Result<Value, VmExecutionError>) {
-            crosscheck_multi_contract_call_public(
+            crosscheck_multi_contract_execute_public(
                 &[
                     (ContractName::from_literal("trait-def"), TRAIT_DEF),
                     (ContractName::from_literal("dispatcher"), DISPATCHER),
@@ -1716,7 +1717,7 @@ mod tests {
 
         #[test]
         fn nonexistent_contract_is_no_such_contract() {
-            crosscheck_multi_contract_call_public(
+            crosscheck_multi_contract_execute_public(
                 &[
                     (ContractName::from_literal("trait-def"), TRAIT_DEF),
                     (ContractName::from_literal("dispatcher"), DISPATCHER),
@@ -1730,7 +1731,7 @@ mod tests {
 
         #[test]
         fn dispatch_to_self_is_circular_reference() {
-            crosscheck_multi_contract_call_public(
+            crosscheck_multi_contract_execute_public(
                 &[
                     (ContractName::from_literal("trait-def"), TRAIT_DEF),
                     (ContractName::from_literal("dispatcher"), DISPATCHER),
@@ -1738,6 +1739,143 @@ mod tests {
                 ("dispatcher", "wrapped-get-1", &[trait_value("dispatcher")]),
                 Err(VmExecutionError::RuntimeCheck(
                     RuntimeCheckErrorKind::CircularReference(vec!["dispatcher".to_string()]),
+                )),
+            );
+        }
+    }
+
+    /// Tests for the value sanitization performed at the function-call
+    /// boundary (`inner_execute_contract`), driving hand-built unsanitized
+    /// values through both runtimes. Such values cannot be constructed from
+    /// Clarity source; on-chain they only arise from database state
+    /// deserialized with pre-2.4 rules. For the same reason, the sanitization
+    /// of nested `contract-call?` inputs and outputs is defense-in-depth.
+    /// Those code paths are executed here, but only ever see already-clean
+    /// values.
+    mod contract_call_sanitization {
+        use std::collections::BTreeMap;
+
+        use clarity::vm::errors::{RuntimeCheckErrorKind, VmExecutionError};
+        use clarity::vm::types::{
+            CallableData, QualifiedContractIdentifier, StandardPrincipalData, TraitIdentifier,
+            TupleData, TupleTypeSignature, TypeSignature,
+        };
+        use clarity::vm::Value;
+        use clarity_types::{ClarityName, ContractName};
+
+        use crate::tools::crosscheck_multi_contract_execute_public;
+
+        /// A tuple value of type `(tuple (a int))` whose data carries an
+        /// extra field `b`, which is not present in its type signature, as
+        /// could be produced by pre-2.4 deserialization.
+        fn dirty_tuple() -> Value {
+            Value::Tuple(TupleData {
+                type_signature: TupleTypeSignature::try_from(vec![(
+                    ClarityName::from_literal("a"),
+                    TypeSignature::IntType,
+                )])
+                .unwrap(),
+                data_map: BTreeMap::from([
+                    (ClarityName::from_literal("a"), Value::Int(1)),
+                    (ClarityName::from_literal("b"), Value::Int(2)),
+                ]),
+            })
+        }
+
+        /// The expected result of sanitizing `dirty_tuple()`.
+        fn clean_tuple() -> Value {
+            Value::Tuple(
+                TupleData::from_data(vec![(ClarityName::from_literal("a"), Value::Int(1))])
+                    .unwrap(),
+            )
+        }
+
+        const ECHO: &str = "(define-public (echo (x (tuple (a int)))) (ok x))";
+
+        #[test]
+        fn call_arguments_are_sanitized() {
+            crosscheck_multi_contract_execute_public(
+                &[(ContractName::from_literal("echo"), ECHO)],
+                ("echo", "echo", &[dirty_tuple()]),
+                Ok(Value::okay(clean_tuple()).unwrap()),
+            );
+        }
+
+        #[test]
+        fn static_dispatch_arguments_are_sanitized() {
+            let forward = "(define-public (forward (x (tuple (a int))))
+                (contract-call? .echo echo x))";
+            crosscheck_multi_contract_execute_public(
+                &[
+                    (ContractName::from_literal("echo"), ECHO),
+                    (ContractName::from_literal("forward"), forward),
+                ],
+                ("forward", "forward", &[dirty_tuple()]),
+                Ok(Value::okay(clean_tuple()).unwrap()),
+            );
+        }
+
+        /// Echo a tuple through a dynamic dispatch, exercising the
+        /// `contract-call?` argument reading and result handling with tuple
+        /// types.
+        #[test]
+        fn dynamic_dispatch_values_are_sanitized() {
+            let trait_def =
+                "(define-trait echo-trait ((echo ((tuple (a int))) (response (tuple (a int)) uint))))";
+            let dispatcher = "
+                (use-trait echo-trait .trait-def.echo-trait)
+                (define-public (dispatch (t <echo-trait>) (x (tuple (a int))))
+                    (contract-call? t echo x))";
+
+            let target_value = Value::CallableContract(CallableData {
+                contract_identifier: QualifiedContractIdentifier::new(
+                    StandardPrincipalData::transient(),
+                    ContractName::from_literal("echo"),
+                ),
+                trait_identifier: Some(TraitIdentifier {
+                    name: ClarityName::from_literal("echo-trait"),
+                    contract_identifier: QualifiedContractIdentifier::new(
+                        StandardPrincipalData::transient(),
+                        ContractName::from_literal("trait-def"),
+                    ),
+                }),
+            });
+
+            crosscheck_multi_contract_execute_public(
+                &[
+                    (ContractName::from_literal("trait-def"), trait_def),
+                    (ContractName::from_literal("echo"), ECHO),
+                    (ContractName::from_literal("dispatcher"), dispatcher),
+                ],
+                ("dispatcher", "dispatch", &[target_value, dirty_tuple()]),
+                Ok(Value::okay(clean_tuple()).unwrap()),
+            );
+        }
+
+        /// A value which cannot be sanitized (its data is missing a field
+        /// required by its type signature) is rejected with a
+        /// `TypeValueError`, as in the interpreter's
+        /// `inner_execute_contract`.
+        #[test]
+        fn unsanitizable_argument_is_type_value_error() {
+            let unsanitizable = Value::Tuple(TupleData {
+                type_signature: TupleTypeSignature::try_from(vec![
+                    (ClarityName::from_literal("a"), TypeSignature::IntType),
+                    (ClarityName::from_literal("b"), TypeSignature::IntType),
+                ])
+                .unwrap(),
+                data_map: BTreeMap::from([(ClarityName::from_literal("a"), Value::Int(1))]),
+            });
+            let expected_type = TypeSignature::type_of(&unsanitizable).unwrap();
+
+            crosscheck_multi_contract_execute_public(
+                &[(ContractName::from_literal("echo"), ECHO)],
+                ("echo", "echo", std::slice::from_ref(&unsanitizable)),
+                Err(VmExecutionError::RuntimeCheck(
+                    RuntimeCheckErrorKind::TypeValueError(
+                        Box::new(expected_type),
+                        unsanitizable.to_error_string(),
+                    ),
                 )),
             );
         }
@@ -2457,7 +2595,7 @@ mod tests {
                 (contract-call? .callee mint-nft u1)
                 (let ((result (contract-call? .callee transfer-token u1)))
                     {
-                        result: result, 
+                        result: result,
                         owner: (contract-call? .callee get-nft-owner u1)
                     }
                 )

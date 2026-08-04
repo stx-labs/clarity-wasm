@@ -28,8 +28,6 @@ use regex::Regex;
 
 use crate::compile;
 use crate::datastore::{BurnDatastore, Datastore, StacksConstants};
-#[cfg(feature = "developer-mode")]
-use crate::initialize::call_function;
 use crate::initialize::initialize_contract;
 use crate::wasm_utils::get_type_in_memory_size;
 
@@ -429,72 +427,16 @@ impl TestEnvironment {
         self.interpret_contract_with_snippet("snippet", snippet)
     }
 
-    /// Call a public function in a contract previously initialized with
-    /// `init_contract_with_snippet`, passing the arguments as values, as a
-    /// transaction would. Since the arguments do not go through the static
-    /// analysis, this allows tests to exercise the runtime checks performed
-    /// by `contract-call?` (e.g. passing an arbitrary principal where a
-    /// trait is expected).
+    /// Call a public function in a previously initialized contract, passing
+    /// the arguments as values, going through stacks-core's
+    /// `ExecutionState::execute_contract` exactly as transaction processing
+    /// does (including the argument sanitization in
+    /// `inner_execute_contract`). Contracts initialized with
+    /// `init_contract_with_snippet` execute on the Wasm runtime, while
+    /// contracts initialized with `interpret_contract_with_snippet` execute
+    /// on the interpreter.
     #[cfg(feature = "developer-mode")]
-    pub fn call_public_function(
-        &mut self,
-        contract_name: &str,
-        function_name: &str,
-        args: &[Value],
-    ) -> Result<Value, VmExecutionError> {
-        let contract_context = self
-            .contract_contexts
-            .get(contract_name)
-            .expect("Contract not initialized")
-            .clone();
-
-        let mut cost_tracker = LimitedCostTracker::new_free();
-        std::mem::swap(&mut self.cost_tracker, &mut cost_tracker);
-
-        let conn = ClarityDatabase::new(
-            &mut self.datastore,
-            &self.burn_datastore,
-            &self.burn_datastore,
-        );
-        let mut global_context = GlobalContext::new(
-            self.is_mainnet,
-            self.chain_id,
-            conn,
-            cost_tracker,
-            self.epoch,
-        );
-        global_context.begin();
-
-        let mut call_stack = CallStack::new();
-        let sender: PrincipalData = StandardPrincipalData::transient().into();
-        let result = call_function(
-            function_name,
-            args,
-            &mut global_context,
-            &contract_context,
-            &mut call_stack,
-            Some(sender.clone()),
-            Some(sender),
-            None,
-        );
-
-        if result.is_ok() {
-            let (_, events) = global_context.commit().unwrap();
-            if let Some(events) = events {
-                self.events.push(events);
-            }
-        }
-        self.cost_tracker = global_context.cost_track;
-
-        result
-    }
-
-    /// Call a public function in a contract previously initialized with
-    /// `interpret_contract_with_snippet`, passing the arguments as values, as
-    /// a transaction would. This is the interpreter-side counterpart of
-    /// `call_public_function`.
-    #[cfg(feature = "developer-mode")]
-    pub fn interpret_call_public_function(
+    pub fn execute_public_function(
         &mut self,
         contract_name: &str,
         function_name: &str,
@@ -966,15 +908,16 @@ pub fn crosscheck_multi_contract_with_env(
 }
 
 /// Initialize the given contracts (in order) with both the compiler and the
-/// interpreter, then call a public function, passing the arguments as values,
-/// as a transaction would. Asserts that the compiled and interpreted results
-/// match each other and the expected result.
+/// interpreter, then call a public function, passing the arguments as
+/// values, going through stacks-core's `ExecutionState::execute_contract` on
+/// both sides, exactly as transaction processing does. Asserts that the
+/// compiled and interpreted results match each other and the expected
+/// result.
 ///
 /// Since the call arguments do not go through the static analysis, this
-/// allows tests to exercise the runtime checks performed by `contract-call?`
-/// (e.g. passing an arbitrary principal where a trait is expected).
+/// allows tests to exercise the runtime checks performed by `contract-call?`.
 #[cfg(feature = "developer-mode")]
-pub fn crosscheck_multi_contract_call_public(
+pub fn crosscheck_multi_contract_execute_public(
     contracts: &[(ContractName, &str)],
     call: (&str, &str, &[Value]),
     expected: Result<Value, VmExecutionError>,
@@ -990,7 +933,7 @@ pub fn crosscheck_multi_contract_call_public(
             .unwrap_or_else(|e| panic!("Failed to init contract \"{name}\": {e:?}"));
     }
     let compiled_result =
-        compiled_env.call_public_function(call_contract, call_function, call_args);
+        compiled_env.execute_public_function(call_contract, call_function, call_args);
 
     // interpreted version
     let mut interpreted_env = env;
@@ -1000,7 +943,7 @@ pub fn crosscheck_multi_contract_call_public(
             .unwrap_or_else(|e| panic!("Failed to interpret contract \"{name}\": {e:?}"));
     }
     let interpreted_result =
-        interpreted_env.interpret_call_public_function(call_contract, call_function, call_args);
+        interpreted_env.execute_public_function(call_contract, call_function, call_args);
 
     assert_eq!(
         compiled_result, interpreted_result,
