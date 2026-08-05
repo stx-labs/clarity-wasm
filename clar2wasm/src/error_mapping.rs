@@ -341,6 +341,7 @@ fn from_runtime_error_code(
                 actual_offset,
                 actual_length,
                 *epoch_id,
+                *clarity_version,
             )
             .unwrap_or_else(|e| panic!("Could not read thrown value from memory: {e}"));
             RuntimeCheckErrorKind::TypeValueError(

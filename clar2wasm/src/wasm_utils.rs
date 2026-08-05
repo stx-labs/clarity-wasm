@@ -485,6 +485,8 @@ pub fn read_from_wasm(
                     issuer: principal,
                     name: ContractName::try_from(contract_name)?,
                 };
+                // In Clarity 1 the interpreter returns a PrincipalData while later versions return a callableType.
+                // The serialization of both types is identical, it only differs in it's printed representation.
                 Ok(if clarity_version == ClarityVersion::Clarity1 {
                     Value::Principal(PrincipalData::Contract(qualified_id))
                 } else if let TypeSignature::CallableType(CallableSubtype::Trait(
