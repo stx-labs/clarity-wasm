@@ -144,6 +144,8 @@ pub fn compile(
                 }
             };
             for (expr, ty) in types_to_add {
+                // We know that the type has already been set, that's why we change it in the first place.
+                // Therefore we discard the TypeAlreadyAnnotatedFailure that would be produced here.
                 let _ = type_map.set_type(&expr, ty);
             }
         }
@@ -271,23 +273,6 @@ mod utils {
         }
     }
 
-    /// Push type annotations for a `contract-call?`'s argument expressions and its
-    /// return value onto `types_to_add`, given the callee's declared arg/return
-    /// types.
-    fn annotate_contract_call<'a>(
-        call_expr: &SymbolicExpression,
-        call_args: impl IntoIterator<Item = (&'a SymbolicExpression, &'a TypeSignature)>,
-        returns: &TypeSignature,
-    ) -> Vec<(SymbolicExpression, TypeSignature)> {
-        let mut types_to_add: Vec<(SymbolicExpression, TypeSignature)> = call_args
-            .into_iter()
-            .map(|(a, b)| (a.clone(), b.clone()))
-            .collect();
-
-        types_to_add.push((call_expr.clone(), returns.clone()));
-        dbg!(types_to_add)
-    }
-
     /// Walk the AST and, for every `contract-call?`, recover the callee's declared
     /// argument and return types from the analysis database and record them so they
     /// can be injected into the type map after analysis runs.
@@ -307,33 +292,31 @@ mod utils {
             return Ok(Vec::new());
         };
 
-        let mut types_to_add = Vec::new();
         // A `contract-call?` form: `(contract-call? <contract> <fn-name> <args...>)`
         if first.match_atom() == Some(&ClarityName::from_literal("contract-call?")) {
             let [contract_expr, function_expr, call_args @ ..] = rest else {
-                return Ok(types_to_add);
+                return Ok(Vec::new());
             };
             let Some(function_name) = function_expr.match_atom() else {
-                return Ok(types_to_add);
+                return Ok(Vec::new());
             };
             // Static call through a literal `.contract` principal.
             if let Some(literal) = contract_expr.match_literal_value() {
                 if let Ok(Contract(contract)) = literal.clone().expect_principal() {
-                    if let Some(FunctionType::Fixed(f)) = match (
-                        analysis_db.get_read_only_function_type(&contract, function_name, &epoch),
-                        analysis_db.get_public_function_type(&contract, function_name, &epoch),
-                    ) {
-                        (Ok(Some(read_only)), _) => Ok(Some(read_only)),
-                        (_, Ok(Some(public))) => Ok(Some(public)),
-                        (Err(e), _) => Err(e),
-                        (_, Err(e)) => Err(e),
-                        _ => Ok(None),
-                    }? {
-                        types_to_add = annotate_contract_call(
-                            expr,
-                            call_args.iter().zip(f.args.iter().map(|a| &a.signature)),
-                            &f.returns,
-                        );
+                    if let Some(FunctionType::Fixed(f)) = analysis_db
+                        .get_public_function_type(&contract, function_name, &epoch)?
+                        .or(analysis_db.get_read_only_function_type(
+                            &contract,
+                            function_name,
+                            &epoch,
+                        )?)
+                    {
+                        return Ok(call_args
+                            .iter()
+                            .zip(f.args.iter().map(|a| &a.signature))
+                            .chain([(expr, &f.returns)])
+                            .map(|(a, b)| (a.clone(), b.clone()))
+                            .collect());
                     }
                 }
             }
@@ -349,16 +332,17 @@ mod utils {
                         &epoch,
                     )? {
                         if let Some(function_signature) = trait_signature.get(function_name) {
-                            types_to_add = annotate_contract_call(
-                                expr,
-                                call_args.iter().zip(&function_signature.args),
-                                &function_signature.returns,
-                            );
+                            return Ok(call_args
+                                .iter()
+                                .zip(&function_signature.args)
+                                .chain([(expr, &function_signature.returns)])
+                                .map(|(a, b)| (a.clone(), b.clone()))
+                                .collect());
                         }
                     }
                 }
             }
-            return Ok(types_to_add);
+            return Ok(Vec::new());
         }
 
         // For a `define-*` form, collect any trait-typed arguments so that dynamic
@@ -386,6 +370,6 @@ mod utils {
                 add_type_annotation_for_contracts(ast, child, analysis_db, epoch, trait_args)
             })
             .collect::<Result<Vec<_>, _>>()
-            .map(|a| a.into_iter().flatten().chain(types_to_add).collect())
+            .map(|a| a.into_iter().flatten().collect())
     }
 }
