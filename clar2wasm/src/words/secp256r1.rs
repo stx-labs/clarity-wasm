@@ -3,6 +3,7 @@ use walrus::ir::{BinaryOp, Block};
 use walrus::ValType;
 
 use crate::check_args;
+use crate::cost::WordCharge;
 use crate::error_mapping::ErrorMap;
 use crate::wasm_generator::GeneratorError;
 use crate::wasm_utils::get_global;
@@ -32,6 +33,8 @@ impl ComplexWord for Verify {
             args.len(),
             crate::wasm_utils::ArgumentCountCheck::Exact
         );
+
+        self.charge(generator, builder, 0)?;
 
         let [message_hash, signature, public_key] = args else {
             unreachable!()

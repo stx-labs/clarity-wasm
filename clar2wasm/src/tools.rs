@@ -970,8 +970,14 @@ macro_rules! boot_contract {
     };
 }
 
-const BOOT_CONTRACTS: &[BootContract] =
-    &[COSTS_V1, COSTS_V2, COSTS_V2_TESTNET, COST_VOTING, COSTS_V3];
+const BOOT_CONTRACTS: &[BootContract] = &[
+    COSTS_V1,
+    COSTS_V2,
+    COSTS_V2_TESTNET,
+    COST_VOTING,
+    COSTS_V3,
+    COSTS_V4,
+];
 
 const COSTS_V1: BootContract =
     boot_contract!("costs", ClarityVersion::Clarity1, StacksEpochId::Epoch20);
@@ -992,6 +998,8 @@ const COST_VOTING: BootContract = boot_contract!(
 );
 const COSTS_V3: BootContract =
     boot_contract!("costs-3", ClarityVersion::Clarity2, StacksEpochId::Epoch21);
+const COSTS_V4: BootContract =
+    boot_contract!("costs-4", ClarityVersion::Clarity4, StacksEpochId::Epoch33);
 
 /// Name of the buffer that will fill the empty space.
 const IGNORE_BUFFER_NAME: &str = "ignore";
