@@ -859,8 +859,8 @@ fn contract_call_constant_pre_34_fails() {
         clarity::types::StacksEpochId::Epoch33,
         TestConfig::clarity_version(),
     );
-
-    let _ = env.init_contract_with_snippet("callee", callee);
+    env.init_contract_with_snippet("callee", callee)
+        .expect("Failed to init contract.");
     std::assert_matches!(
         env.init_contract_with_snippet("caller", caller)
             .unwrap_err(),
@@ -888,7 +888,8 @@ fn contract_call_constant_of_constant_pre_34_fails() {
         clarity::types::StacksEpochId::Epoch33,
         TestConfig::clarity_version(),
     );
-    let _ = env.init_contract_with_snippet("callee", callee);
+    env.init_contract_with_snippet("callee", callee)
+        .expect("Failed to init contract.");
     std::assert_matches!(
         env.init_contract_with_snippet("caller", caller)
             .unwrap_err(),
