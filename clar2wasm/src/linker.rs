@@ -224,7 +224,6 @@ fn link_define_variable_fn(
                     (value_offset, value_length) =
                         read_indirect_offset_and_length(memory, &mut caller, value_offset)?;
                 }
-                let clarity_version = *caller.data_mut().contract_context().get_clarity_version();
                 let value = read_from_wasm(
                     memory,
                     &mut caller,
@@ -232,7 +231,6 @@ fn link_define_variable_fn(
                     value_offset,
                     value_length,
                     epoch,
-                    clarity_version,
                 )?;
 
                 caller
@@ -824,7 +822,6 @@ fn link_set_variable_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), V
                     (value_offset, value_length) =
                         read_indirect_offset_and_length(memory, &mut caller, value_offset)?;
                 }
-                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 let value = read_from_wasm(
                     memory,
                     &mut caller,
@@ -832,7 +829,6 @@ fn link_set_variable_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), V
                     value_offset,
                     value_length,
                     epoch,
-                    clarity_version,
                 )?;
 
                 // TODO: Include this cost
@@ -1478,7 +1474,6 @@ fn link_exit_restrict_assets_fn(
                     .and_then(|export| export.into_memory())
                     .ok_or(WasmError::MemoryNotFound)?;
                 let epoch = caller.data().global_context.epoch_id;
-                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 let owner = read_from_wasm(
                     memory,
                     &mut caller,
@@ -1486,7 +1481,6 @@ fn link_exit_restrict_assets_fn(
                     asset_owner_offset,
                     asset_owner_length,
                     epoch,
-                    clarity_version,
                 )?
                 .expect_principal()?;
                 let allowances = AllowanceContext::extract(&allowance_ref)?;
@@ -1630,8 +1624,6 @@ fn link_with_ft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExec
                     .ok_or(WasmError::MemoryNotFound)?;
 
                 let epoch = caller.data().global_context.epoch_id;
-
-                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 let token_name_value = read_from_wasm(
                     memory,
                     &mut caller,
@@ -1639,7 +1631,6 @@ fn link_with_ft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExec
                     token_name_offset,
                     token_name_length,
                     epoch,
-                    clarity_version,
                 )?;
                 let token_name = token_name_value.expect_ascii()?;
 
@@ -1652,7 +1643,6 @@ fn link_with_ft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExec
                     contract_id_offset,
                     contract_id_length,
                     epoch,
-                    clarity_version,
                 )?;
                 let contract_id = match &contract_principal {
                     Value::Principal(PrincipalData::Contract(contract_id)) => contract_id,
@@ -1724,8 +1714,6 @@ fn link_with_nft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                     .ok_or(WasmError::MemoryNotFound)?;
 
                 let epoch = caller.data().global_context.epoch_id;
-
-                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // we cannot just read an identifier due to the '*' case.
                 let token_name = read_from_wasm(
                     memory,
@@ -1734,12 +1722,9 @@ fn link_with_nft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                     token_name_offset,
                     token_name_length,
                     epoch,
-                    clarity_version,
                 )?
                 .expect_ascii()?;
                 let asset_name = ClarityName::try_from(token_name.clone())?;
-
-                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // Read the contract principal first — needed for both wildcard
                 // and non-wildcard paths.
                 let contract_principal = read_from_wasm(
@@ -1749,7 +1734,6 @@ fn link_with_nft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                     contract_id_offset,
                     contract_id_length,
                     epoch,
-                    clarity_version,
                 )?;
                 let contract_id = match &contract_principal {
                     Value::Principal(PrincipalData::Contract(contract_id)) => contract_id,
@@ -1816,8 +1800,6 @@ fn link_with_nft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                 let entry_size = key_type.size()?;
                 let max_list_len = (MAX_VALUE_SIZE.saturating_sub(entry_size + 5)) / entry_size;
 
-                let clarity_version = *caller.data().contract_context().get_clarity_version();
-
                 // We use read_from_wasm (not read_identifier_from_wasm) because
                 // this is a typed list of NFT key values, not a string identifier.
                 // The wildcard ("*") case also requires this since the key type
@@ -1831,7 +1813,6 @@ fn link_with_nft_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                     identifiers_offset,
                     identifiers_length,
                     epoch,
-                    clarity_version,
                 )?;
                 let allowed_identifiers = identifiers_value.expect_list()?;
 
@@ -1943,8 +1924,6 @@ fn link_stx_get_balance_fn(
                     .ok_or(VmExecutionError::Wasm(WasmError::MemoryNotFound))?;
 
                 let epoch = caller.data_mut().global_context.epoch_id;
-
-                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // Read the principal from the Wasm memory
                 let value = read_from_wasm(
                     memory,
@@ -1953,7 +1932,6 @@ fn link_stx_get_balance_fn(
                     principal_offset,
                     principal_length,
                     epoch,
-                    clarity_version,
                 )?;
                 let principal = value_as_principal(&value)?;
 
@@ -1996,8 +1974,6 @@ fn link_stx_account_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Vm
                     .ok_or(VmExecutionError::Wasm(WasmError::MemoryNotFound))?;
 
                 let epoch = caller.data_mut().global_context.epoch_id;
-
-                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // Read the principal from the Wasm memory
                 let value = read_from_wasm(
                     memory,
@@ -2006,7 +1982,6 @@ fn link_stx_account_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Vm
                     principal_offset,
                     principal_length,
                     epoch,
-                    clarity_version,
                 )?;
                 let principal = value_as_principal(&value)?;
 
@@ -2082,8 +2057,6 @@ fn link_stx_burn_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                     .ok_or(VmExecutionError::Wasm(WasmError::MemoryNotFound))?;
 
                 let epoch = caller.data_mut().global_context.epoch_id;
-
-                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // Read the principal from the Wasm memory
                 let value = read_from_wasm(
                     memory,
@@ -2092,7 +2065,6 @@ fn link_stx_burn_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                     principal_offset,
                     principal_length,
                     epoch,
-                    clarity_version,
                 )?;
                 let from = value_as_principal(&value)?;
 
@@ -2182,8 +2154,6 @@ fn link_stx_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), V
                     .ok_or(VmExecutionError::Wasm(WasmError::MemoryNotFound))?;
 
                 let epoch = caller.data_mut().global_context.epoch_id;
-
-                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // Read the sender principal from the Wasm memory
                 let value = read_from_wasm(
                     memory,
@@ -2192,7 +2162,6 @@ fn link_stx_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), V
                     sender_offset,
                     sender_length,
                     epoch,
-                    clarity_version,
                 )?;
                 let sender = value_as_principal(&value)?;
 
@@ -2204,11 +2173,8 @@ fn link_stx_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), V
                     recipient_offset,
                     recipient_length,
                     epoch,
-                    clarity_version,
                 )?;
                 let recipient = value_as_principal(&value)?;
-
-                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // Read the memo from the Wasm memory
                 let memo = if memo_length > 0 {
                     let value = read_from_wasm(
@@ -2220,7 +2186,6 @@ fn link_stx_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), V
                         memo_offset,
                         memo_length,
                         epoch,
-                        clarity_version,
                     )?;
                     value_as_buffer(value)?
                 } else {
@@ -2367,8 +2332,6 @@ fn link_ft_get_balance_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(),
                 let contract_identifier =
                     caller.data().contract_context().contract_identifier.clone();
                 let epoch = caller.data_mut().global_context.epoch_id;
-
-                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // Read the owner principal from the Wasm memory
                 let value = read_from_wasm(
                     memory,
@@ -2377,7 +2340,6 @@ fn link_ft_get_balance_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(),
                     owner_offset,
                     owner_length,
                     epoch,
-                    clarity_version,
                 )?;
                 let owner = value_as_principal(&value)?;
 
@@ -2442,8 +2404,6 @@ fn link_ft_burn_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExec
 
                 // Compute the amount
                 let amount = ((amount_hi as u128) << 64) | ((amount_lo as u64) as u128);
-
-                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // Read the sender principal from the Wasm memory
                 let value = read_from_wasm(
                     memory,
@@ -2452,7 +2412,6 @@ fn link_ft_burn_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExec
                     sender_offset,
                     sender_length,
                     epoch,
-                    clarity_version,
                 )?;
                 let burner = value_as_principal(&value)?;
 
@@ -2570,8 +2529,6 @@ fn link_ft_mint_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExec
 
                 // Compute the amount
                 let amount = ((amount_hi as u128) << 64) | ((amount_lo as u64) as u128);
-
-                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // Read the sender principal from the Wasm memory
                 let value = read_from_wasm(
                     memory,
@@ -2580,7 +2537,6 @@ fn link_ft_mint_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExec
                     sender_offset,
                     sender_length,
                     epoch,
-                    clarity_version,
                 )?;
                 let to_principal = value_as_principal(&value)?;
 
@@ -2700,8 +2656,6 @@ fn link_ft_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Vm
 
                 // Compute the amount
                 let amount = ((amount_hi as u128) << 64) | ((amount_lo as u64) as u128);
-
-                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // Read the sender principal from the Wasm memory
                 let value = read_from_wasm(
                     memory,
@@ -2710,7 +2664,6 @@ fn link_ft_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Vm
                     sender_offset,
                     sender_length,
                     epoch,
-                    clarity_version,
                 )?;
                 let from_principal = value_as_principal(&value)?;
 
@@ -2722,7 +2675,6 @@ fn link_ft_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Vm
                     recipient_offset,
                     recipient_length,
                     epoch,
-                    clarity_version,
                 )?;
                 let to_principal = value_as_principal(&value)?;
 
@@ -2894,7 +2846,6 @@ fn link_nft_get_owner_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
                     (asset_offset, asset_length) =
                         read_indirect_offset_and_length(memory, &mut caller, asset_offset)?;
                 }
-                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 let asset = read_from_wasm(
                     memory,
                     &mut caller,
@@ -2902,7 +2853,6 @@ fn link_nft_get_owner_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
                     asset_offset,
                     asset_length,
                     epoch,
-                    clarity_version,
                 )?;
 
                 let _asset_size = asset.serialized_size()? as u64;
@@ -3002,7 +2952,6 @@ fn link_nft_burn_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                     (asset_offset, asset_length) =
                         read_indirect_offset_and_length(memory, &mut caller, asset_offset)?;
                 }
-                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 let asset = read_from_wasm(
                     memory,
                     &mut caller,
@@ -3010,10 +2959,7 @@ fn link_nft_burn_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                     asset_offset,
                     asset_length,
                     epoch,
-                    clarity_version,
                 )?;
-
-                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // Read the sender principal from the Wasm memory
                 let value = read_from_wasm(
                     memory,
@@ -3022,7 +2968,6 @@ fn link_nft_burn_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                     sender_offset,
                     sender_length,
                     epoch,
-                    clarity_version,
                 )?;
                 let sender_principal = value_as_principal(&value)?;
 
@@ -3148,7 +3093,6 @@ fn link_nft_mint_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                     (asset_offset, asset_length) =
                         read_indirect_offset_and_length(memory, &mut caller, asset_offset)?;
                 }
-                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 let asset = read_from_wasm(
                     memory,
                     &mut caller,
@@ -3156,10 +3100,7 @@ fn link_nft_mint_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                     asset_offset,
                     asset_length,
                     epoch,
-                    clarity_version,
                 )?;
-
-                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // Read the recipient principal from the Wasm memory
                 let value = read_from_wasm(
                     memory,
@@ -3168,7 +3109,6 @@ fn link_nft_mint_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExe
                     recipient_offset,
                     recipient_length,
                     epoch,
-                    clarity_version,
                 )?;
                 let to_principal = value_as_principal(&value)?;
 
@@ -3286,7 +3226,6 @@ fn link_nft_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), V
                     (asset_offset, asset_length) =
                         read_indirect_offset_and_length(memory, &mut caller, asset_offset)?;
                 }
-                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 let asset = read_from_wasm(
                     memory,
                     &mut caller,
@@ -3294,7 +3233,6 @@ fn link_nft_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), V
                     asset_offset,
                     asset_length,
                     epoch,
-                    clarity_version,
                 )?;
 
                 // Read the sender principal from the Wasm memory
@@ -3305,11 +3243,8 @@ fn link_nft_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), V
                     sender_offset,
                     sender_length,
                     epoch,
-                    clarity_version,
                 )?;
                 let from_principal = value_as_principal(&value)?;
-
-                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // Read the recipient principal from the Wasm memory
                 let value = read_from_wasm(
                     memory,
@@ -3318,7 +3253,6 @@ fn link_nft_transfer_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), V
                     recipient_offset,
                     recipient_length,
                     epoch,
-                    clarity_version,
                 )?;
                 let to_principal = value_as_principal(&value)?;
 
@@ -3462,7 +3396,6 @@ fn link_map_get_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExec
                     (key_offset, key_length) =
                         read_indirect_offset_and_length(memory, &mut caller, key_offset)?;
                 }
-                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 let key = read_from_wasm(
                     memory,
                     &mut caller,
@@ -3470,7 +3403,6 @@ fn link_map_get_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExec
                     key_offset,
                     key_length,
                     epoch,
-                    clarity_version,
                 )?;
 
                 let result = caller.data_mut().global_context.database.fetch_entry(
@@ -3568,7 +3500,6 @@ fn link_map_set_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExec
                     (key_offset, key_length) =
                         read_indirect_offset_and_length(memory, &mut caller, key_offset)?;
                 }
-                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 let key = read_from_wasm(
                     memory,
                     &mut caller,
@@ -3576,7 +3507,6 @@ fn link_map_set_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExec
                     key_offset,
                     key_length,
                     epoch,
-                    clarity_version,
                 )?;
 
                 // Read in the value from the Wasm memory
@@ -3591,7 +3521,6 @@ fn link_map_set_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExec
                     value_offset,
                     value_length,
                     epoch,
-                    clarity_version,
                 )?;
 
                 // Store the value in the map in the global context
@@ -3690,7 +3619,6 @@ fn link_map_insert_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmE
                     (key_offset, key_length) =
                         read_indirect_offset_and_length(memory, &mut caller, key_offset)?;
                 }
-                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 let key = read_from_wasm(
                     memory,
                     &mut caller,
@@ -3698,7 +3626,6 @@ fn link_map_insert_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmE
                     key_offset,
                     key_length,
                     epoch,
-                    clarity_version,
                 )?;
 
                 // Read in the value from the Wasm memory
@@ -3713,7 +3640,6 @@ fn link_map_insert_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmE
                     value_offset,
                     value_length,
                     epoch,
-                    clarity_version,
                 )?;
 
                 // Insert the value into the map
@@ -3808,7 +3734,6 @@ fn link_map_delete_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmE
                     (key_offset, key_length) =
                         read_indirect_offset_and_length(memory, &mut caller, key_offset)?;
                 }
-                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 let key = read_from_wasm(
                     memory,
                     &mut caller,
@@ -3816,7 +3741,6 @@ fn link_map_delete_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmE
                     key_offset,
                     key_length,
                     epoch,
-                    clarity_version,
                 )?;
 
                 // Delete the key from the map in the global context
@@ -5220,8 +5144,6 @@ fn link_contract_call_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
                     .ok_or(VmExecutionError::Wasm(WasmError::MemoryNotFound))?;
 
                 let epoch = caller.data_mut().global_context.epoch_id;
-
-                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // Read the contract identifier from the Wasm memory
                 let contract_val = read_from_wasm(
                     memory,
@@ -5230,7 +5152,6 @@ fn link_contract_call_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
                     contract_offset,
                     contract_length,
                     epoch,
-                    clarity_version,
                 )?;
                 let contract_id = match &contract_val {
                     Value::Principal(PrincipalData::Contract(contract_id)) => contract_id,
@@ -5265,14 +5186,8 @@ fn link_contract_call_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
                 let mut arg_offset = args_offset;
                 // Read the arguments from the Wasm memory
                 for arg_ty in function.get_arg_types() {
-                    let arg = read_from_wasm_indirect(
-                        memory,
-                        &mut caller,
-                        arg_ty,
-                        arg_offset,
-                        epoch,
-                        clarity_version,
-                    )?;
+                    let arg =
+                        read_from_wasm_indirect(memory, &mut caller, arg_ty, arg_offset, epoch)?;
                     args_sizes.push(arg.size()? as u64);
                     args.push(arg);
 
@@ -5416,8 +5331,6 @@ fn link_contract_hash_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
                     .ok_or(VmExecutionError::Wasm(WasmError::MemoryNotFound))?;
 
                 let epoch = caller.data_mut().global_context.epoch_id;
-
-                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // Read the contract identifier from the Wasm memory
                 let contract_val = read_from_wasm(
                     memory,
@@ -5426,7 +5339,6 @@ fn link_contract_hash_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
                     contract_offset,
                     contract_length,
                     epoch,
-                    clarity_version,
                 )?;
 
                 // (response (buff 32) uint)
@@ -5626,14 +5538,8 @@ fn link_print_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExecut
                 let version = *caller.data().contract_context().get_clarity_version();
 
                 let value_ty = signature_from_string(&serialized_ty, version, epoch)?;
-                let clarity_val = read_from_wasm_indirect(
-                    memory,
-                    &mut caller,
-                    &value_ty,
-                    value_offset,
-                    epoch,
-                    version,
-                )?;
+                let clarity_val =
+                    read_from_wasm_indirect(memory, &mut caller, &value_ty, value_offset, epoch)?;
 
                 caller.data_mut().register_print_event(clarity_val)?;
 
@@ -5662,8 +5568,6 @@ fn link_enter_at_block_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(),
                     .and_then(|export| export.into_memory())
                     .ok_or(VmExecutionError::Wasm(WasmError::MemoryNotFound))?;
                 let epoch = caller.data_mut().global_context.epoch_id;
-
-                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 let block_hash = read_from_wasm(
                     memory,
                     &mut caller,
@@ -5671,7 +5575,6 @@ fn link_enter_at_block_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(),
                     block_hash_offset,
                     block_hash_length,
                     epoch,
-                    clarity_version,
                 )?;
 
                 let bhh = match block_hash {
@@ -6126,8 +6029,6 @@ fn link_principal_of_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), V
                     .ok_or(VmExecutionError::Wasm(WasmError::MemoryNotFound))?;
 
                 let epoch = caller.data_mut().global_context.epoch_id;
-
-                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 // Read the public key from the memory
                 let key_val = read_from_wasm(
                     memory,
@@ -6136,7 +6037,6 @@ fn link_principal_of_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), V
                     key_offset,
                     key_length,
                     epoch,
-                    clarity_version,
                 )?;
 
                 let pub_key = match key_val {
@@ -6160,6 +6060,7 @@ fn link_principal_of_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), V
                 };
 
                 if let Ok(pub_key) = Secp256k1PublicKey::from_slice(pub_key) {
+                    let clarity_version = *caller.data().contract_context().get_clarity_version();
                     // Note: Clarity1 had a bug in how the address is computed (issues/2619).
                     // We want to preserve the old behavior unless the version is greater.
                     let addr = if clarity_version > ClarityVersion::Clarity1 {
@@ -6232,16 +6133,8 @@ fn link_save_constant_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
                     .ok_or(VmExecutionError::Wasm(WasmError::DefinesNotFound))?
                     .get_variable_type(const_name.as_str())
                     .ok_or(VmExecutionError::Wasm(WasmError::DefinesNotFound))?;
-
-                let clarity_version = *caller.data().contract_context().get_clarity_version();
-                let value = read_from_wasm_indirect(
-                    memory,
-                    &mut caller,
-                    value_ty,
-                    value_offset,
-                    epoch,
-                    clarity_version,
-                )?;
+                let value =
+                    read_from_wasm_indirect(memory, &mut caller, value_ty, value_offset, epoch)?;
 
                 // Insert constant name and expression value into a persistent data structure.
                 caller
@@ -6335,8 +6228,6 @@ fn link_principal_to_string_ascii(
                     .ok_or(VmExecutionError::Wasm(WasmError::MemoryNotFound))?;
 
                 let epoch = caller.data().global_context.epoch_id;
-
-                let clarity_version = *caller.data().contract_context().get_clarity_version();
                 let principal = read_from_wasm(
                     memory,
                     &mut caller,
@@ -6344,7 +6235,6 @@ fn link_principal_to_string_ascii(
                     principal_offset,
                     principal_length,
                     epoch,
-                    clarity_version,
                 )?;
 
                 let result_beg = result_offset as usize;
@@ -6443,7 +6333,7 @@ fn link_debug_msg<T>(linker: &mut Linker<T>) -> Result<(), VmExecutionError> {
         })
 }
 
-pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
+pub fn dummy_linker<T>(engine: &Engine) -> Result<Linker<T>, wasmtime::Error> {
     let mut linker = Linker::new(engine);
 
     link_skip_list(&mut linker)?;
@@ -6572,57 +6462,57 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
         },
     )?;
 
-    linker.func_wrap("clarity", "block_height", |_: Caller<'_, ()>| {
+    linker.func_wrap("clarity", "block_height", |_: Caller<'_, T>| {
         println!("block-height");
         Ok((0i64, 0i64))
     })?;
 
-    linker.func_wrap("clarity", "stacks_block_height", |_: Caller<'_, ()>| {
+    linker.func_wrap("clarity", "stacks_block_height", |_: Caller<'_, T>| {
         println!("stacks-block-height");
         Ok((0i64, 0i64))
     })?;
 
-    linker.func_wrap("clarity", "stacks_block_time", |_: Caller<'_, ()>| {
+    linker.func_wrap("clarity", "stacks_block_time", |_: Caller<'_, T>| {
         println!("stacks_block_time");
         Ok((0i64, 0i64))
     })?;
 
-    linker.func_wrap("clarity", "tenure_height", |_: Caller<'_, ()>| {
+    linker.func_wrap("clarity", "tenure_height", |_: Caller<'_, T>| {
         println!("tenure-height");
         Ok((0i64, 0i64))
     })?;
 
-    linker.func_wrap("clarity", "burn_block_height", |_: Caller<'_, ()>| {
+    linker.func_wrap("clarity", "burn_block_height", |_: Caller<'_, T>| {
         println!("burn-block-height");
         Ok((0i64, 0i64))
     })?;
 
-    linker.func_wrap("clarity", "stx_liquid_supply", |_: Caller<'_, ()>| {
+    linker.func_wrap("clarity", "stx_liquid_supply", |_: Caller<'_, T>| {
         println!("stx-liquid-supply");
         Ok((0i64, 0i64))
     })?;
 
-    linker.func_wrap("clarity", "is_in_regtest", |_: Caller<'_, ()>| {
+    linker.func_wrap("clarity", "is_in_regtest", |_: Caller<'_, T>| {
         println!("is-in-regtest");
         Ok(0i32)
     })?;
 
-    linker.func_wrap("clarity", "is_in_mainnet", |_: Caller<'_, ()>| {
+    linker.func_wrap("clarity", "is_in_mainnet", |_: Caller<'_, T>| {
         println!("is-in-mainnet");
         Ok(0i32)
     })?;
 
-    linker.func_wrap("clarity", "chain_id", |_: Caller<'_, ()>| {
+    linker.func_wrap("clarity", "chain_id", |_: Caller<'_, T>| {
         println!("chain-id");
         Ok((0i64, 0i64))
     })?;
 
-    linker.func_wrap("clarity", "enter_as_contract", |_: Caller<'_, ()>| {
+    linker.func_wrap("clarity", "enter_as_contract", |_: Caller<'_, T>| {
         println!("as-contract: enter");
         Ok(())
     })?;
 
-    linker.func_wrap("clarity", "exit_as_contract", |_: Caller<'_, ()>| {
+    linker.func_wrap("clarity", "exit_as_contract", |_: Caller<'_, T>| {
         println!("as-contract: exit");
         Ok(())
     })?;
@@ -6630,7 +6520,7 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
     linker.func_wrap(
         "clarity",
         "enter_as_contract_safe",
-        |_: Caller<'_, ()>| -> Option<ExternRef> {
+        |_: Caller<'_, T>| -> Option<ExternRef> {
             println!("as-contract?: enter");
             None
         },
@@ -6639,25 +6529,21 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
     linker.func_wrap(
         "clarity",
         "exit_as_contract_safe",
-        |_: Caller<'_, ()>, _allowance_ref: Option<ExternRef>| {
+        |_: Caller<'_, T>, _allowance_ref: Option<ExternRef>| {
             println!("as-contract?: exit");
             Ok((0i64, 0i64, 0i32))
         },
     )?;
 
-    linker.func_wrap(
-        "clarity",
-        "cleanup_as_contract_safe",
-        |_: Caller<'_, ()>| {
-            println!("as-contract?: cleanup");
-            Ok(())
-        },
-    )?;
+    linker.func_wrap("clarity", "cleanup_as_contract_safe", |_: Caller<'_, T>| {
+        println!("as-contract?: cleanup");
+        Ok(())
+    })?;
 
     linker.func_wrap(
         "clarity",
         "enter_restrict_assets",
-        |_: Caller<'_, ()>| -> Option<ExternRef> {
+        |_: Caller<'_, T>| -> Option<ExternRef> {
             println!("restrict-assets?: enter");
             None
         },
@@ -6666,7 +6552,7 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
     linker.func_wrap(
         "clarity",
         "exit_restrict_assets",
-        |_: Caller<'_, ()>,
+        |_: Caller<'_, T>,
          _asset_owner_offset: i32,
          _asset_owner_length: i32,
          _allowance_ref: Option<ExternRef>| {
@@ -6675,7 +6561,7 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
         },
     )?;
 
-    linker.func_wrap("clarity", "cleanup_restrict_assets", |_: Caller<'_, ()>| {
+    linker.func_wrap("clarity", "cleanup_restrict_assets", |_: Caller<'_, T>| {
         println!("restrict-assets?: cleanup");
         Ok(())
     })?;
@@ -6683,7 +6569,7 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
     linker.func_wrap(
         "clarity",
         "with_all_assets_unsafe",
-        |_: Caller<'_, ()>, _allowance_ref: Option<ExternRef>| {
+        |_: Caller<'_, T>, _allowance_ref: Option<ExternRef>| {
             println!("with_all_assets_unsafe: enter");
             Ok(())
         },
@@ -6692,7 +6578,7 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
     linker.func_wrap(
         "clarity",
         "exit_with_all_assets_unsafe",
-        |_: Caller<'_, ()>| {
+        |_: Caller<'_, T>| {
             println!("with_all_assets_unsafe: exit");
             Ok(())
         },
@@ -6713,7 +6599,7 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
         },
     )?;
 
-    linker.func_wrap("clarity", "exit_with_ft", |_: Caller<'_, ()>| {
+    linker.func_wrap("clarity", "exit_with_ft", |_: Caller<'_, T>| {
         println!("with_ft: exit");
         Ok(())
     })?;
@@ -6733,7 +6619,7 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
         },
     )?;
 
-    linker.func_wrap("clarity", "exit_with_nft", |_: Caller<'_, ()>| {
+    linker.func_wrap("clarity", "exit_with_nft", |_: Caller<'_, T>| {
         println!("with_nft: exit");
         Ok(())
     })?;
@@ -6747,7 +6633,7 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
         },
     )?;
 
-    linker.func_wrap("clarity", "exit_with_stacking", |_: Caller<'_, ()>| {
+    linker.func_wrap("clarity", "exit_with_stacking", |_: Caller<'_, T>| {
         println!("with_stacking: exit");
         Ok(())
     })?;
@@ -6761,7 +6647,7 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
         },
     )?;
 
-    linker.func_wrap("clarity", "exit_with_stx", |_: Caller<'_, ()>| {
+    linker.func_wrap("clarity", "exit_with_stx", |_: Caller<'_, T>| {
         println!("with_stx: exit");
         Ok(())
     })?;
@@ -6775,7 +6661,7 @@ pub fn dummy_linker(engine: &Engine) -> Result<Linker<()>, wasmtime::Error> {
         },
     )?;
 
-    linker.func_wrap("clarity", "exit_at_block", |_: Caller<'_, ()>| {
+    linker.func_wrap("clarity", "exit_at_block", |_: Caller<'_, T>| {
         println!("at-block: exit");
         Ok(())
     })?;

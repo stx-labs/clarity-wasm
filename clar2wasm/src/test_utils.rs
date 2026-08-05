@@ -1,16 +1,22 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use clarity::consts::CHAIN_ID_TESTNET;
 use clarity::types::StacksEpochId;
 use clarity::vm::analysis::ContractAnalysis;
+use clarity::vm::contexts::GlobalContext;
 use clarity::vm::costs::LimitedCostTracker;
+use clarity::vm::database::ClarityDatabase;
 use clarity::vm::types::{
     QualifiedContractIdentifier, SequenceData, SequenceSubtype, TypeSignature,
 };
-use clarity::vm::{ClarityVersion, Value};
+use clarity::vm::{CallStack, ClarityVersion, ContractContext, Value};
 use walrus::{FunctionBuilder, InstrSeqBuilder, MemoryId};
 use wasmtime::{Engine, Module, Store};
 
+use crate::datastore::{BurnDatastore, Datastore, StacksConstants};
+use crate::initialize::ClarityWasmContext;
 use crate::linker::{dummy_linker, link_cost_globals};
+use crate::tools::TestConfig;
 use crate::wasm_generator::{
     add_placeholder_for_clarity_type, clar2wasm_ty, GeneratorError, WasmGenerator,
 };
@@ -182,44 +188,71 @@ impl WasmGenerator {
     /// If the value isn't of the type passed as a parameter, the function panics.
     pub fn execute_module(&mut self, return_ty: &TypeSignature) -> Value {
         let engine = Engine::default();
-        let mut store = Store::new(&engine, ());
-        let mut linker = dummy_linker(&engine).expect("failed to create linker");
-        link_cost_globals(&mut linker, &mut store).expect("failed to link host globals");
-        let module =
-            Module::new(&engine, self.module.emit_wasm()).expect("failed to create module");
-        let instance = linker
-            .instantiate(&mut store, &module)
-            .expect("failed to instanciate module");
+        let version = TestConfig::clarity_version();
+        let epoch = TestConfig::epoch_for_version(version);
 
-        let top_level = instance
-            .get_func(&mut store, ".top-level")
-            .expect("cannot find .top-level function");
+        with_test_store(&engine, epoch, version, |store| {
+            let mut linker = dummy_linker(&engine).expect("failed to create linker");
+            link_cost_globals(&mut linker, &mut *store).expect("failed to link host globals");
+            let module =
+                Module::new(&engine, self.module.emit_wasm()).expect("failed to create module");
+            let instance = linker
+                .instantiate(&mut *store, &module)
+                .expect("failed to instanciate module");
 
-        let mut result: Vec<_> = top_level
-            .ty(&mut store)
-            .results()
-            .map(placeholder_for_type)
-            .collect();
+            let top_level = instance
+                .get_func(&mut *store, ".top-level")
+                .expect("cannot find .top-level function");
 
-        top_level
-            .call(&mut store, &[], &mut result)
-            .expect("couldn't call .top-level");
+            let mut result: Vec<_> = top_level
+                .ty(&mut *store)
+                .results()
+                .map(placeholder_for_type)
+                .collect();
 
-        let memory = instance
-            .get_memory(&mut store, "memory")
-            .expect("couldn't find memory");
+            top_level
+                .call(&mut *store, &[], &mut result)
+                .expect("couldn't call .top-level");
 
-        wasm_to_clarity_value(
-            return_ty,
-            0,
-            &result,
-            memory,
-            &mut store,
-            StacksEpochId::latest(),
-            ClarityVersion::latest(),
-        )
-        .expect("error in execution")
-        .0
-        .expect("no value computed???")
+            let memory = instance
+                .get_memory(&mut *store, "memory")
+                .expect("couldn't find memory");
+
+            wasm_to_clarity_value(return_ty, 0, &result, memory, &mut *store, epoch)
+                .expect("error in execution")
+                .0
+                .expect("no value computed???")
+        })
     }
+}
+
+fn with_test_store<R>(
+    engine: &Engine,
+    epoch: StacksEpochId,
+    version: ClarityVersion,
+    f: impl FnOnce(&mut Store<ClarityWasmContext>) -> R,
+) -> R {
+    let burn_datastore = BurnDatastore::new(StacksConstants::default());
+    let mut datastore = Datastore::new();
+    let conn = ClarityDatabase::new(&mut datastore, &burn_datastore, &burn_datastore);
+    let mut global_context = GlobalContext::new(
+        false,
+        CHAIN_ID_TESTNET,
+        conn,
+        LimitedCostTracker::new_free(),
+        epoch,
+    );
+    let contract_context = ContractContext::new(QualifiedContractIdentifier::transient(), version);
+    let mut call_stack = CallStack::new();
+    let context = ClarityWasmContext::new_run(
+        &mut global_context,
+        &contract_context,
+        &mut call_stack,
+        None,
+        None,
+        None,
+        None,
+    );
+    let mut store = Store::new(engine, context);
+    f(&mut store)
 }

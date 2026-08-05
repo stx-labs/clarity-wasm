@@ -12,9 +12,10 @@ use clarity::vm::types::{
 use clarity::vm::{ClarityName, ClarityVersion, ContractName, Value};
 use stacks_common::types::StacksEpochId;
 use walrus::{GlobalId, InstrSeqBuilder};
-use wasmtime::{AsContextMut, Memory, Val, ValType};
+use wasmtime::{AsContext, AsContextMut, Memory, Val, ValType};
 
 use crate::error_mapping::ErrorMap;
+use crate::initialize::ClarityWasmContext;
 use crate::wasm_generator::{GeneratorError, WasmGenerator};
 
 #[allow(non_snake_case)]
@@ -83,14 +84,13 @@ pub const PRINCIPAL_BYTES_MAX: usize = STANDARD_PRINCIPAL_BYTES + CONTRACT_NAME_
 /// - `store` is the Wasm store.
 ///
 /// Returns the Clarity `Value` and the number of Wasm `Val`s that were used.
-pub fn wasm_to_clarity_value(
+pub fn wasm_to_clarity_value<'a, 'b: 'a>(
     type_sig: &TypeSignature,
     value_index: usize,
     buffer: &[Val],
     memory: Memory,
-    store: &mut impl AsContextMut,
+    store: &mut impl AsContextMut<Data = ClarityWasmContext<'a, 'b>>,
     epoch: StacksEpochId,
-    clarity_version: ClarityVersion,
 ) -> Result<(Option<Value>, usize), VmExecutionError> {
     match type_sig {
         TypeSignature::IntType => {
@@ -143,7 +143,6 @@ pub fn wasm_to_clarity_value(
                         memory,
                         store,
                         epoch,
-                        clarity_version,
                     )?;
                     Some(Value::some(value.ok_or(VmExecutionError::Wasm(
                         WasmError::Expect(
@@ -173,7 +172,6 @@ pub fn wasm_to_clarity_value(
                         memory,
                         store,
                         epoch,
-                        clarity_version,
                     )?;
                     Some(Value::okay(ok.ok_or(VmExecutionError::Wasm(
                         WasmError::Expect(
@@ -188,7 +186,6 @@ pub fn wasm_to_clarity_value(
                         memory,
                         store,
                         epoch,
-                        clarity_version,
                     )?;
                     Some(Value::error(err.ok_or(VmExecutionError::Wasm(
                         WasmError::Expect("Failed to construct Err value from inner value".into()),
@@ -249,15 +246,7 @@ pub fn wasm_to_clarity_value(
                 .i32()
                 .ok_or(VmExecutionError::Wasm(WasmError::ValueTypeMismatch))?;
 
-            let value = read_from_wasm(
-                memory,
-                store,
-                type_sig,
-                offset,
-                length,
-                epoch,
-                clarity_version,
-            )?;
+            let value = read_from_wasm(memory, store, type_sig, offset, length, epoch)?;
             Ok((Some(value), 2))
         }
         TypeSignature::PrincipalType
@@ -326,15 +315,8 @@ pub fn wasm_to_clarity_value(
             let mut index = value_index;
             let mut data_map = Vec::new();
             for (name, ty) in t.get_type_map() {
-                let (value, increment) = wasm_to_clarity_value(
-                    ty,
-                    index,
-                    buffer,
-                    memory,
-                    store,
-                    epoch,
-                    clarity_version,
-                )?;
+                let (value, increment) =
+                    wasm_to_clarity_value(ty, index, buffer, memory, store, epoch)?;
                 data_map.push((
                     name.clone(),
                     value.ok_or_else(|| {
@@ -360,13 +342,12 @@ pub fn wasm_to_clarity_value(
 /// In-memory values require one extra level
 /// of indirection, so this function will read the offset and length from the
 /// memory, then read the actual value.
-pub fn read_from_wasm_indirect(
+pub fn read_from_wasm_indirect<'a, 'b: 'a>(
     memory: Memory,
-    store: &mut impl AsContextMut,
+    store: &mut impl AsContextMut<Data = ClarityWasmContext<'a, 'b>>,
     ty: &TypeSignature,
     mut offset: i32,
     epoch: StacksEpochId,
-    clarity_version: ClarityVersion,
 ) -> Result<Value, VmExecutionError> {
     let mut length = get_type_size(ty);
 
@@ -376,19 +357,18 @@ pub fn read_from_wasm_indirect(
         (offset, length) = read_indirect_offset_and_length(memory, store, offset)?;
     };
 
-    read_from_wasm(memory, store, ty, offset, length, epoch, clarity_version)
+    read_from_wasm(memory, store, ty, offset, length, epoch)
 }
 
 /// Read a value from the Wasm memory at `offset` with `length`, given the
 /// provided Clarity `TypeSignature`.
-pub fn read_from_wasm(
+pub fn read_from_wasm<'a, 'b: 'a>(
     memory: Memory,
-    store: &mut impl AsContextMut,
+    store: &mut impl AsContextMut<Data = ClarityWasmContext<'a, 'b>>,
     ty: &TypeSignature,
     offset: i32,
     length: i32,
     epoch: StacksEpochId,
-    clarity_version: ClarityVersion,
 ) -> Result<Value, VmExecutionError> {
     match ty {
         TypeSignature::UIntType => {
@@ -475,6 +455,11 @@ pub fn read_from_wasm(
             if contract_length == 0 {
                 Ok(Value::Principal(principal.into()))
             } else {
+                let clarity_version = *store
+                    .as_context()
+                    .data()
+                    .contract_context()
+                    .get_clarity_version();
                 let mut contract_name: Vec<u8> = vec![0; contract_length as usize];
                 memory
                     .read(store, current_offset, &mut contract_name)
@@ -516,14 +501,7 @@ pub fn read_from_wasm(
             let mut buffer: Vec<Value> = Vec::new();
             let mut current_offset = offset;
             while current_offset < end {
-                let elem = read_from_wasm_indirect(
-                    memory,
-                    store,
-                    elem_ty,
-                    current_offset,
-                    epoch,
-                    clarity_version,
-                )?;
+                let elem = read_from_wasm_indirect(memory, store, elem_ty, current_offset, epoch)?;
                 buffer.push(elem);
                 current_offset += elem_length;
             }
@@ -546,14 +524,8 @@ pub fn read_from_wasm(
             let mut current_offset = offset;
             for (field_key, field_ty) in type_sig.get_type_map() {
                 let field_length = get_type_size(field_ty);
-                let field_value = read_from_wasm_indirect(
-                    memory,
-                    store,
-                    field_ty,
-                    current_offset,
-                    epoch,
-                    clarity_version,
-                )?;
+                let field_value =
+                    read_from_wasm_indirect(memory, store, field_ty, current_offset, epoch)?;
                 data.push((field_key.clone(), field_value));
                 current_offset += field_length;
             }
@@ -584,7 +556,6 @@ pub fn read_from_wasm(
                         &response_type.1,
                         current_offset,
                         epoch,
-                        clarity_version,
                     )?;
                     Value::error(err_value)
                         .map_err(|_| VmExecutionError::Wasm(WasmError::ValueTypeMismatch))
@@ -596,7 +567,6 @@ pub fn read_from_wasm(
                         &response_type.0,
                         current_offset,
                         epoch,
-                        clarity_version,
                     )?;
                     Value::okay(ok_value)
                         .map_err(|_| VmExecutionError::Wasm(WasmError::ValueTypeMismatch))
@@ -624,14 +594,8 @@ pub fn read_from_wasm(
             match indicator {
                 0 => Ok(Value::none()),
                 1 => {
-                    let value = read_from_wasm_indirect(
-                        memory,
-                        store,
-                        type_sig,
-                        current_offset,
-                        epoch,
-                        clarity_version,
-                    )?;
+                    let value =
+                        read_from_wasm_indirect(memory, store, type_sig, current_offset, epoch)?;
                     Ok(Value::some(value)
                         .map_err(|_| VmExecutionError::Wasm(WasmError::ValueTypeMismatch))?)
                 }
@@ -781,8 +745,8 @@ pub fn placeholder_for_type(ty: ValType) -> Val {
 /// to the memory at `in_mem_offset`, and if `include_repr` is true, the offset
 /// and length of the value will be written to the memory at `offset`.
 /// Returns the number of bytes written at `offset` and at `in_mem_offset`.
-pub fn write_to_wasm(
-    mut store: impl AsContextMut,
+pub fn write_to_wasm<'a, 'b: 'a>(
+    mut store: impl AsContextMut<Data = ClarityWasmContext<'a, 'b>>,
     memory: Memory,
     ty: &TypeSignature,
     offset: i32,
