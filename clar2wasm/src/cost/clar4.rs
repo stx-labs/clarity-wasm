@@ -29,7 +29,7 @@ lazy_static! {
         map.insert(
             ToAscii.name(),
             WordCost {
-                runtime: Linear { a: 16, b: 150},
+                runtime: Linear { a: 16, b: 150 },
                 read_count: None,
                 read_length: None,
                 write_count: None,
@@ -40,7 +40,7 @@ lazy_static! {
         map.insert(
             RestrictAssets.name(),
             WordCost {
-                runtime: Linear { a: 125, b: 750},
+                runtime: Linear { a: 125, b: 750 },
                 read_count: None,
                 read_length: None,
                 write_count: None,
@@ -51,7 +51,7 @@ lazy_static! {
         map.insert(
             AsContractSafe.name(),
             WordCost {
-                runtime: Linear { a: 125, b: 888},
+                runtime: Linear { a: 125, b: 888 },
                 read_count: None,
                 read_length: None,
                 write_count: None,
@@ -59,16 +59,16 @@ lazy_static! {
             },
         );
 
-      //  map.insert(
-      //      Secp256R1Veriry.name(),
-      //      WordCost {
-      //          runtime: Constant(51750),
-      //          read_count: None,
-      //          read_length: None,
-      //          write_count: None,
-      //          write_length: None,
-      //      },
-      //  );
+        map.insert(
+            crate::words::secp256r1::Verify.name(),
+            WordCost {
+                runtime: Constant(51750),
+                read_count: None,
+                read_length: None,
+                write_count: None,
+                write_length: None,
+            },
+        );
 
         map
     };
