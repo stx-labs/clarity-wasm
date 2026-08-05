@@ -859,18 +859,11 @@ fn contract_call_constant_pre_34_fails() {
         clarity::types::StacksEpochId::Epoch33,
         TestConfig::clarity_version(),
     );
+
+    let _ = env.init_contract_with_snippet("callee", callee);
     std::assert_matches!(
-        [
-            (ContractName::from_literal("callee"), callee),
-            (ContractName::from_literal("caller"), caller),
-        ]
-        .iter()
-        .map(|(name, snippet)| env.init_contract_with_snippet(name, snippet))
-        .collect::<Vec<_>>()
-        .last()
-        .unwrap()
-        .as_ref()
-        .unwrap_err(),
+        env.init_contract_with_snippet("caller", caller)
+            .unwrap_err(),
         VmExecutionError::Wasm(WasmError::WasmGeneratorError(_))
     );
 }
@@ -895,20 +888,12 @@ fn contract_call_constant_of_constant_pre_34_fails() {
         clarity::types::StacksEpochId::Epoch33,
         TestConfig::clarity_version(),
     );
+    let _ = env.init_contract_with_snippet("callee", callee);
     std::assert_matches!(
-        [
-            (ContractName::from_literal("callee"), callee),
-            (ContractName::from_literal("caller"), caller),
-        ]
-        .iter()
-        .map(|(name, snippet)| env.init_contract_with_snippet(name, snippet))
-        .collect::<Vec<_>>()
-        .last()
-        .unwrap()
-        .as_ref()
-        .unwrap_err(),
+        env.init_contract_with_snippet("caller", caller)
+            .unwrap_err(),
         VmExecutionError::Wasm(WasmError::WasmGeneratorError(_))
-    );
+    )
 }
 
 #[cfg(not(feature = "test-clarity-v1"))]
@@ -937,6 +922,29 @@ fn contract_call_constant_of_constant_post_34_succeeds() {
             (define-constant cst1 .callee)
             (define-constant cst2 cst1)
             (contract-call? cst2 foo)
+        "#;
+
+    crosscheck_multi_contract(
+        &[
+            (ContractName::from_literal("callee"), callee),
+            (ContractName::from_literal("caller"), caller),
+        ],
+        Ok(Some(Value::okay(Value::UInt(42)).unwrap())),
+    );
+}
+
+#[cfg(not(feature = "test-clarity-v1",))]
+#[test]
+fn contract_call_constant_of_constant_6_time_post_34_succeeds() {
+    let callee = r#"(define-public (foo) (ok u42))"#;
+    let caller = r#"
+            (define-constant cst1 .callee)
+            (define-constant cst2 cst1)
+            (define-constant cst3 cst2)
+            (define-constant cst4 cst3)
+            (define-constant cst5 cst4)
+            (define-constant cst6 cst5)
+            (contract-call? cst6 foo)
         "#;
 
     crosscheck_multi_contract(
