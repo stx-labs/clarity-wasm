@@ -835,6 +835,16 @@ mod tests {
             r#"(to-ascii? u"a\u{1f601}bcd")"#,
             Ok(Some(Value::err_uint(1))),
         );
+
+        // making sure only valid clarity ascii value are accepted
+        for b in u8::MIN..=u8::MAX {
+            let snippet = format!(r#"(to-ascii? u"\u{{{:X}}}")"#, b as u32);
+            let expected = match Value::string_ascii_from_bytes(vec![b]) {
+                Ok(v) => Value::okay(v).unwrap(),
+                Err(_) => Value::err_uint(1),
+            };
+            crosscheck(&snippet, Ok(Some(expected)));
+        }
     }
 
     #[test]
