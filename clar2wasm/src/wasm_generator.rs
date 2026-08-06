@@ -2456,4 +2456,64 @@ mod tests {
             );
         }
     }
+
+    #[cfg(feature = "test-clarity-v1")]
+    #[test]
+    fn static_contract_call_has_right_type_set() {
+        let callee = (
+            ContractName::from_literal("callee"),
+            "(define-read-only (print-param (par {x: (optional uint),y: int,}))
+                        (print par))",
+        );
+        let caller = (
+            ContractName::from_literal("caller"),
+            "(contract-call? .callee print-param (tuple (x none) (y -54756928044990108781631836)))",
+        );
+
+        let expected = Ok(Some(Value::from(
+            TupleData::from_data(vec![
+                (ClarityName::from_literal("x"), Value::none()),
+                (
+                    ClarityName::from_literal("y"),
+                    Value::Int(-54756928044990108781631836),
+                ),
+            ])
+            .unwrap(),
+        )));
+        crate::tools::crosscheck_multi_contract(&[callee, caller], expected);
+    }
+
+    #[cfg(feature = "test-clarity-v1")]
+    #[test]
+    fn dynamic_contract_call_has_right_type_set() {
+        let callee = (
+            ContractName::from_literal("callee"),
+            "(define-trait printer
+                        ((print-param ({x: (optional uint), y: int})
+                                      (response {x: (optional uint), y: int} uint))))
+                     (define-public (print-param (par {x: (optional uint), y: int}))
+                        (ok (print par)))",
+        );
+        let caller = (
+            ContractName::from_literal("caller"),
+            "(use-trait printer .callee.printer)
+                     (define-private (call-it (tt <printer>))
+                        (contract-call? tt print-param (tuple (x none) (y -54756928044990108781631836))))
+                     (call-it .callee)",
+        );
+        let expected = Ok(Some(
+            Value::okay(Value::from(
+                TupleData::from_data(vec![
+                    (ClarityName::from_literal("x"), Value::none()),
+                    (
+                        ClarityName::from_literal("y"),
+                        Value::Int(-54756928044990108781631836),
+                    ),
+                ])
+                .unwrap(),
+            ))
+            .unwrap(),
+        ));
+        crate::tools::crosscheck_multi_contract(&[callee, caller], expected);
+    }
 }
