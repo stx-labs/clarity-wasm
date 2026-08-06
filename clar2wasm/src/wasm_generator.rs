@@ -2455,7 +2455,7 @@ mod tests {
 
     #[cfg(feature = "test-clarity-v1")]
     #[test]
-    fn static_contract_call_failure() {
+    fn static_contract_call_has_right_type_set() {
         let callee = (
             ContractName::from_literal("callee"),
             "(define-read-only (print-param (par {x: (optional uint),y: int,}))
@@ -2481,7 +2481,7 @@ mod tests {
 
     #[cfg(feature = "test-clarity-v1")]
     #[test]
-    fn dynamic_contract_call_failure() {
+    fn dynamic_contract_call_has_right_type_set() {
         let callee = (
             ContractName::from_literal("callee"),
             "(define-trait printer
