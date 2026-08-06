@@ -157,6 +157,10 @@ impl From<i32> for ErrorMap {
     }
 }
 
+/// Take ownership of an error behind a shared reference by swapping in a
+/// placeholder value. Only used for errors stashed in the `linked-error`
+/// `ExternRef`, which offers no by-value access; everywhere else, prefer
+/// `wasmtime::Error::downcast`.
 fn referror_to_error<T>(referror: &T, placeholder_error: T) -> T {
     // SAFETY:
     //
@@ -175,6 +179,7 @@ fn referror_to_error<T>(referror: &T, placeholder_error: T) -> T {
     // held in the referror.
     unsafe { core::ptr::replace((referror as *const T) as *mut T, placeholder_error) }
 }
+
 pub(crate) fn resolve_error(
     e: wasmtime::Error,
     instance: Instance,
@@ -182,22 +187,31 @@ pub(crate) fn resolve_error(
     epoch_id: &StacksEpochId,
     clarity_version: &ClarityVersion,
 ) -> VmExecutionError {
-    if let Some(vm_error) = e.root_cause().downcast_ref::<VmExecutionError>() {
-        return referror_to_error(vm_error, VmExecutionError::Wasm(WasmError::ModuleNotFound));
+    // `wasmtime::Error` is `anyhow::Error`, so `downcast` peels off any
+    // context layers and returns the original error by value. Since these
+    // error types report no `source()`, a successful `root_cause()` match
+    // implies the error is the payload, so `downcast` finds it too.
+    let e = match e.downcast::<VmExecutionError>() {
+        Ok(vm_error) => return vm_error,
+        Err(e) => e,
     };
 
-    if let Some(vm_error) = e.root_cause().downcast_ref::<RuntimeCheckErrorKind>() {
-        return <RuntimeCheckErrorKind as std::convert::Into<VmExecutionError>>::into(
-            referror_to_error(vm_error, RuntimeCheckErrorKind::AtBlockUnavailable),
-        );
+    let e = match e.downcast::<RuntimeCheckErrorKind>() {
+        Ok(check_error) => return check_error.into(),
+        Err(e) => e,
     };
 
-    if let Some(vm_error) = e.root_cause().downcast_ref::<RuntimeError>() {
-        return <RuntimeError as std::convert::Into<VmExecutionError>>::into(referror_to_error(
-            vm_error,
-            RuntimeError::ArithmeticOverflow,
-        ));
+    let e = match e.downcast::<RuntimeError>() {
+        Ok(runtime_error) => return runtime_error.into(),
+        Err(e) => e,
     };
+
+    debug_assert!(
+        !e.root_cause().is::<VmExecutionError>()
+            && !e.root_cause().is::<RuntimeCheckErrorKind>()
+            && !e.root_cause().is::<RuntimeError>(),
+        "clarity error reachable via root_cause() but not downcast(): {e:?}"
+    );
 
     // Check if the error is caused by
     // an unreachable Wasm trap.

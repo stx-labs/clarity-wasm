@@ -13,12 +13,16 @@ use clarity::vm::analysis::run_analysis;
 use clarity::vm::ast::build_ast;
 use clarity::vm::clarity_wasm::CostMeter;
 use clarity::vm::contexts::{EventBatch, GlobalContext};
+#[cfg(feature = "developer-mode")]
+use clarity::vm::contexts::{ExecutionState, InvocationContext};
 use clarity::vm::costs::{CostTracker, ExecutionCost, LimitedCostTracker};
 use clarity::vm::database::ClarityDatabase;
 use clarity::vm::errors::{StaticCheckErrorKind, VmExecutionError, WasmError};
 use clarity::vm::events::{SmartContractEventData, StacksTransactionEvent};
 use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
 use clarity::vm::{eval_all, ClarityVersion, ContractContext, ContractName, Value};
+#[cfg(feature = "developer-mode")]
+use clarity::vm::{CallStack, SymbolicExpression};
 use clarity_types::types::TypeSignature;
 use regex::Regex;
 
@@ -421,6 +425,77 @@ impl TestEnvironment {
 
     pub fn interpret(&mut self, snippet: &str) -> Result<Option<Value>, VmExecutionError> {
         self.interpret_contract_with_snippet("snippet", snippet)
+    }
+
+    /// Call a public function in a previously initialized contract, passing
+    /// the arguments as values, going through stacks-core's
+    /// `ExecutionState::execute_contract` exactly as transaction processing
+    /// does (including the argument sanitization in
+    /// `inner_execute_contract`). Contracts initialized with
+    /// `init_contract_with_snippet` execute on the Wasm runtime, while
+    /// contracts initialized with `interpret_contract_with_snippet` execute
+    /// on the interpreter.
+    #[cfg(feature = "developer-mode")]
+    pub fn execute_public_function(
+        &mut self,
+        contract_name: &str,
+        function_name: &str,
+        args: &[Value],
+    ) -> Result<Value, VmExecutionError> {
+        let contract_id = QualifiedContractIdentifier::new(
+            StandardPrincipalData::transient(),
+            ContractName::try_from(contract_name)?,
+        );
+
+        let mut cost_tracker = LimitedCostTracker::new_free();
+        std::mem::swap(&mut self.cost_tracker, &mut cost_tracker);
+
+        let conn = ClarityDatabase::new(
+            &mut self.datastore,
+            &self.burn_datastore,
+            &self.burn_datastore,
+        );
+        let mut global_context = GlobalContext::new(
+            self.is_mainnet,
+            self.chain_id,
+            conn,
+            cost_tracker,
+            self.epoch,
+        );
+        global_context.begin();
+
+        let placeholder_context =
+            ContractContext::new(QualifiedContractIdentifier::transient(), self.version);
+        let sender: PrincipalData = StandardPrincipalData::transient().into();
+        let args: Vec<SymbolicExpression> = args
+            .iter()
+            .map(|value| SymbolicExpression::atom_value(value.clone()))
+            .collect();
+
+        let result = {
+            let mut call_stack = CallStack::new();
+            let mut exec_state = ExecutionState {
+                global_context: &mut global_context,
+                call_stack: &mut call_stack,
+            };
+            let invoke_ctx = InvocationContext {
+                contract_context: &placeholder_context,
+                sender: Some(sender.clone()),
+                caller: Some(sender),
+                sponsor: None,
+            };
+            exec_state.execute_contract(&invoke_ctx, &contract_id, function_name, &args, false)
+        };
+
+        if result.is_ok() {
+            let (_, events) = global_context.commit().unwrap();
+            if let Some(events) = events {
+                self.events.push(events);
+            }
+        }
+        self.cost_tracker = global_context.cost_track;
+
+        result
     }
 }
 
@@ -827,6 +902,57 @@ pub fn crosscheck_multi_contract_with_env(
     assert_eq!(
         final_value, &expected,
         "final value is not the expected {final_value:?}"
+    );
+
+    compare_events(interpreted_env.get_events(), compiled_env.get_events());
+}
+
+/// Initialize the given contracts (in order) with both the compiler and the
+/// interpreter, then call a public function, passing the arguments as
+/// values, going through stacks-core's `ExecutionState::execute_contract` on
+/// both sides, exactly as transaction processing does. Asserts that the
+/// compiled and interpreted results match each other and the expected
+/// result.
+///
+/// Since the call arguments do not go through the static analysis, this
+/// allows tests to exercise the runtime checks performed by `contract-call?`.
+#[cfg(feature = "developer-mode")]
+pub fn crosscheck_multi_contract_execute_public(
+    contracts: &[(ContractName, &str)],
+    call: (&str, &str, &[Value]),
+    expected: Result<Value, VmExecutionError>,
+) {
+    let (call_contract, call_function, call_args) = call;
+    let env = TestEnvironment::default();
+
+    // compiled version
+    let mut compiled_env = env.clone();
+    for (name, snippet) in contracts {
+        compiled_env
+            .init_contract_with_snippet(name, snippet)
+            .unwrap_or_else(|e| panic!("Failed to init contract \"{name}\": {e:?}"));
+    }
+    let compiled_result =
+        compiled_env.execute_public_function(call_contract, call_function, call_args);
+
+    // interpreted version
+    let mut interpreted_env = env;
+    for (name, snippet) in contracts {
+        interpreted_env
+            .interpret_contract_with_snippet(name, snippet)
+            .unwrap_or_else(|e| panic!("Failed to interpret contract \"{name}\": {e:?}"));
+    }
+    let interpreted_result =
+        interpreted_env.execute_public_function(call_contract, call_function, call_args);
+
+    assert_eq!(
+        compiled_result, interpreted_result,
+        "Compiled and interpreted results diverge in call to \"{call_contract}.{call_function}\"\ncompiled: {compiled_result:?}\ninterpreted: {interpreted_result:?}"
+    );
+
+    assert_eq!(
+        compiled_result, expected,
+        "value is not the expected {compiled_result:?}"
     );
 
     compare_events(interpreted_env.get_events(), compiled_env.get_events());
