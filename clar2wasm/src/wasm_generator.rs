@@ -8,8 +8,9 @@ use clarity::vm::analysis::ContractAnalysis;
 use clarity::vm::diagnostic::DiagnosableError;
 use clarity::vm::types::signatures::{CallableSubtype, StringUTF8Length};
 use clarity::vm::types::{
-    ASCIIData, CharType, FixedFunction, FunctionType, ListTypeData, PrincipalData, SequenceData,
-    SequenceSubtype, StringSubtype, TraitIdentifier, TupleTypeSignature, TypeSignature,
+    ASCIIData, CharType, FixedFunction, FunctionType, ListTypeData, PrincipalData,
+    QualifiedContractIdentifier, SequenceData, SequenceSubtype, StringSubtype, TraitIdentifier,
+    TupleTypeSignature, TypeSignature,
 };
 use clarity::vm::variables::NativeVariables;
 use clarity::vm::{functions, variables, ClarityName, SymbolicExpression, SymbolicExpressionType};
@@ -51,6 +52,8 @@ pub struct WasmGenerator {
     pub(crate) literal_memory_offset: HashMap<LiteralMemoryEntry, u32>,
     /// Map constants to an offset in the literal memory.
     pub(crate) constants: HashMap<String, TypeSignature>,
+    /// Map constants bound to a contract principal literal to their contract identifier.
+    pub(crate) constant_contract_principals: HashMap<String, QualifiedContractIdentifier>,
     /// The current function body block, used for early exit
     pub(crate) early_return_block_id: Option<InstrSeqId>,
     /// The type of the current function.
@@ -398,6 +401,7 @@ impl WasmGenerator {
             linked_error: linked_error_id,
             literal_memory_offset: HashMap::new(),
             constants: HashMap::new(),
+            constant_contract_principals: HashMap::new(),
             bindings: Bindings::new(),
             cost_context: None,
             early_return_block_id: None,

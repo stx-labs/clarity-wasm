@@ -1,5 +1,6 @@
 use std::cell::Cell;
 
+use clarity::types::StacksEpochId;
 use clarity::vm::clarity_wasm::get_type_size;
 use clarity::vm::types::signatures::CallableSubtype;
 use clarity::vm::types::{PrincipalData, TypeSignature};
@@ -664,17 +665,33 @@ impl ComplexWord for ContractCall {
 
         let function_name = args.get_name(1)?;
         let contract_expr = args.get_expr(0)?;
-        if let SymbolicExpressionType::LiteralValue(Value::Principal(PrincipalData::Contract(
-            ref contract_identifier,
-        ))) = contract_expr.expr
-        {
+
+        // Resolve a static contract identifier from either a literal principal
+        // or a constant holding a callable principal literal.
+        let static_contract_id = match (
+            &contract_expr.expr,
+            generator.contract_analysis.epoch >= StacksEpochId::Epoch34,
+        ) {
+            (
+                SymbolicExpressionType::LiteralValue(Value::Principal(PrincipalData::Contract(
+                    contract_identifier,
+                ))),
+                _,
+            ) => Some(contract_identifier.clone()),
+            (SymbolicExpressionType::Atom(name), true) => generator
+                .constant_contract_principals
+                .get(name.as_str())
+                .cloned(),
+            _ => None,
+        };
+
+        if let Some(contract_identifier) = static_contract_id {
             // This is a static contract call.
             // Push an empty trait name first
             builder.i32_const(0).i32_const(0);
             // Push the contract identifier onto the stack
             // TODO(#111): These should be tracked for reuse, similar to the string literals
-            let (id_offset, id_length) =
-                generator.add_literal(&contract_identifier.clone().into())?;
+            let (id_offset, id_length) = generator.add_literal(&contract_identifier.into())?;
             builder
                 .i32_const(id_offset as i32)
                 .i32_const(id_length as i32);
