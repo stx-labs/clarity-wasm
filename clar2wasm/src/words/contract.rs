@@ -109,7 +109,6 @@ impl ComplexWord for AsContractSafe {
             ArgumentCountCheck::AtLeast
         );
 
-        // TODO: add cost tracking #783
         let [allowances, inners @ ..] = args else {
             unreachable!()
         };
@@ -145,10 +144,13 @@ impl ComplexWord for AsContractSafe {
         // Set and make sure we are not overwriting an existing allowance context local
         let former_allowance_ctx = ALLOWANCE_CONTEXT.replace(Some(*allowance_ref_local));
 
-        // Register each allowance (e.g. with-stx, with-stacking).
-        for allowance in allowances.match_list().ok_or_else(|| {
+        let allowance_list = allowances.match_list().ok_or_else(|| {
             GeneratorError::TypeError("as-contract?'s allowances should be a list".to_owned())
-        })? {
+        })?;
+        // Thanks to static type check we know we have less than 128 allowances
+        self.charge(generator, builder, allowance_list.len() as u32)?;
+        // Register each allowance (e.g. with-stx, with-stacking).
+        for allowance in allowance_list {
             generator.traverse_expr(builder, allowance)?;
         }
 
@@ -323,10 +325,13 @@ impl ComplexWord for RestrictAssets {
         // Set and make sure we are not overwriting an existing allowance context local
         let former_allowance_ctx = ALLOWANCE_CONTEXT.replace(Some(*allowance_ref_local));
 
+        let allowance_list = allowances.match_list().ok_or(GeneratorError::TypeError(
+            "restrict-assets?'s allowances should be a list".to_owned(),
+        ))?;
+        // Thanks to static type check we know we have less than 128 allowances
+        self.charge(generator, builder, allowance_list.len() as u32)?;
         // Register each allowance (e.g. with-stx, with-stacking).
-        for allowance in allowances.match_list().ok_or_else(|| {
-            GeneratorError::TypeError("restrict-assets?'s allowances should be a list".to_owned())
-        })? {
+        for allowance in allowance_list {
             generator.traverse_expr(builder, allowance)?;
         }
 
@@ -534,8 +539,6 @@ impl ComplexWord for WithNft {
     ) -> Result<(), GeneratorError> {
         check_args!(generator, builder, 3, args.len(), ArgumentCountCheck::Exact);
 
-        // TODO: add cost tracking #783
-
         let token_contract = args.get_expr(0)?;
         let token_name = args.get_expr(1)?;
         let allowance = args.get_expr(2)?;
@@ -580,8 +583,6 @@ impl ComplexWord for WithStacking {
     ) -> Result<(), GeneratorError> {
         check_args!(generator, builder, 1, args.len(), ArgumentCountCheck::Exact);
 
-        // TODO: add cost tracking #783
-
         let allowance = args.get_expr(0)?;
 
         with_allowance_context(|allowance_context| {
@@ -617,8 +618,6 @@ impl ComplexWord for WithStx {
         args: &[SymbolicExpression],
     ) -> Result<(), GeneratorError> {
         check_args!(generator, builder, 1, args.len(), ArgumentCountCheck::Exact);
-
-        // TODO: add cost tracking #783
 
         let allowance = args.get_expr(0)?;
 
@@ -812,8 +811,7 @@ impl SimpleWord for ContractHash {
             ArgumentCountCheck::Exact
         );
 
-        // TODO: add cost tests after the costs are implemented (see issue #783)
-        // self.charge(generator, builder, 0)?;
+        self.charge(generator, builder, 0)?;
 
         // Reserve space for the return value (response (buff 32) uint)
         let (return_offset, return_size) =

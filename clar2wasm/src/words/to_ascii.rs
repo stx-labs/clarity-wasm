@@ -5,6 +5,7 @@ use walrus::ir::{BinaryOp, ExtendedLoad, LoadKind, MemArg, StoreKind, UnaryOp};
 use walrus::LocalId;
 
 use crate::check_args;
+use crate::cost::charge_ok_or_throw_runtime_error;
 use crate::wasm_generator::GeneratorError;
 use crate::wasm_utils::ArgumentCountCheck;
 use crate::words::{ComplexWord, Word};
@@ -32,10 +33,13 @@ impl ComplexWord for ToAscii {
             // the check above makes sure we have exactly one argument.
             unreachable!()
         };
-        let arg_ty = generator.get_expr_type(arg).ok_or_else(|| {
-            GeneratorError::TypeError("to-ascii? 's argument should be typed".to_owned())
-        })?;
-
+        let arg_ty = generator
+            .get_expr_type(arg)
+            .ok_or_else(|| {
+                GeneratorError::TypeError("to-ascii? 's argument should be typed".to_owned())
+            })?
+            .clone();
+        charge_ok_or_throw_runtime_error(&arg_ty.size(), generator, builder, self)?;
         match arg_ty {
             TypeSignature::BoolType => to_ascii_bool(generator, builder, expr, arg),
             TypeSignature::IntType => to_ascii_int(generator, builder, expr, arg),
@@ -587,27 +591,46 @@ fn to_ascii_string_utf8(
                 )
                 .local_tee(*unicode);
 
-            // we break the loop if the character is not ascii
+            // we break the loop if the character is not valid clarity ascii, meaning that a
+            // character should be alpha-numeric, or a punctuation, or a whitespace.
+            // Thus, valid characters are in the range [32..=126] or in [9, 10, 12, 13].
+            // First, we make sure it's smaller than 128
             loop_
                 .i32_const(!127u32.to_be() as i32)
                 .binop(BinaryOp::I32And)
                 .br_if(block_id);
+            // Then, we check that the character is not 127
+            loop_
+                // we consider only the least significant byte from now on
+                .local_get(*unicode)
+                .i32_const(24)
+                .binop(BinaryOp::I32ShrU)
+                .local_tee(*unicode);
+            loop_.i32_const(127).binop(BinaryOp::I32Eq).br_if(block_id);
+            // Then we check if the number is smaller than 32...
+            loop_
+                .local_get(*unicode)
+                .i32_const(32)
+                .binop(BinaryOp::I32LtU);
+            // ... and not in [9, 10, 12, 13] -> (!0x3600 >> c) & 1
+            loop_
+                .i32_const(!0x3600u32 as i32)
+                .local_get(*unicode)
+                .binop(BinaryOp::I32ShrU)
+                .i32_const(1)
+                .binop(BinaryOp::I32And);
+            loop_.binop(BinaryOp::I32And).br_if(block_id);
 
             // otherwise we store the last byte
             // CAUTION: for now, string-utf8 are still stored in big-endian order!!!
-            loop_
-                .local_get(*current_offset)
-                .local_get(*unicode)
-                .i32_const(3 * 8)
-                .binop(BinaryOp::I32ShrU)
-                .store(
-                    memory,
-                    StoreKind::I32_8 { atomic: false },
-                    MemArg {
-                        align: 1,
-                        offset: 0,
-                    },
-                );
+            loop_.local_get(*current_offset).local_get(*unicode).store(
+                memory,
+                StoreKind::I32_8 { atomic: false },
+                MemArg {
+                    align: 1,
+                    offset: 0,
+                },
+            );
 
             // now we update the locals and loop if we still have characters to process
             loop_
@@ -816,6 +839,16 @@ mod tests {
             r#"(to-ascii? u"a\u{1f601}bcd")"#,
             Ok(Some(Value::err_uint(1))),
         );
+
+        // making sure only valid clarity ascii value are accepted
+        for b in u8::MIN..=u8::MAX {
+            let snippet = format!(r#"(to-ascii? u"\u{{{:X}}}")"#, b as u32);
+            let expected = match Value::string_ascii_from_bytes(vec![b]) {
+                Ok(v) => Value::okay(v).unwrap(),
+                Err(_) => Value::err_uint(1),
+            };
+            crosscheck(&snippet, Ok(Some(expected)));
+        }
     }
 
     #[test]
