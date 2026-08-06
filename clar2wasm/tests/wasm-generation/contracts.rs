@@ -681,8 +681,9 @@ proptest! {
                 let func_name = if name.is_empty()
                     || name.len() == 1
                     || (name.starts_with('u') && name.chars().nth(1).is_some_and(|c| c.is_ascii_digit()))
+                    || clarity::vm::is_reserved(&name, &TestConfig::clarity_version())
                 {
-                    format!("func{}", idx)
+                    format!("func-{}", idx)
                 } else {
                     name
                 };
