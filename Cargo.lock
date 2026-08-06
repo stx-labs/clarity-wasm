@@ -465,7 +465,7 @@ dependencies = [
 [[package]]
 name = "clarity"
 version = "2.3.0"
-source = "git+https://github.com/stacks-network/stacks-core?branch=feat%2Fclarity-wasm-develop#d87bfebaa56d70b31c955ef3835712cc5bda34e9"
+source = "git+https://github.com/stacks-network/stacks-core?branch=feat%2Fclarity-wasm-develop#1d786f79a10a449cb26e75f708c2d5ad79ad2df4"
 dependencies = [
  "clarity-types",
  "hashbrown 0.15.5",
@@ -487,7 +487,7 @@ dependencies = [
 [[package]]
 name = "clarity-types"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core?branch=feat%2Fclarity-wasm-develop#d87bfebaa56d70b31c955ef3835712cc5bda34e9"
+source = "git+https://github.com/stacks-network/stacks-core?branch=feat%2Fclarity-wasm-develop#1d786f79a10a449cb26e75f708c2d5ad79ad2df4"
 dependencies = [
  "lazy_static",
  "regex",
@@ -497,6 +497,7 @@ dependencies = [
  "serde_json",
  "slog",
  "stacks-common",
+ "variant_count",
  "wasmtime",
 ]
 
@@ -2494,7 +2495,7 @@ dependencies = [
 [[package]]
 name = "stacks-common"
 version = "0.0.2"
-source = "git+https://github.com/stacks-network/stacks-core?branch=feat%2Fclarity-wasm-develop#d87bfebaa56d70b31c955ef3835712cc5bda34e9"
+source = "git+https://github.com/stacks-network/stacks-core?branch=feat%2Fclarity-wasm-develop#1d786f79a10a449cb26e75f708c2d5ad79ad2df4"
 dependencies = [
  "chrono",
  "curve25519-dalek",
@@ -2747,6 +2748,17 @@ checksum = "2f87b8aa10b915a06587d0dec516c282ff295b475d94abf425d62b57710070a2"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "variant_count"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17c13b28baa922722e35ded153b394d0247b4942b4ad54f85713a7de672cdf0e"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.106",
 ]
 
 [[package]]

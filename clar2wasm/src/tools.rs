@@ -17,6 +17,7 @@ use clarity::vm::costs::{CostTracker, ExecutionCost, LimitedCostTracker};
 use clarity::vm::database::ClarityDatabase;
 use clarity::vm::errors::{StaticCheckErrorKind, VmExecutionError, WasmError};
 use clarity::vm::events::{SmartContractEventData, StacksTransactionEvent};
+use clarity::vm::time_tracker::TimeTracker;
 use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
 use clarity::vm::{eval_all, ClarityVersion, ContractContext, ContractName, Value};
 use clarity_types::types::TypeSignature;
@@ -357,6 +358,7 @@ impl TestEnvironment {
                     self.epoch,
                     self.version,
                     true,
+                    TimeTracker::unlimited(),
                 )
                 .map_err(|boxed| StaticCheckErrorKind::Unreachable(format!("{:?}", boxed.0)))
             })
