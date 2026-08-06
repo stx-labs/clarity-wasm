@@ -5,12 +5,13 @@ use clarity::vm::errors::{
     WasmError,
 };
 use clarity::vm::types::ResponseData;
-use clarity::vm::{ClarityVersion, Value};
+use clarity::vm::Value;
 use clarity_types::types::{ASCIIData, CharType, TypeSignature};
 use clarity_types::{ClarityName, ClarityTypeError};
 use walrus::InstrSeqBuilder;
-use wasmtime::{AsContextMut, Instance, Trap};
+use wasmtime::{AsContext, AsContextMut, Instance, Trap};
 
+use crate::initialize::ClarityWasmContext;
 use crate::wasm_generator::{GeneratorError, WasmGenerator};
 use crate::wasm_utils::{
     get_global, read_bytes_from_wasm, read_from_wasm, read_from_wasm_indirect,
@@ -175,12 +176,11 @@ fn referror_to_error<T>(referror: &T, placeholder_error: T) -> T {
     // held in the referror.
     unsafe { core::ptr::replace((referror as *const T) as *mut T, placeholder_error) }
 }
-pub(crate) fn resolve_error(
+pub(crate) fn resolve_error<'a, 'b: 'a>(
     e: wasmtime::Error,
     instance: Instance,
-    mut store: impl AsContextMut,
+    mut store: impl AsContextMut<Data = ClarityWasmContext<'a, 'b>>,
     epoch_id: &StacksEpochId,
-    clarity_version: &ClarityVersion,
 ) -> VmExecutionError {
     if let Some(vm_error) = e.root_cause().downcast_ref::<VmExecutionError>() {
         return referror_to_error(vm_error, VmExecutionError::Wasm(WasmError::ModuleNotFound));
@@ -205,7 +205,7 @@ pub(crate) fn resolve_error(
     // In this case, runtime errors are handled
     // by being mapped to the corresponding ClarityWasm Errors.
     if let Some(Trap::UnreachableCodeReached) = e.root_cause().downcast_ref::<Trap>() {
-        return from_runtime_error_code(instance, &mut store, e, epoch_id, clarity_version);
+        return from_runtime_error_code(instance, &mut store, e, epoch_id);
     }
 
     // All other errors are treated as general runtime errors.
@@ -223,12 +223,11 @@ pub(crate) fn resolve_error(
 /// Returns a Clarity `Error` that corresponds to the runtime error encountered during
 /// WebAssembly execution.
 ///
-fn from_runtime_error_code(
+fn from_runtime_error_code<'a, 'b: 'a>(
     instance: Instance,
-    mut store: impl AsContextMut,
+    mut store: impl AsContextMut<Data = ClarityWasmContext<'a, 'b>>,
     e: wasmtime::Error,
     epoch_id: &StacksEpochId,
-    clarity_version: &ClarityVersion,
 ) -> VmExecutionError {
     let runtime_error_code = get_global_i32(&instance, &mut store, "runtime-error-code");
 
@@ -260,7 +259,7 @@ fn from_runtime_error_code(
             VmExecutionError::Runtime(RuntimeError::UnwrapFailure, Some(Vec::new()))
         }
         ErrorMap::ShortReturnAssertionFailure => {
-            let clarity_val = short_return_value(&instance, &mut store, epoch_id, clarity_version);
+            let clarity_val = short_return_value(&instance, &mut store, epoch_id);
             VmExecutionError::EarlyReturn(EarlyReturnError::AssertionFailed(Box::new(clarity_val)))
         }
         ErrorMap::ArithmeticPowError => VmExecutionError::Runtime(
@@ -287,7 +286,7 @@ fn from_runtime_error_code(
             VmExecutionError::RuntimeCheck(RuntimeCheckErrorKind::NameAlreadyUsed(arg_name))
         }
         ErrorMap::ShortReturnExpectedValueResponse => {
-            let clarity_val = short_return_value(&instance, &mut store, epoch_id, clarity_version);
+            let clarity_val = short_return_value(&instance, &mut store, epoch_id);
             VmExecutionError::EarlyReturn(EarlyReturnError::UnwrapFailed(Box::new(
                 Value::Response(ResponseData {
                     committed: false,
@@ -301,7 +300,7 @@ fn from_runtime_error_code(
             )))
         }
         ErrorMap::ShortReturnExpectedValue => {
-            let clarity_val = short_return_value(&instance, &mut store, epoch_id, clarity_version);
+            let clarity_val = short_return_value(&instance, &mut store, epoch_id);
             VmExecutionError::EarlyReturn(EarlyReturnError::UnwrapFailed(Box::new(clarity_val)))
         }
         ErrorMap::ArgumentCountMismatch => {
@@ -441,11 +440,10 @@ fn extract_expected_and_got(bytes: &[u8]) -> (usize, usize) {
 ///
 /// Returns a deserialized Clarity `Value` representing the short return value.
 ///
-fn short_return_value(
+fn short_return_value<'a, 'b: 'a>(
     instance: &Instance,
-    store: &mut impl AsContextMut,
+    store: &mut impl AsContextMut<Data = ClarityWasmContext<'a, 'b>>,
     epoch_id: &StacksEpochId,
-    clarity_version: &ClarityVersion,
 ) -> Value {
     let val_offset = get_global_i32(instance, store, "runtime-error-value-offset");
     let type_ser_offset = get_global_i32(instance, store, "runtime-error-type-ser-offset");
@@ -458,7 +456,13 @@ fn short_return_value(
     let type_ser_str = read_identifier_from_wasm(memory, store, type_ser_offset, type_ser_len)
         .unwrap_or_else(|e| panic!("Could not recover stringified type: {e}"));
 
-    let value_ty = signature_from_string(&type_ser_str, *clarity_version, *epoch_id)
+    let clarity_version = *store
+        .as_context()
+        .data()
+        .contract_context()
+        .get_clarity_version();
+
+    let value_ty = signature_from_string(&type_ser_str, clarity_version, *epoch_id)
         .unwrap_or_else(|e| panic!("Could not recover thrown value: {e}"));
 
     read_from_wasm_indirect(memory, store, &value_ty, val_offset, *epoch_id)

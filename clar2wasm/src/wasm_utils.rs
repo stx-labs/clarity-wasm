@@ -12,9 +12,10 @@ use clarity::vm::types::{
 use clarity::vm::{ClarityName, ClarityVersion, ContractName, Value};
 use stacks_common::types::StacksEpochId;
 use walrus::{GlobalId, InstrSeqBuilder};
-use wasmtime::{AsContextMut, Memory, Val, ValType};
+use wasmtime::{AsContext, AsContextMut, Memory, Val, ValType};
 
 use crate::error_mapping::ErrorMap;
+use crate::initialize::ClarityWasmContext;
 use crate::wasm_generator::{GeneratorError, WasmGenerator};
 
 #[allow(non_snake_case)]
@@ -83,12 +84,12 @@ pub const PRINCIPAL_BYTES_MAX: usize = STANDARD_PRINCIPAL_BYTES + CONTRACT_NAME_
 /// - `store` is the Wasm store.
 ///
 /// Returns the Clarity `Value` and the number of Wasm `Val`s that were used.
-pub fn wasm_to_clarity_value(
+pub fn wasm_to_clarity_value<'a, 'b: 'a>(
     type_sig: &TypeSignature,
     value_index: usize,
     buffer: &[Val],
     memory: Memory,
-    store: &mut impl AsContextMut,
+    store: &mut impl AsContextMut<Data = ClarityWasmContext<'a, 'b>>,
     epoch: StacksEpochId,
 ) -> Result<(Option<Value>, usize), VmExecutionError> {
     match type_sig {
@@ -341,9 +342,9 @@ pub fn wasm_to_clarity_value(
 /// In-memory values require one extra level
 /// of indirection, so this function will read the offset and length from the
 /// memory, then read the actual value.
-pub fn read_from_wasm_indirect(
+pub fn read_from_wasm_indirect<'a, 'b: 'a>(
     memory: Memory,
-    store: &mut impl AsContextMut,
+    store: &mut impl AsContextMut<Data = ClarityWasmContext<'a, 'b>>,
     ty: &TypeSignature,
     mut offset: i32,
     epoch: StacksEpochId,
@@ -361,9 +362,9 @@ pub fn read_from_wasm_indirect(
 
 /// Read a value from the Wasm memory at `offset` with `length`, given the
 /// provided Clarity `TypeSignature`.
-pub fn read_from_wasm(
+pub fn read_from_wasm<'a, 'b: 'a>(
     memory: Memory,
-    store: &mut impl AsContextMut,
+    store: &mut impl AsContextMut<Data = ClarityWasmContext<'a, 'b>>,
     ty: &TypeSignature,
     offset: i32,
     length: i32,
@@ -454,6 +455,11 @@ pub fn read_from_wasm(
             if contract_length == 0 {
                 Ok(Value::Principal(principal.into()))
             } else {
+                let clarity_version = *store
+                    .as_context()
+                    .data()
+                    .contract_context()
+                    .get_clarity_version();
                 let mut contract_name: Vec<u8> = vec![0; contract_length as usize];
                 memory
                     .read(store, current_offset, &mut contract_name)
@@ -464,18 +470,21 @@ pub fn read_from_wasm(
                     issuer: principal,
                     name: ContractName::try_from(contract_name)?,
                 };
-                Ok(
-                    if let TypeSignature::CallableType(CallableSubtype::Trait(trait_identifier)) =
-                        ty
-                    {
-                        Value::CallableContract(CallableData {
-                            contract_identifier: qualified_id,
-                            trait_identifier: Some(trait_identifier.clone()),
-                        })
-                    } else {
-                        Value::Principal(PrincipalData::Contract(qualified_id))
-                    },
-                )
+                // In Clarity 1 the interpreter returns a PrincipalData while later versions return a callableType.
+                // The serialization of both types is identical, it only differs in it's printed representation.
+                Ok(if clarity_version == ClarityVersion::Clarity1 {
+                    Value::Principal(PrincipalData::Contract(qualified_id))
+                } else if let TypeSignature::CallableType(CallableSubtype::Trait(
+                    trait_identifier,
+                )) = ty
+                {
+                    Value::CallableContract(CallableData {
+                        contract_identifier: qualified_id,
+                        trait_identifier: Some(trait_identifier.clone()),
+                    })
+                } else {
+                    Value::Principal(PrincipalData::Contract(qualified_id))
+                })
             }
         }
         TypeSignature::SequenceType(SequenceSubtype::BufferType(_b)) => {
@@ -736,8 +745,8 @@ pub fn placeholder_for_type(ty: ValType) -> Val {
 /// to the memory at `in_mem_offset`, and if `include_repr` is true, the offset
 /// and length of the value will be written to the memory at `offset`.
 /// Returns the number of bytes written at `offset` and at `in_mem_offset`.
-pub fn write_to_wasm(
-    mut store: impl AsContextMut,
+pub fn write_to_wasm<'a, 'b: 'a>(
+    mut store: impl AsContextMut<Data = ClarityWasmContext<'a, 'b>>,
     memory: Memory,
     ty: &TypeSignature,
     offset: i32,
