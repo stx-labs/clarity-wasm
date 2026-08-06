@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use clarity::types::StacksEpochId;
 use clarity::vm::analysis::{run_analysis, AnalysisDatabase, ContractAnalysis};
 use clarity::vm::ast::{build_ast_with_diagnostics, ContractAST};
@@ -7,9 +5,10 @@ use clarity::vm::costs::{ExecutionCost, LimitedCostTracker};
 use clarity::vm::diagnostic::Diagnostic;
 use clarity::vm::types::QualifiedContractIdentifier;
 use clarity::vm::ClarityVersion;
-use clarity_types::ClarityVersion::Clarity1;
 pub use walrus::Module;
 use wasm_generator::{GeneratorError, WasmGenerator};
+
+use crate::utils::annotate_types_for_contract_calls;
 
 mod cost;
 
@@ -108,46 +107,22 @@ pub fn compile(
         }
     };
 
-    // The Clarity 1 typechecker does not fully annotate `contract-call?`
-    // arguments, so recover their declared types up front and inject them after
-    if clarity_version == Clarity1 {
-        if let Some(type_map) = contract_analysis.type_map.as_mut() {
-            let mut trait_args = HashMap::new();
-            let types_to_add = match ast
-                .expressions
-                .iter()
-                .map(|expr| {
-                    utils::add_type_annotation_for_contracts(
-                        &ast,
-                        expr,
-                        analysis_db,
-                        epoch,
-                        &mut trait_args,
-                    )
-                })
-                .collect::<Result<Vec<_>, _>>()
-            {
-                Ok(a) => a.into_iter().flatten(),
-                #[allow(clippy::expect_used)]
-                Err(e) => {
-                    diagnostics.push(e.diagnostic);
-                    return Err(CompileError::Generic {
-                        ast: Box::new(ast),
-                        diagnostics: diagnostics.clone(),
-                        cost_tracker: Box::new(
-                            contract_analysis
-                                .cost_track
-                                .take()
-                                .expect("Failed to take cost tracker from contract analysis"),
-                        ),
-                    });
-                }
-            };
-            for (expr, ty) in types_to_add {
-                // We know that the type has already been set, that's why we change it in the first place.
-                // Therefore we discard the TypeAlreadyAnnotatedFailure that would be produced here.
-                let _ = type_map.set_type(&expr, ty);
-            }
+    if clarity_version == ClarityVersion::Clarity1 {
+        if let Err(e) =
+            annotate_types_for_contract_calls(&mut contract_analysis, &ast, analysis_db, epoch)
+        {
+            diagnostics.push(e.diagnostic);
+            #[allow(clippy::expect_used)]
+            return Err(CompileError::Generic {
+                ast: Box::new(ast),
+                diagnostics: diagnostics.clone(),
+                cost_tracker: Box::new(
+                    contract_analysis
+                        .cost_track
+                        .take()
+                        .expect("Failed to take cost tracker from contract analysis"),
+                ),
+            });
         }
     }
 
@@ -281,7 +256,7 @@ mod utils {
     /// the trait it was declared with (e.g. `tt` -> `printer`), so that dynamic
     /// calls through a trait reference can be resolved too.
     /// See issue #819
-    pub fn add_type_annotation_for_contracts(
+    fn add_type_annotation_for_contracts(
         ast: &ContractAST,
         expr: &SymbolicExpression,
         analysis_db: &mut AnalysisDatabase,
@@ -371,5 +346,40 @@ mod utils {
             })
             .collect::<Result<Vec<_>, _>>()
             .map(|a| a.into_iter().flatten().collect())
+    }
+
+    /// The Clarity 1 typechecker does not fully annotate `contract-call?`
+    /// arguments, so we recover their declared types up front and inject them after
+    pub fn annotate_types_for_contract_calls(
+        contract_analysis: &mut ContractAnalysis,
+        ast: &ContractAST,
+        analysis_db: &mut AnalysisDatabase,
+        epoch: StacksEpochId,
+    ) -> Result<(), StaticCheckError> {
+        if let Some(type_map) = contract_analysis.type_map.as_mut() {
+            let mut trait_args = HashMap::new();
+            let types_to_add = ast
+                .expressions
+                .iter()
+                .map(|expr| {
+                    add_type_annotation_for_contracts(
+                        ast,
+                        expr,
+                        analysis_db,
+                        epoch,
+                        &mut trait_args,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .flatten();
+
+            for (expr, ty) in types_to_add {
+                // We know that the type has already been set, that's why we change it in the first place.
+                // Therefore we discard the TypeAlreadyAnnotatedFailure that would be produced here.
+                let _ = type_map.set_type(&expr, ty);
+            }
+        }
+        Ok(())
     }
 }
