@@ -100,25 +100,17 @@ mod clarity_v4 {
                     StringSubtype::UTF8(i.try_into().unwrap()),
                 )))
             })) {
+                let snippet = format!("(to-ascii? {s})");
                 let expected = {
-                    let Value::Sequence(SequenceData::String(CharType::UTF8(bytes))) = s.inner() else {
+                    let Value::Sequence(SequenceData::String(CharType::UTF8(bytes))) = s.into() else {
                         unreachable!()
                     };
-                    let all_valid_ascii = bytes
-                        .data
-                        .iter()
-                        .all(|b| b.len() == 1 && (0x20u8..0x7e).contains(&b[0]));
-                    if all_valid_ascii {
-                        Value::okay(
-                            Value::string_ascii_from_bytes(bytes.data.iter().flatten().copied().collect())
-                                .unwrap(),
-                        )
-                        .unwrap()
-                    } else {
-                        Value::err_uint(1)
+                    match Value::string_ascii_from_bytes(bytes.data.into_iter().flatten().collect()) {
+                        Ok(ascii) => Value::okay(ascii).unwrap(),
+                        Err(_) => Value::err_uint(1),
                     }
                 };
-                crosscheck(&format!("(to-ascii? {s})"), Ok(Some(expected)));
+                crosscheck(&snippet, Ok(Some(expected)));
         }
     }
 }
