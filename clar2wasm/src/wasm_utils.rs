@@ -301,7 +301,7 @@ pub fn wasm_to_clarity_value<'a, 'b: 'a>(
                         {
                             Value::CallableContract(CallableData {
                                 contract_identifier: qualified_id,
-                                trait_identifier: Some(trait_identifier.clone()),
+                                trait_identifier: Some(Box::new(trait_identifier.clone())),
                             })
                         } else {
                             Value::Principal(PrincipalData::Contract(qualified_id))
@@ -480,7 +480,7 @@ pub fn read_from_wasm<'a, 'b: 'a>(
                 {
                     Value::CallableContract(CallableData {
                         contract_identifier: qualified_id,
-                        trait_identifier: Some(trait_identifier.clone()),
+                        trait_identifier: Some(Box::new(trait_identifier.clone())),
                     })
                 } else {
                     Value::Principal(PrincipalData::Contract(qualified_id))

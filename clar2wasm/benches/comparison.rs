@@ -11,10 +11,12 @@ use clarity::util::hash::Keccak256Hash;
 use clarity::util::secp256k1::{Secp256k1PrivateKey, Secp256k1PublicKey};
 use clarity::vm::analysis::{run_analysis, AnalysisDatabase};
 use clarity::vm::ast::build_ast_with_diagnostics;
-use clarity::vm::contexts::{ExecutionState, GlobalContext, InvocationContext};
+use clarity::vm::contexts::{
+    ExecutionState, FunctionExecutionOptions, GlobalContext, InvocationContext,
+};
 use clarity::vm::costs::LimitedCostTracker;
 use clarity::vm::database::{ClarityDatabase, MemoryBackingStore};
-use clarity::vm::time_tracker::TimeTracker;
+use clarity::vm::resource_limiter::ResourceLimiter;
 use clarity::vm::types::{QualifiedContractIdentifier, StandardPrincipalData, TupleData};
 use clarity::vm::{
     eval_all, CallStack, ClarityName, ClarityVersion, ContractContext, ContractName, Value,
@@ -75,7 +77,7 @@ where
         StacksEpochId::latest(),
         ClarityVersion::latest(),
         true,
-        TimeTracker::unlimited(),
+        ResourceLimiter::unlimited(),
     )
     .expect("Failed to run analysis");
 
@@ -119,7 +121,12 @@ where
 
     b.iter(|| {
         exec_state
-            .execute_function_as_transaction(&invoke_ctx, &func, &args, None, false)
+            .execute_function_as_transaction(
+                &invoke_ctx,
+                &func,
+                &args,
+                FunctionExecutionOptions::default(),
+            )
             .expect("Function call failed");
     });
 
@@ -206,7 +213,12 @@ where
 
     b.iter(|| {
         exec_state
-            .execute_function_as_transaction(&invoke_ctx, &func, &args, None, false)
+            .execute_function_as_transaction(
+                &invoke_ctx,
+                &func,
+                &args,
+                FunctionExecutionOptions::default(),
+            )
             .expect("Function call failed");
     });
 
@@ -502,8 +514,7 @@ fn add_prices_init(
                 Value::UInt(source),
                 Value::buff_from(pk.to_bytes_compressed()).unwrap(),
             ],
-            None,
-            false,
+            FunctionExecutionOptions::default(),
         )
         .expect("Adding source should succeed");
 

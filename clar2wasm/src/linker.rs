@@ -2008,12 +2008,21 @@ fn link_stx_account_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), Vm
                     .global_context
                     .database
                     .get_v3_unlock_height()?;
+                let v4_unlock_ht = caller
+                    .data_mut()
+                    .global_context
+                    .database
+                    .get_v4_unlock_height()?;
 
                 let locked = account.amount_locked();
                 let locked_high = (locked >> 64) as u64;
                 let locked_low = (locked & 0xffff_ffff_ffff_ffff) as u64;
-                let unlock_height =
-                    account.effective_unlock_height(v1_unlock_ht, v2_unlock_ht, v3_unlock_ht);
+                let unlock_height = account.effective_unlock_height(
+                    v1_unlock_ht,
+                    v2_unlock_ht,
+                    v3_unlock_ht,
+                    v4_unlock_ht,
+                );
                 let unlocked = account.amount_unlocked();
                 let unlocked_high = (unlocked >> 64) as u64;
                 let unlocked_low = (unlocked & 0xffff_ffff_ffff_ffff) as u64;

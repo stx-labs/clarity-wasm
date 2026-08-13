@@ -330,10 +330,10 @@ mod tests {
                         .map(|_| {
                             Value::CallableContract(clarity_types::types::CallableData {
                                 contract_identifier: contract_id.clone(),
-                                trait_identifier: Some(TraitIdentifier {
+                                trait_identifier: Some(Box::new(TraitIdentifier {
                                     name: ClarityName::from_literal("my-trait"),
                                     contract_identifier: contract_id.clone(),
-                                }),
+                                })),
                             })
                         })
                         .collect(),

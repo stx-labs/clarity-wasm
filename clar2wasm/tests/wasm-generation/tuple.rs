@@ -38,7 +38,11 @@ proptest! {
     #[test]
     fn crosscheck_merge(t1 in tuple_gen(), t2 in tuple_gen()) {
 
-        let expected = clarity::vm::functions::tuples::tuple_merge(t1.clone(), t2.clone()).unwrap();
+        let expected = {
+            let Value::Tuple(base) = &t1 else {unreachable!()};
+            let Value::Tuple(updates) = &t2 else {unreachable!()};
+            TupleData::shallow_merge(base.clone(), updates.clone()).into()
+        };
 
         crosscheck(
             &format!("(merge {} {})", PropValue(t1), PropValue(t2)),
@@ -52,12 +56,13 @@ proptest! {
 
     #[test]
     fn crosscheck_get(t in tuple_gen(), v in strategies_base().prop_flat_map(PropValue::from_type)) {
-        let merged = clarity::vm::functions::tuples::tuple_merge(
-            t.clone(),
-            Value::Tuple(
+        let merged = {
+            let Value::Tuple(base) = t else {unreachable!()};
+            TupleData::shallow_merge(
+                base,
                 TupleData::from_data(vec![(ClarityName::from_literal("new"), v.clone().into())]).unwrap()
-            ))
-            .unwrap();
+            ).into()
+        };
 
         crosscheck(
             &format!("(get new {})", PropValue(merged)),
