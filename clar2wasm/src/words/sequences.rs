@@ -1914,6 +1914,13 @@ mod tests {
             .contains("expecting 2 arguments, got 3"));
     }
 
+    #[cfg(any(
+        feature = "test-clarity-v1",
+        feature = "test-clarity-v2",
+        feature = "test-clarity-v3",
+        feature = "test-clarity-v4",
+        feature = "test-clarity-v5"
+    ))]
     #[test]
     fn concat_less_than_two_args() {
         let result = evaluate("(concat (list 1 2 3))");
@@ -1924,6 +1931,13 @@ mod tests {
             .contains("expecting 2 arguments, got 1"));
     }
 
+    #[cfg(any(
+        feature = "test-clarity-v1",
+        feature = "test-clarity-v2",
+        feature = "test-clarity-v3",
+        feature = "test-clarity-v4",
+        feature = "test-clarity-v5"
+    ))]
     #[test]
     fn concat_more_than_two_args() {
         let result = evaluate("(concat (list 1 2 3) (list 4 5) (list 6 7))");
@@ -1964,6 +1978,7 @@ mod tests {
             .contains("expecting 1 arguments, got 2"));
     }
 
+    #[cfg(not(feature = "test-clarity-v1"))]
     #[test]
     fn element_at_less_than_two_args() {
         let result = evaluate("(element-at? (list 1 2 3))");
@@ -1974,6 +1989,7 @@ mod tests {
             .contains("expecting 2 arguments, got 1"));
     }
 
+    #[cfg(not(feature = "test-clarity-v1"))]
     #[test]
     fn element_at_more_than_two_args() {
         let result = evaluate("(element-at? (list 1 2 3) 1 0)");
@@ -1984,6 +2000,7 @@ mod tests {
             .contains("expecting 2 arguments, got 3"));
     }
 
+    #[cfg(not(feature = "test-clarity-v1"))]
     #[test]
     fn replace_at_less_than_three_args() {
         let result = evaluate("(replace-at? (list 1 2 3) 2)");
@@ -1994,6 +2011,7 @@ mod tests {
             .contains("expecting 3 arguments, got 2"));
     }
 
+    #[cfg(not(feature = "test-clarity-v1"))]
     #[test]
     fn replace_at_more_than_three_args() {
         let result = evaluate("(replace-at? (list 1 2 3) 1 4 0)");
@@ -2004,6 +2022,7 @@ mod tests {
             .contains("expecting 3 arguments, got 4"));
     }
 
+    #[cfg(not(feature = "test-clarity-v1"))]
     #[test]
     fn slice_less_than_three_args() {
         let result = evaluate("(slice? (list 1 2 3) u1)");
@@ -2014,6 +2033,7 @@ mod tests {
             .contains("expecting 3 arguments, got 2"));
     }
 
+    #[cfg(not(feature = "test-clarity-v1"))]
     #[test]
     fn slice_more_than_three_args() {
         let result = evaluate("(slice? (list 1 2 3) u1 u2 u3)");

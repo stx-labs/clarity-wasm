@@ -1723,6 +1723,7 @@ mod tests {
                 .contains("expecting 1 arguments, got 2"));
         }
 
+        #[cfg(any(feature = "test-clarity-v4", feature = "test-clarity-v5"))]
         #[test]
         fn with_stacking_no_args() {
             let result = evaluate("(as-contract? ((with-stacking)) (ok true))");
@@ -1733,6 +1734,7 @@ mod tests {
                 .contains("expecting 1 arguments, got 0"));
         }
 
+        #[cfg(any(feature = "test-clarity-v4", feature = "test-clarity-v5"))]
         #[test]
         fn with_stacking_too_many_args() {
             let result = evaluate("(as-contract? ((with-stacking u100 u200)) (ok true))");
@@ -2529,6 +2531,7 @@ mod tests {
 
         // ==================== with-stacking ====================
 
+        #[cfg(any(feature = "test-clarity-v4", feature = "test-clarity-v5"))]
         #[test]
         fn as_contract_safe_stacking_ok() {
             let pox4_code =
@@ -2554,6 +2557,7 @@ mod tests {
             );
         }
 
+        #[cfg(any(feature = "test-clarity-v4", feature = "test-clarity-v5"))]
         #[test]
         fn as_contract_safe_stacking_pox_indirect() {
             let pox4_code =
@@ -2594,6 +2598,7 @@ mod tests {
             );
         }
 
+        #[cfg(any(feature = "test-clarity-v4", feature = "test-clarity-v5"))]
         #[test]
         fn as_contract_safe_stacking_and_stx_pox() {
             let pox4_code =

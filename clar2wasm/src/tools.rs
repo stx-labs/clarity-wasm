@@ -17,7 +17,7 @@ use clarity::vm::costs::{CostTracker, ExecutionCost, LimitedCostTracker};
 use clarity::vm::database::ClarityDatabase;
 use clarity::vm::errors::{StaticCheckErrorKind, VmExecutionError, WasmError};
 use clarity::vm::events::{SmartContractEventData, StacksTransactionEvent};
-use clarity::vm::time_tracker::TimeTracker;
+use clarity::vm::resource_limiter::ResourceLimiter;
 use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
 use clarity::vm::{eval_all, ClarityVersion, ContractContext, ContractName, Value};
 use clarity_types::types::TypeSignature;
@@ -358,7 +358,7 @@ impl TestEnvironment {
                     self.epoch,
                     self.version,
                     true,
-                    TimeTracker::unlimited(),
+                    ResourceLimiter::unlimited(),
                 )
                 .map_err(|boxed| StaticCheckErrorKind::Unreachable(format!("{:?}", boxed.0)))
             })
@@ -428,7 +428,8 @@ impl TestEnvironment {
 
 impl Default for TestEnvironment {
     fn default() -> Self {
-        Self::new(TestConfig::latest_epoch(), TestConfig::clarity_version())
+        let version = TestConfig::clarity_version();
+        Self::new(TestConfig::epoch_for_version(version), version)
     }
 }
 
@@ -466,10 +467,12 @@ pub fn evaluate_at_with_amount(
     env.evaluate(snippet)
 }
 
-/// Evaluate a Clarity snippet at the latest epoch and clarity version.
+/// Evaluate a Clarity snippet at the clarity version selected by the
+/// `test-clarity-vN` features (latest if none is set) and its matching epoch.
 /// Returns an optional value -- the result of the evaluation.
 pub fn evaluate(snippet: &str) -> Result<Option<Value>, VmExecutionError> {
-    evaluate_at(snippet, StacksEpochId::latest(), ClarityVersion::latest())
+    let version = TestConfig::clarity_version();
+    evaluate_at(snippet, TestConfig::epoch_for_version(version), version)
 }
 
 /// Interpret a Clarity snippet at a specific epoch and version.
@@ -496,10 +499,15 @@ pub fn interpret_at_with_amount(
     env.interpret(snippet)
 }
 
-/// Interprets a Clarity snippet at the latest epoch and clarity version.
+/// Interprets a Clarity snippet at the clarity version selected by the
+/// `test-clarity-vN` features (latest if none is set) and its matching epoch.
+///
+/// Must stay in sync with [`evaluate`]: `crosscheck_expect_failure` compares
+/// the two, so they have to run at the same version and epoch.
 /// Returns an optional value -- the result of the evaluation.
 pub fn interpret(snippet: &str) -> Result<Option<Value>, VmExecutionError> {
-    interpret_at(snippet, StacksEpochId::latest(), ClarityVersion::latest())
+    let version = TestConfig::clarity_version();
+    interpret_at(snippet, TestConfig::epoch_for_version(version), version)
 }
 
 pub struct TestConfig;
@@ -775,6 +783,21 @@ pub fn crosscheck_with_clarity_version(
     crosscheck_with_epoch_and_version(snippet, expected, TestConfig::latest_epoch(), version)
 }
 
+/// Crosscheck at the latest epoch, using the clarity version selected by the
+/// `test-clarity-vN` features. Use this for tests whose snippet needs a recent
+/// epoch even when an older clarity version is selected.
+pub fn crosscheck_with_latest_epoch(
+    snippet: &str,
+    expected: Result<Option<Value>, VmExecutionError>,
+) {
+    crosscheck_with_epoch_and_version(
+        snippet,
+        expected,
+        TestConfig::latest_epoch(),
+        TestConfig::clarity_version(),
+    )
+}
+
 pub fn crosscheck_validate<V: Fn(Value)>(snippet: &str, validator: V) {
     if let Some(eval) = execute_crosscheck(
         TestEnvironment::new(TestConfig::latest_epoch(), TestConfig::clarity_version()),
@@ -840,8 +863,15 @@ pub fn crosscheck_multi_contract_with_env(
 // Consider gating tests to epochs whenever possible
 // using the `crosscheck_with_epoch` function.
 pub fn crosscheck_expect_failure(snippet: &str) {
-    let compiled = evaluate(snippet);
-    let interpreted = interpret(snippet);
+    crosscheck_expect_failure_with_clarity_version(snippet, TestConfig::clarity_version())
+}
+
+/// Same as [`crosscheck_expect_failure`], but at an explicit clarity version
+/// instead of the one selected by the `test-clarity-vN` features.
+pub fn crosscheck_expect_failure_with_clarity_version(snippet: &str, version: ClarityVersion) {
+    let epoch = TestConfig::epoch_for_version(version);
+    let compiled = evaluate_at(snippet, epoch, version);
+    let interpreted = interpret_at(snippet, epoch, version);
 
     assert!(
         interpreted.is_err(),
@@ -1188,14 +1218,16 @@ mod tests {
     fn detect_list_of_qualified_principal_issue() {
         let snippet_no_wrap = r#"(index-of (list 'S53AR76V04QBY9CKZFQZ6FZF0730CEQS2AH761HTX.FoUtMZdXvouVYyvtvceMcRGotjQlzb) 'S53AR76V04QBY9CKZFQZ6FZF0730CEQS2AH761HTX.FoUtMZdXvouVYyvtvceMcRGotjQlzb)"#;
 
-        let e = interpret(snippet_no_wrap).expect_err("Snippet should err due to bug");
-        assert!(KnownBug::has_list_of_qualified_principal_issue(&e));
-        crosscheck_with_epoch_and_version(
+        // Pinned to the latest epoch: the bug being detected only reproduces
+        // there, and `TestConfig` pairs Clarity 1 with Epoch 2.05.
+        let e = interpret_at(
             snippet_no_wrap,
-            Ok(None),
             TestConfig::latest_epoch(),
             TestConfig::clarity_version(),
-        ); // we don't care about the expected result
+        )
+        .expect_err("Snippet should err due to bug");
+        assert!(KnownBug::has_list_of_qualified_principal_issue(&e));
+        crosscheck_with_latest_epoch(snippet_no_wrap, Ok(None)); // we don't care about the expected result
 
         let e = interpret_at(
             snippet_no_wrap,
@@ -1204,23 +1236,18 @@ mod tests {
         )
         .expect_err("Snippet should err due to bug");
         assert!(KnownBug::has_list_of_qualified_principal_issue(&e));
-        crosscheck_with_epoch_and_version(
-            snippet_no_wrap,
-            Ok(None),
-            TestConfig::latest_epoch(),
-            TestConfig::clarity_version(),
-        ); // we don't care about the expected result
+        crosscheck_with_latest_epoch(snippet_no_wrap, Ok(None)); // we don't care about the expected result
 
         let snippet_simple = r#"(index-of (list (some 'S53AR76V04QBY9CKZFQZ6FZF0730CEQS2AH761HTX.FoUtMZdXvouVYyvtvceMcRGotjQlzb)) (some 'S53AR76V04QBY9CKZFQZ6FZF0730CEQS2AH761HTX.FoUtMZdXvouVYyvtvceMcRGotjQlzb))"#;
 
-        let e = interpret(snippet_simple).expect_err("Snippet should err due to bug");
-        assert!(KnownBug::has_list_of_qualified_principal_issue(&e));
-        crosscheck_with_epoch_and_version(
+        let e = interpret_at(
             snippet_simple,
-            Ok(None),
             TestConfig::latest_epoch(),
             TestConfig::clarity_version(),
-        ); // we don't care about the expected result
+        )
+        .expect_err("Snippet should err due to bug");
+        assert!(KnownBug::has_list_of_qualified_principal_issue(&e));
+        crosscheck_with_latest_epoch(snippet_simple, Ok(None)); // we don't care about the expected result
 
         let e = interpret_at(
             snippet_simple,
@@ -1229,23 +1256,18 @@ mod tests {
         )
         .expect_err("Snippet should err due to bug");
         assert!(KnownBug::has_list_of_qualified_principal_issue(&e));
-        crosscheck_with_epoch_and_version(
-            snippet_simple,
-            Ok(None),
-            TestConfig::latest_epoch(),
-            TestConfig::clarity_version(),
-        ); // we don't care about the expected result
+        crosscheck_with_latest_epoch(snippet_simple, Ok(None)); // we don't care about the expected result
 
         let snippet_no_rgx_2nd_match = r#"(index-of (list (ok 'S932CK89GTZ50W6ZHYT9FR8A625KMXTBN4FDHXFNW.a) (ok 'SH3MZSPN84M1NC77YFD2EV36NAS4EW9RNBXF4TGY3.A) (ok 'SME80C5G10ZJGHJA8Q1R4WH99ZV794GPH050DG87.A) (err u1409580484) (err u78298087165342409770641973297847909482) (ok 'ST1305A3CKDY8C2M3K9E7D8ZESND3W9RV4G7TSEAH.sSzXanZZmDqBadhzkhYweAFAdHVzWrlqToalG) (ok 'S61F1MAGPTM4Y3WEYE757PTZEGRY5D3FV2BG53STB.VXSrEfeDQmDpUQpbLcpTcpHhytHKnXQnbLLhw) (ok 'S939MQP0630GPK1S5RRKWDEXT5X8DEBW5T5PHXBTA.pBvEuNMOoLNHAkBpAyWkOgMQRXsuqs) (err u130787449693949619415771523117179796343) (ok 'SZ1NX5BPB8JTT5FZ86FD4R2H2A4FRSZYYYADEZPVM.GNlVpg)) (ok 'S61F1MAGPTM4Y3WEYE757PTZEGRY5D3FV2BG53STB.VXSrEfeDQmDpUQpbLcpTcpHhytHKnXQnbLLhw))"#;
 
-        let e = interpret(snippet_no_rgx_2nd_match).expect_err("Snippet should err due to bug");
-        assert!(KnownBug::has_list_of_qualified_principal_issue(&e));
-        crosscheck_with_epoch_and_version(
-            snippet_simple,
-            Ok(None),
+        let e = interpret_at(
+            snippet_no_rgx_2nd_match,
             TestConfig::latest_epoch(),
             TestConfig::clarity_version(),
-        ); // we don't care about the expected result
+        )
+        .expect_err("Snippet should err due to bug");
+        assert!(KnownBug::has_list_of_qualified_principal_issue(&e));
+        crosscheck_with_latest_epoch(snippet_simple, Ok(None)); // we don't care about the expected result
 
         // Those tests below use `replace-at`, which didn't exist in Clarity 1
         #[cfg(not(feature = "test-clarity-v1"))]

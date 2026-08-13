@@ -588,9 +588,9 @@ mod tests {
     #[cfg(feature = "test-clarity-v1")]
     mod clarity_v1 {
         use clarity::types::StacksEpochId;
+        use clarity::vm::ClarityVersion;
 
-        use super::*;
-        use crate::tools::crosscheck_with_epoch;
+        use crate::tools::{crosscheck_expect_failure_with_clarity_version, crosscheck_with_epoch};
 
         #[test]
         fn validate_define_fungible_tokens_epoch() {
@@ -601,7 +601,13 @@ mod tests {
                 StacksEpochId::Epoch20,
             );
 
-            crosscheck_expect_failure("(define-fungible-token index-of? u100)");
+            // `index-of?` only became a native function -- and therefore a
+            // reserved name -- in Clarity 2. In Clarity 1 it is a legal token
+            // name at every epoch, so the rejection has to be checked there.
+            crosscheck_expect_failure_with_clarity_version(
+                "(define-fungible-token index-of? u100)",
+                ClarityVersion::Clarity2,
+            );
         }
 
         #[test]
@@ -613,7 +619,10 @@ mod tests {
                 StacksEpochId::Epoch20,
             );
 
-            crosscheck_expect_failure("(define-non-fungible-token index-of? (buff 50))");
+            crosscheck_expect_failure_with_clarity_version(
+                "(define-non-fungible-token index-of? (buff 50))",
+                ClarityVersion::Clarity2,
+            );
         }
     }
 
