@@ -1804,6 +1804,17 @@ mod tests {
                 .contains("expecting 1 arguments, got 2"));
         }
 
+        #[cfg(not(any(feature = "test-clarity-v4", feature = "test-clarity-v5")))]
+        #[test]
+        fn with_pox_too_many_args() {
+            let result = evaluate("(as-contract? ((with-pox u100)) (ok true))");
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("expecting 0 arguments, got 1"));
+        }
+
         #[test]
         fn with_ft_no_args() {
             let result = evaluate("(as-contract? ((with-ft)) (ok true))");
@@ -2786,6 +2797,158 @@ mod tests {
             );
         }
 
+        // ==================== with-pox ====================
+
+        #[cfg(not(any(feature = "test-clarity-v4", feature = "test-clarity-v5")))]
+        #[test]
+        fn as_contract_safe_pox_ok() {
+            let callee = r#"
+                (define-public (do-nothing)
+                    (as-contract? ((with-pox))
+                        true
+                    )
+                )
+            "#;
+            let caller = "(contract-call? .callee do-nothing)";
+            crosscheck_multi_contract(
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
+                Ok(Some(Value::okay_true())),
+            );
+        }
+
+        #[cfg(not(any(feature = "test-clarity-v4", feature = "test-clarity-v5")))]
+        #[test]
+        fn as_contract_safe_pox_does_not_allow_stx() {
+            let callee = r#"
+                (define-public (send-stx (amount uint) (recipient principal))
+                    (as-contract? ((with-pox))
+                        (try! (stx-transfer? amount current-contract recipient))
+                    )
+                )
+            "#;
+            let caller = "
+                (stx-transfer? u500 tx-sender .callee)
+                (let ((result (contract-call? .callee send-stx u50 tx-sender)))
+                    {error-code: result, balance: (stx-get-balance .callee)}
+                )
+            ";
+            let expected = Value::Tuple(
+                clarity::vm::types::TupleData::from_data(vec![
+                    (ClarityName::from_literal("balance"), Value::UInt(500)),
+                    (
+                        ClarityName::from_literal("error-code"),
+                        Value::error(Value::UInt(128)).unwrap(),
+                    ),
+                ])
+                .unwrap(),
+            );
+            crosscheck_multi_contract(
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
+                Ok(Some(expected)),
+            );
+        }
+
+        #[cfg(not(any(feature = "test-clarity-v4", feature = "test-clarity-v5")))]
+        #[test]
+        fn as_contract_safe_pox_and_stx_ok() {
+            let callee = r#"
+                (define-public (send-stx (amount uint) (recipient principal))
+                    (as-contract? ((with-pox) (with-stx u100))
+                        (try! (stx-transfer? amount current-contract recipient))
+                    )
+                )
+            "#;
+            let caller = "
+                (stx-transfer? u500 tx-sender .callee)
+                (let ((result (contract-call? .callee send-stx u50 tx-sender)))
+                    {error-code: result, balance: (stx-get-balance .callee)}
+                )
+            ";
+            let expected = Value::Tuple(
+                clarity::vm::types::TupleData::from_data(vec![
+                    (ClarityName::from_literal("balance"), Value::UInt(450)),
+                    (ClarityName::from_literal("error-code"), Value::okay_true()),
+                ])
+                .unwrap(),
+            );
+            crosscheck_multi_contract(
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
+                Ok(Some(expected)),
+            );
+        }
+
+        // The violation index has to account for the amount-less `with-pox`
+        // allowance, so the exceeded `with-stx` is reported as index 1.
+        #[cfg(not(any(feature = "test-clarity-v4", feature = "test-clarity-v5")))]
+        #[test]
+        fn as_contract_safe_pox_then_stx_violation_index() {
+            let callee = r#"
+                (define-public (send-stx (amount uint) (recipient principal))
+                    (as-contract? ((with-pox) (with-stx u10))
+                        (try! (stx-transfer? amount current-contract recipient))
+                    )
+                )
+            "#;
+            let caller = "
+                (stx-transfer? u500 tx-sender .callee)
+                (let ((result (contract-call? .callee send-stx u50 tx-sender)))
+                    {error-code: result, balance: (stx-get-balance .callee)}
+                )
+            ";
+            let expected = Value::Tuple(
+                clarity::vm::types::TupleData::from_data(vec![
+                    (ClarityName::from_literal("balance"), Value::UInt(500)),
+                    (
+                        ClarityName::from_literal("error-code"),
+                        Value::error(Value::UInt(1)).unwrap(),
+                    ),
+                ])
+                .unwrap(),
+            );
+            crosscheck_multi_contract(
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
+                Ok(Some(expected)),
+            );
+        }
+
+        #[cfg(not(any(feature = "test-clarity-v4", feature = "test-clarity-v5")))]
+        #[test]
+        fn as_contract_safe_pox_and_staking_pox() {
+            let pox4_code =
+                std::fs::read_to_string("tests/contracts/boot-contracts/pox-4.clar").unwrap();
+            let wrapper = r#"
+                (define-public (do-delegate (amount uint) (delegate-to principal))
+                    (as-contract? ((with-staking u1000000) (with-pox))
+                        (unwrap-panic (contract-call? .pox-4 delegate-stx
+                            amount delegate-to none none))
+                    )
+                )
+            "#;
+            crosscheck_multi_contract(
+                &[
+                    (ContractName::from_literal("pox-4"), &pox4_code),
+                    (ContractName::from_literal("wrapper"), wrapper),
+                    (
+                        ContractName::from_literal("test"),
+                        "(contract-call? .wrapper do-delegate u1000 tx-sender)",
+                    ),
+                ],
+                Ok(Some(Value::okay_true())),
+            );
+        }
+
         // ==================== mixed / multiple allowances ====================
 
         #[test]
@@ -3287,6 +3450,67 @@ mod tests {
             let callee = r#"
                 (define-public (send-stx (amount uint) (recipient principal))
                     (restrict-assets? tx-sender ()
+                        (try! (stx-transfer? amount tx-sender recipient))
+                    )
+                )
+
+                (define-read-only (callee-balance)
+                    (stx-get-balance .callee)
+                )
+            "#;
+            let caller = "
+                (let ((result (contract-call? .callee send-stx u50 .callee)))
+                    {error-code: result, callee-balance: (contract-call? .callee callee-balance)}
+                )
+            ";
+            let expected = Value::Tuple(
+                clarity::vm::types::TupleData::from_data(vec![
+                    (ClarityName::from_literal("callee-balance"), Value::UInt(0)),
+                    (
+                        ClarityName::from_literal("error-code"),
+                        Value::error(Value::UInt(128)).unwrap(),
+                    ),
+                ])
+                .unwrap(),
+            );
+            crosscheck_multi_contract(
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
+                Ok(Some(expected)),
+            );
+        }
+
+        // ---------- with-pox ----------
+
+        #[cfg(not(any(feature = "test-clarity-v4", feature = "test-clarity-v5")))]
+        #[test]
+        fn restrict_assets_pox_no_asset_movement() {
+            let callee = r#"
+                (define-public (do-nothing)
+                    (restrict-assets? tx-sender ((with-pox))
+                        true
+                    )
+                )
+            "#;
+            let caller = "(contract-call? .callee do-nothing)";
+            crosscheck_multi_contract(
+                &[
+                    (ContractName::from_literal("callee"), callee),
+                    (ContractName::from_literal("caller"), caller),
+                ],
+                Ok(Some(Value::okay_true())),
+            );
+        }
+
+        #[cfg(not(any(feature = "test-clarity-v4", feature = "test-clarity-v5")))]
+        #[test]
+        fn restrict_assets_pox_does_not_allow_stx() {
+            // A PoX allowance does not authorize STX outflow → (err u128).
+            let callee = r#"
+                (define-public (send-stx (amount uint) (recipient principal))
+                    (restrict-assets? tx-sender ((with-pox))
                         (try! (stx-transfer? amount tx-sender recipient))
                     )
                 )
