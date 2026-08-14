@@ -568,6 +568,10 @@ impl BurnStateDB for BurnDatastore {
         0
     }
 
+    fn get_pox_5_activation_height(&self) -> u32 {
+        0
+    }
+
     fn get_pox_prepare_length(&self) -> u32 {
         self.constants.pox_prepare_length
     }

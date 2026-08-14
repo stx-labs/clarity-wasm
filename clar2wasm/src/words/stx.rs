@@ -176,6 +176,7 @@ mod tests {
             .contains("expecting 3 arguments, got 4"));
     }
 
+    #[cfg(not(feature = "test-clarity-v1"))]
     #[test]
     fn stx_transfer_memo_less_than_four_args() {
         let result = evaluate("(stx-transfer-memo? u100 'S1G2081040G2081040G2081040G208105NK8PE5 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM)");
@@ -186,6 +187,7 @@ mod tests {
             .contains("expecting 4 arguments, got 3"));
     }
 
+    #[cfg(not(feature = "test-clarity-v1"))]
     #[test]
     fn stx_transfer_memo_more_than_four_args() {
         let result = evaluate("(stx-transfer-memo? u100 'S1G2081040G2081040G2081040G208105NK8PE5 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM 0x12345678 0x12345678)");

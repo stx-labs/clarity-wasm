@@ -185,6 +185,8 @@ impl ChargeContext {
             | StacksEpochId::Epoch32 => clar3::WORD_COSTS.get(name),
             StacksEpochId::Epoch33 => clar4::WORD_COSTS.get(name),
             StacksEpochId::Epoch34 => todo!(),
+            StacksEpochId::Epoch40 => todo!(),
+            StacksEpochId::Epoch41 => todo!(),
         }
     }
 }

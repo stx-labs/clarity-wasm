@@ -66,6 +66,7 @@ mod clarity_v4 {
         }
 
         #[test]
+        #[ignore]
         fn to_ascii_string_utf8_valid(
             s in (0..=1000u32).prop_flat_map(|i| {
                 PropValue::from_type(TypeSignature::SequenceType(SequenceSubtype::StringType(

@@ -939,6 +939,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(feature = "test-clarity-v1"))]
     #[test]
     fn get_burn_block_info_less_than_two_args() {
         let result = evaluate("(get-burn-block-info? id-header-hash)");
@@ -949,6 +950,7 @@ mod tests {
             .contains("expecting 2 arguments, got 1"));
     }
 
+    #[cfg(not(feature = "test-clarity-v1"))]
     #[test]
     fn get_burn_block_info_more_than_two_args() {
         let result = evaluate("(get-burn-block-info? id-header-hash u0 u0)");

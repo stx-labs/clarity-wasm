@@ -293,7 +293,7 @@ mod tests {
 
     #[test]
     fn var_set_less_than_two_args() {
-        let result = evaluate("(define-data-var something int 1)(var-set something)");
+        let result = evaluate("(define-data-var something int 1) (var-set something)");
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
@@ -328,7 +328,7 @@ mod tests {
 
     #[test]
     fn var_get_more_than_one_arg() {
-        let result = evaluate("(define-data-var something int 1)(var-get something 1)");
+        let result = evaluate("(define-data-var something int 1) (var-get something 1)");
         assert!(result.is_err());
         assert!(result
             .unwrap_err()

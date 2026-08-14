@@ -3,7 +3,7 @@ use clarity::vm::analysis::{run_analysis, AnalysisDatabase, ContractAnalysis};
 use clarity::vm::ast::{build_ast_with_diagnostics, ContractAST};
 use clarity::vm::costs::{ExecutionCost, LimitedCostTracker};
 use clarity::vm::diagnostic::Diagnostic;
-use clarity::vm::time_tracker::TimeTracker;
+use clarity::vm::resource_limiter::ResourceLimiter;
 use clarity::vm::types::QualifiedContractIdentifier;
 use clarity::vm::ClarityVersion;
 pub use walrus::Module;
@@ -95,7 +95,7 @@ pub fn compile(
         epoch,
         clarity_version,
         true,
-        TimeTracker::unlimited(),
+        ResourceLimiter::unlimited(),
     ) {
         Ok(contract_analysis) => contract_analysis,
         Err(boxed) => {

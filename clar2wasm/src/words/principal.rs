@@ -394,6 +394,7 @@ mod tests {
             Ok(Some(Value::err_uint(1))),
         );
     }
+    #[cfg(not(feature = "test-clarity-v1"))]
     #[test]
     fn principal_construct_less_than_two_args() {
         let result = evaluate("(principal-construct? 0x1a)");
@@ -404,6 +405,7 @@ mod tests {
             .contains("expecting >= 2 arguments, got 1"));
     }
 
+    #[cfg(not(feature = "test-clarity-v1"))]
     #[test]
     fn principal_construct_more_than_three_args() {
         let result = evaluate(

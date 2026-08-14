@@ -152,7 +152,8 @@ mod tests {
     use crate::tools::TestConfig;
     #[allow(unused_imports)]
     use crate::tools::{
-        crosscheck, crosscheck_expect_failure, crosscheck_multi_contract, TestEnvironment,
+        crosscheck, crosscheck_expect_failure, crosscheck_expect_failure_with_clarity_version,
+        crosscheck_multi_contract_with_env, TestEnvironment,
     };
 
     //
@@ -173,7 +174,13 @@ mod tests {
                 StacksEpochId::Epoch20,
             );
 
-            crosscheck_expect_failure("(define-trait index-of? ((func (int) (response int int))))");
+            // `index-of?` only became a native function -- and therefore a
+            // reserved name -- in Clarity 2. In Clarity 1 it is a legal trait
+            // name at every epoch, so the rejection has to be checked there.
+            crosscheck_expect_failure_with_clarity_version(
+                "(define-trait index-of? ((func (int) (response int int))))",
+                ClarityVersion::Clarity2,
+            );
         }
     }
 
@@ -330,10 +337,10 @@ mod tests {
                         .map(|_| {
                             Value::CallableContract(clarity_types::types::CallableData {
                                 contract_identifier: contract_id.clone(),
-                                trait_identifier: Some(TraitIdentifier {
+                                trait_identifier: Some(Box::new(TraitIdentifier {
                                     name: ClarityName::from_literal("my-trait"),
                                     contract_identifier: contract_id.clone(),
-                                }),
+                                })),
                             })
                         })
                         .collect(),
@@ -342,12 +349,16 @@ mod tests {
                 .unwrap(),
             ))
         };
-        crosscheck_multi_contract(
+        // `expected` is built with `StacksEpochId::latest()`, so the snippet has
+        // to run at that epoch too. The default environment pairs Clarity 1 with
+        // Epoch 2.05, which would not match.
+        crosscheck_multi_contract_with_env(
             &[
                 (first_contract_name, first_snippet),
                 (second_contract_name, second_snippet),
             ],
             expected,
+            TestEnvironment::new(TestConfig::latest_epoch(), TestConfig::clarity_version()),
         );
     }
 

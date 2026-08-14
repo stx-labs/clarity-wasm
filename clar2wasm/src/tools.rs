@@ -17,7 +17,7 @@ use clarity::vm::costs::{CostTracker, ExecutionCost, LimitedCostTracker};
 use clarity::vm::database::ClarityDatabase;
 use clarity::vm::errors::{StaticCheckErrorKind, VmExecutionError, WasmError};
 use clarity::vm::events::{SmartContractEventData, StacksTransactionEvent};
-use clarity::vm::time_tracker::TimeTracker;
+use clarity::vm::resource_limiter::ResourceLimiter;
 use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
 use clarity::vm::{eval_all, ClarityVersion, ContractContext, ContractName, Value};
 use clarity_types::types::TypeSignature;
@@ -358,7 +358,7 @@ impl TestEnvironment {
                     self.epoch,
                     self.version,
                     true,
-                    TimeTracker::unlimited(),
+                    ResourceLimiter::unlimited(),
                 )
                 .map_err(|boxed| StaticCheckErrorKind::Unreachable(format!("{:?}", boxed.0)))
             })
@@ -428,7 +428,8 @@ impl TestEnvironment {
 
 impl Default for TestEnvironment {
     fn default() -> Self {
-        Self::new(TestConfig::latest_epoch(), TestConfig::clarity_version())
+        let version = TestConfig::clarity_version();
+        Self::new(TestConfig::epoch_for_version(version), version)
     }
 }
 
@@ -466,10 +467,12 @@ pub fn evaluate_at_with_amount(
     env.evaluate(snippet)
 }
 
-/// Evaluate a Clarity snippet at the latest epoch and clarity version.
+/// Evaluate a Clarity snippet at the clarity version selected by the
+/// `test-clarity-vN` features (latest if none is set) and its matching epoch.
 /// Returns an optional value -- the result of the evaluation.
 pub fn evaluate(snippet: &str) -> Result<Option<Value>, VmExecutionError> {
-    evaluate_at(snippet, StacksEpochId::latest(), ClarityVersion::latest())
+    let version = TestConfig::clarity_version();
+    evaluate_at(snippet, TestConfig::epoch_for_version(version), version)
 }
 
 /// Interpret a Clarity snippet at a specific epoch and version.
@@ -496,10 +499,15 @@ pub fn interpret_at_with_amount(
     env.interpret(snippet)
 }
 
-/// Interprets a Clarity snippet at the latest epoch and clarity version.
+/// Interprets a Clarity snippet at the clarity version selected by the
+/// `test-clarity-vN` features (latest if none is set) and its matching epoch.
+///
+/// Must stay in sync with [`evaluate`]: `crosscheck_expect_failure` compares
+/// the two, so they have to run at the same version and epoch.
 /// Returns an optional value -- the result of the evaluation.
 pub fn interpret(snippet: &str) -> Result<Option<Value>, VmExecutionError> {
-    interpret_at(snippet, StacksEpochId::latest(), ClarityVersion::latest())
+    let version = TestConfig::clarity_version();
+    interpret_at(snippet, TestConfig::epoch_for_version(version), version)
 }
 
 pub struct TestConfig;
@@ -542,22 +550,67 @@ struct CrossEvalResult {
 enum KnownBug {
     /// [https://github.com/stacks-network/stacks-core/issues/4622]
     ListOfQualifiedPrincipal,
+    /// A string literal ending with a backslash cannot be lexed by the parser v1.
+    StringEndingWithBackslash,
 }
 
 impl KnownBug {
     fn check_for_known_bugs(
         compiled: &Result<Option<Value>, VmExecutionError>,
         interpreted: &Result<Option<Value>, VmExecutionError>,
+        snippet: &str,
+        version: ClarityVersion,
+        epoch: StacksEpochId,
     ) -> Option<Self> {
         let check_predicate = |pred: &dyn Fn(&VmExecutionError) -> bool| {
             interpreted.as_ref().is_err_and(pred) && compiled.as_ref().is_err_and(pred)
         };
 
+        // The parser v1 is used below epoch 2.1, and Clarity 1 is the only
+        // version available on those epochs.
+        let uses_parser_v1 = epoch < StacksEpochId::Epoch21 && version == ClarityVersion::Clarity1;
+
         if check_predicate(&Self::has_list_of_qualified_principal_issue) {
             Some(KnownBug::ListOfQualifiedPrincipal)
+        } else if uses_parser_v1 && Self::has_string_ending_with_backslash(snippet) {
+            Some(KnownBug::StringEndingWithBackslash)
         } else {
             None
         }
+    }
+
+    /// Allows to detect if a snippet contains a string literal ending with a
+    /// backslash, which the parser v1 cannot lex.
+    ///
+    /// The parser v1 matches string literals with the regex
+    /// `"(?P<value>((\\")|([[ -~]&&[^"]]))*)"`, which prefers the escaped quote
+    /// alternative over a single character. When the last character of a string
+    /// is a backslash, the closing quote is consumed as part of a `\"` escape and
+    /// the literal keeps running until the next quote of the source.
+    fn has_string_ending_with_backslash(snippet: &str) -> bool {
+        let mut chars = snippet.chars();
+
+        while let Some(c) = chars.next() {
+            if c != '"' {
+                continue;
+            }
+
+            // inside a string literal, until its closing quote
+            let mut ends_with_backslash = false;
+            while let Some(c) = chars.next() {
+                match c {
+                    '\\' => ends_with_backslash = chars.next() == Some('\\'),
+                    '"' => break,
+                    _ => ends_with_backslash = false,
+                }
+            }
+
+            if ends_with_backslash {
+                return true;
+            }
+        }
+
+        false
     }
 
     /// Allows to detect if an error suffers from this issue:
@@ -595,13 +648,15 @@ impl CrossEvalResult {
 }
 
 fn crosseval(snippet: &str, env: TestEnvironment) -> Result<CrossEvalResult, KnownBug> {
+    let (version, epoch) = (env.version, env.epoch);
+
     let mut env_interpreted = env.clone();
     let interpreted = env_interpreted.interpret(snippet);
 
     let mut env_compiled = env;
     let compiled = env_compiled.evaluate(snippet);
 
-    match KnownBug::check_for_known_bugs(&compiled, &interpreted) {
+    match KnownBug::check_for_known_bugs(&compiled, &interpreted, snippet, version, epoch) {
         Some(bug) => {
             println!("KNOW BUG TRIGGERED <{bug:?}>:\n\t{snippet}");
             Err(bug)
@@ -775,6 +830,21 @@ pub fn crosscheck_with_clarity_version(
     crosscheck_with_epoch_and_version(snippet, expected, TestConfig::latest_epoch(), version)
 }
 
+/// Crosscheck at the latest epoch, using the clarity version selected by the
+/// `test-clarity-vN` features. Use this for tests whose snippet needs a recent
+/// epoch even when an older clarity version is selected.
+pub fn crosscheck_with_latest_epoch(
+    snippet: &str,
+    expected: Result<Option<Value>, VmExecutionError>,
+) {
+    crosscheck_with_epoch_and_version(
+        snippet,
+        expected,
+        TestConfig::latest_epoch(),
+        TestConfig::clarity_version(),
+    )
+}
+
 pub fn crosscheck_validate<V: Fn(Value)>(snippet: &str, validator: V) {
     if let Some(eval) = execute_crosscheck(
         TestEnvironment::new(TestConfig::latest_epoch(), TestConfig::clarity_version()),
@@ -798,6 +868,8 @@ pub fn crosscheck_multi_contract_with_env(
     expected: Result<Option<Value>, VmExecutionError>,
     env: TestEnvironment,
 ) {
+    let (version, epoch) = (env.version, env.epoch);
+
     // compiled version
     let mut compiled_env = env.clone();
     let compiled_results: Vec<_> = contracts
@@ -813,11 +885,18 @@ pub fn crosscheck_multi_contract_with_env(
         .collect();
 
     // compare results contract by contract
-    for ((cmp_res, int_res), (contract_name, _)) in compiled_results
+    for ((cmp_res, int_res), (contract_name, snippet)) in compiled_results
         .iter()
         .zip(interpreted_results)
         .zip(contracts)
     {
+        if let Some(bug) =
+            KnownBug::check_for_known_bugs(cmp_res, &int_res, snippet, version, epoch)
+        {
+            println!("KNOW BUG TRIGGERED <{bug:?}>:\n\t{snippet}");
+            return;
+        }
+
         assert_eq!(
             cmp_res, &int_res,
             "Compiled and interpreted results diverge in contract \"{contract_name}\"\ncompiled: {cmp_res:?}\ninterpreted: {int_res:?}"
@@ -840,8 +919,15 @@ pub fn crosscheck_multi_contract_with_env(
 // Consider gating tests to epochs whenever possible
 // using the `crosscheck_with_epoch` function.
 pub fn crosscheck_expect_failure(snippet: &str) {
-    let compiled = evaluate(snippet);
-    let interpreted = interpret(snippet);
+    crosscheck_expect_failure_with_clarity_version(snippet, TestConfig::clarity_version())
+}
+
+/// Same as [`crosscheck_expect_failure`], but at an explicit clarity version
+/// instead of the one selected by the `test-clarity-vN` features.
+pub fn crosscheck_expect_failure_with_clarity_version(snippet: &str, version: ClarityVersion) {
+    let epoch = TestConfig::epoch_for_version(version);
+    let compiled = evaluate_at(snippet, epoch, version);
+    let interpreted = interpret_at(snippet, epoch, version);
 
     assert!(
         interpreted.is_err(),
@@ -1188,14 +1274,16 @@ mod tests {
     fn detect_list_of_qualified_principal_issue() {
         let snippet_no_wrap = r#"(index-of (list 'S53AR76V04QBY9CKZFQZ6FZF0730CEQS2AH761HTX.FoUtMZdXvouVYyvtvceMcRGotjQlzb) 'S53AR76V04QBY9CKZFQZ6FZF0730CEQS2AH761HTX.FoUtMZdXvouVYyvtvceMcRGotjQlzb)"#;
 
-        let e = interpret(snippet_no_wrap).expect_err("Snippet should err due to bug");
-        assert!(KnownBug::has_list_of_qualified_principal_issue(&e));
-        crosscheck_with_epoch_and_version(
+        // Pinned to the latest epoch: the bug being detected only reproduces
+        // there, and `TestConfig` pairs Clarity 1 with Epoch 2.05.
+        let e = interpret_at(
             snippet_no_wrap,
-            Ok(None),
             TestConfig::latest_epoch(),
             TestConfig::clarity_version(),
-        ); // we don't care about the expected result
+        )
+        .expect_err("Snippet should err due to bug");
+        assert!(KnownBug::has_list_of_qualified_principal_issue(&e));
+        crosscheck_with_latest_epoch(snippet_no_wrap, Ok(None)); // we don't care about the expected result
 
         let e = interpret_at(
             snippet_no_wrap,
@@ -1204,23 +1292,18 @@ mod tests {
         )
         .expect_err("Snippet should err due to bug");
         assert!(KnownBug::has_list_of_qualified_principal_issue(&e));
-        crosscheck_with_epoch_and_version(
-            snippet_no_wrap,
-            Ok(None),
-            TestConfig::latest_epoch(),
-            TestConfig::clarity_version(),
-        ); // we don't care about the expected result
+        crosscheck_with_latest_epoch(snippet_no_wrap, Ok(None)); // we don't care about the expected result
 
         let snippet_simple = r#"(index-of (list (some 'S53AR76V04QBY9CKZFQZ6FZF0730CEQS2AH761HTX.FoUtMZdXvouVYyvtvceMcRGotjQlzb)) (some 'S53AR76V04QBY9CKZFQZ6FZF0730CEQS2AH761HTX.FoUtMZdXvouVYyvtvceMcRGotjQlzb))"#;
 
-        let e = interpret(snippet_simple).expect_err("Snippet should err due to bug");
-        assert!(KnownBug::has_list_of_qualified_principal_issue(&e));
-        crosscheck_with_epoch_and_version(
+        let e = interpret_at(
             snippet_simple,
-            Ok(None),
             TestConfig::latest_epoch(),
             TestConfig::clarity_version(),
-        ); // we don't care about the expected result
+        )
+        .expect_err("Snippet should err due to bug");
+        assert!(KnownBug::has_list_of_qualified_principal_issue(&e));
+        crosscheck_with_latest_epoch(snippet_simple, Ok(None)); // we don't care about the expected result
 
         let e = interpret_at(
             snippet_simple,
@@ -1229,23 +1312,18 @@ mod tests {
         )
         .expect_err("Snippet should err due to bug");
         assert!(KnownBug::has_list_of_qualified_principal_issue(&e));
-        crosscheck_with_epoch_and_version(
-            snippet_simple,
-            Ok(None),
-            TestConfig::latest_epoch(),
-            TestConfig::clarity_version(),
-        ); // we don't care about the expected result
+        crosscheck_with_latest_epoch(snippet_simple, Ok(None)); // we don't care about the expected result
 
         let snippet_no_rgx_2nd_match = r#"(index-of (list (ok 'S932CK89GTZ50W6ZHYT9FR8A625KMXTBN4FDHXFNW.a) (ok 'SH3MZSPN84M1NC77YFD2EV36NAS4EW9RNBXF4TGY3.A) (ok 'SME80C5G10ZJGHJA8Q1R4WH99ZV794GPH050DG87.A) (err u1409580484) (err u78298087165342409770641973297847909482) (ok 'ST1305A3CKDY8C2M3K9E7D8ZESND3W9RV4G7TSEAH.sSzXanZZmDqBadhzkhYweAFAdHVzWrlqToalG) (ok 'S61F1MAGPTM4Y3WEYE757PTZEGRY5D3FV2BG53STB.VXSrEfeDQmDpUQpbLcpTcpHhytHKnXQnbLLhw) (ok 'S939MQP0630GPK1S5RRKWDEXT5X8DEBW5T5PHXBTA.pBvEuNMOoLNHAkBpAyWkOgMQRXsuqs) (err u130787449693949619415771523117179796343) (ok 'SZ1NX5BPB8JTT5FZ86FD4R2H2A4FRSZYYYADEZPVM.GNlVpg)) (ok 'S61F1MAGPTM4Y3WEYE757PTZEGRY5D3FV2BG53STB.VXSrEfeDQmDpUQpbLcpTcpHhytHKnXQnbLLhw))"#;
 
-        let e = interpret(snippet_no_rgx_2nd_match).expect_err("Snippet should err due to bug");
-        assert!(KnownBug::has_list_of_qualified_principal_issue(&e));
-        crosscheck_with_epoch_and_version(
-            snippet_simple,
-            Ok(None),
+        let e = interpret_at(
+            snippet_no_rgx_2nd_match,
             TestConfig::latest_epoch(),
             TestConfig::clarity_version(),
-        ); // we don't care about the expected result
+        )
+        .expect_err("Snippet should err due to bug");
+        assert!(KnownBug::has_list_of_qualified_principal_issue(&e));
+        crosscheck_with_latest_epoch(snippet_simple, Ok(None)); // we don't care about the expected result
 
         // Those tests below use `replace-at`, which didn't exist in Clarity 1
         #[cfg(not(feature = "test-clarity-v1"))]
@@ -1293,6 +1371,50 @@ mod tests {
         "#;
             let res = interpret(snippet_different_err).expect_err("Should detect a syntax error");
             assert!(!KnownBug::has_list_of_qualified_principal_issue(&res));
+        }
+    }
+
+    #[test]
+    fn detect_string_ending_with_backslash_issue() {
+        // A second string literal is needed after the offending one: the parser
+        // v1 extends the first literal up to the next quote of the source, and
+        // resumes lexing on the content of the second one. Depending on that
+        // content, the failure is either an unlexable remainder or a missing
+        // separator.
+        for snippet in [
+            r#"(list "a\\" "\\")"#,
+            r#"(list u"a\\" u"\\")"#,
+            r#"(list "a\\" "b")"#,
+            r#"(list u"a\\" u"b")"#,
+            r#"(list "\"a\\" "b")"#,
+            r#"(list u"\u{1F600}a\\" u"b")"#,
+        ] {
+            let bug = crosseval(
+                snippet,
+                TestEnvironment::new(StacksEpochId::Epoch2_05, ClarityVersion::Clarity1),
+            )
+            .err()
+            .expect("Snippet should trigger the known bug");
+            assert!(matches!(bug, KnownBug::StringEndingWithBackslash));
+
+            // The parser v2, used from epoch 2.1 on, lexes those snippets fine.
+            crosseval(
+                snippet,
+                TestEnvironment::new(TestConfig::latest_epoch(), ClarityVersion::Clarity1),
+            )
+            .unwrap_or_else(|bug| panic!("Unexpected known bug <{bug:?}>"))
+            .compare(snippet);
+        }
+
+        // A backslash which is not the last character of a string is lexed
+        // correctly, even by the parser v1.
+        for snippet in [r#"(list "a\\b" "c")"#, r#"(list u"a\\b" u"c")"#] {
+            crosseval(
+                snippet,
+                TestEnvironment::new(StacksEpochId::Epoch2_05, ClarityVersion::Clarity1),
+            )
+            .unwrap_or_else(|bug| panic!("Unexpected known bug <{bug:?}>"))
+            .compare(snippet);
         }
     }
 
