@@ -1753,6 +1753,28 @@ mod tests {
                 .contains("expecting 1 arguments, got 2"));
         }
 
+        #[cfg(not(any(feature = "test-clarity-v4", feature = "test-clarity-v5")))]
+        #[test]
+        fn with_staking_no_args() {
+            let result = evaluate("(as-contract? ((with-staking)) (ok true))");
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("expecting 1 arguments, got 0"));
+        }
+
+        #[cfg(not(any(feature = "test-clarity-v4", feature = "test-clarity-v5")))]
+        #[test]
+        fn with_staking_too_many_args() {
+            let result = evaluate("(as-contract? ((with-staking u100 u200)) (ok true))");
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("expecting 1 arguments, got 2"));
+        }
+
         #[test]
         fn with_ft_no_args() {
             let result = evaluate("(as-contract? ((with-ft)) (ok true))");
@@ -2614,6 +2636,105 @@ mod tests {
             let wrapper = r#"
                 (define-public (delegate-and-send-stx (delegate-amount uint) (stx-amount uint) (recipient principal))
                     (as-contract? ((with-stacking u1000000) (with-stx u500))
+                        (unwrap-panic (contract-call? .pox-4 delegate-stx
+                            delegate-amount recipient none none))
+                        (try! (stx-transfer? stx-amount current-contract recipient))
+                    )
+                )
+            "#;
+            crosscheck_multi_contract(
+                &[
+                    (ContractName::from_literal("pox-4"), &pox4_code),
+                    (ContractName::from_literal("wrapper"), wrapper),
+                    (
+                        ContractName::from_literal("test"),
+                        "
+                            (stx-transfer? u1000 tx-sender .wrapper)
+                            (contract-call? .wrapper delegate-and-send-stx u5000 u200 tx-sender)
+                        ",
+                    ),
+                ],
+                Ok(Some(Value::okay_true())),
+            );
+        }
+
+        // ==================== with-staking ====================
+
+        #[cfg(not(any(feature = "test-clarity-v4", feature = "test-clarity-v5")))]
+        #[test]
+        fn as_contract_safe_staking_ok() {
+            let pox4_code =
+                std::fs::read_to_string("tests/contracts/boot-contracts/pox-4.clar").unwrap();
+            let wrapper = r#"
+                (define-public (do-delegate (amount uint) (delegate-to principal))
+                    (as-contract? ((with-staking u1000000))
+                        (unwrap-panic (contract-call? .pox-4 delegate-stx
+                            amount delegate-to none none))
+                    )
+                )
+            "#;
+            crosscheck_multi_contract(
+                &[
+                    (ContractName::from_literal("pox-4"), &pox4_code),
+                    (ContractName::from_literal("wrapper"), wrapper),
+                    (
+                        ContractName::from_literal("test"),
+                        "(contract-call? .wrapper do-delegate u1000 tx-sender)",
+                    ),
+                ],
+                Ok(Some(Value::okay_true())),
+            );
+        }
+
+        #[cfg(not(any(feature = "test-clarity-v4", feature = "test-clarity-v5")))]
+        #[test]
+        fn as_contract_safe_staking_pox_indirect() {
+            let pox4_code =
+                std::fs::read_to_string("tests/contracts/boot-contracts/pox-4.clar").unwrap();
+            let intermediary = r#"
+                (define-public (do-delegate (amount uint) (delegate-to principal))
+                    (contract-call? .pox-4 delegate-stx amount delegate-to none none)
+                )
+            "#;
+            // setup-allowance grants the intermediary permission to call pox-4
+            // on behalf of the wrapper (as-contract? changes tx-sender to wrapper)
+            let wrapper = r#"
+                (define-public (setup-allowance)
+                    (as-contract? ((with-all-assets-unsafe))
+                        (unwrap-panic (contract-call? .pox-4 allow-contract-caller .intermediary none))
+                    )
+                )
+
+                (define-public (delegate-via-intermediary (amount uint) (delegate-to principal))
+                    (as-contract? ((with-staking u1000000))
+                        (unwrap-panic (contract-call? .intermediary do-delegate
+                            amount delegate-to))
+                    )
+                )
+            "#;
+            crosscheck_multi_contract(
+                &[
+                    (ContractName::from_literal("pox-4"), &pox4_code),
+                    (ContractName::from_literal("intermediary"), intermediary),
+                    (ContractName::from_literal("wrapper"), wrapper),
+                    (
+                        ContractName::from_literal("test"),
+                        "(contract-call? .wrapper setup-allowance)
+                (contract-call? .wrapper delegate-via-intermediary u1000 tx-sender)",
+                    ),
+                ],
+                Ok(Some(Value::okay_true())),
+            );
+        }
+
+        #[cfg(not(any(feature = "test-clarity-v4", feature = "test-clarity-v5")))]
+        #[test]
+        fn as_contract_safe_staking_and_stx_pox() {
+            let pox4_code =
+                std::fs::read_to_string("tests/contracts/boot-contracts/pox-4.clar").unwrap();
+            let wrapper = r#"
+                (define-public (delegate-and-send-stx (delegate-amount uint) (stx-amount uint) (recipient principal))
+                    (as-contract? ((with-staking u1000000) (with-stx u500))
                         (unwrap-panic (contract-call? .pox-4 delegate-stx
                             delegate-amount recipient none none))
                         (try! (stx-transfer? stx-amount current-contract recipient))
