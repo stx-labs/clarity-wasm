@@ -566,11 +566,19 @@ impl ComplexWord for WithNft {
 }
 
 #[derive(Debug)]
-pub struct WithStacking;
+pub enum WithStacking {
+    Stacking,
+    Staking,
+}
 
 impl Word for WithStacking {
     fn name(&self) -> ClarityName {
-        ClarityName::from_literal("with-stacking")
+        match self {
+            // Name of the word before Clarity 6
+            WithStacking::Stacking => ClarityName::from_literal("with-stacking"),
+            // Name of the word from Clarity 6
+            WithStacking::Staking => ClarityName::from_literal("with-staking"),
+        }
     }
 }
 
