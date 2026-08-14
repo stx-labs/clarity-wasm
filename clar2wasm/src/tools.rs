@@ -550,22 +550,67 @@ struct CrossEvalResult {
 enum KnownBug {
     /// [https://github.com/stacks-network/stacks-core/issues/4622]
     ListOfQualifiedPrincipal,
+    /// A string literal ending with a backslash cannot be lexed by the parser v1.
+    StringEndingWithBackslash,
 }
 
 impl KnownBug {
     fn check_for_known_bugs(
         compiled: &Result<Option<Value>, VmExecutionError>,
         interpreted: &Result<Option<Value>, VmExecutionError>,
+        snippet: &str,
+        version: ClarityVersion,
+        epoch: StacksEpochId,
     ) -> Option<Self> {
         let check_predicate = |pred: &dyn Fn(&VmExecutionError) -> bool| {
             interpreted.as_ref().is_err_and(pred) && compiled.as_ref().is_err_and(pred)
         };
 
+        // The parser v1 is used below epoch 2.1, and Clarity 1 is the only
+        // version available on those epochs.
+        let uses_parser_v1 = epoch < StacksEpochId::Epoch21 && version == ClarityVersion::Clarity1;
+
         if check_predicate(&Self::has_list_of_qualified_principal_issue) {
             Some(KnownBug::ListOfQualifiedPrincipal)
+        } else if uses_parser_v1 && Self::has_string_ending_with_backslash(snippet) {
+            Some(KnownBug::StringEndingWithBackslash)
         } else {
             None
         }
+    }
+
+    /// Allows to detect if a snippet contains a string literal ending with a
+    /// backslash, which the parser v1 cannot lex.
+    ///
+    /// The parser v1 matches string literals with the regex
+    /// `"(?P<value>((\\")|([[ -~]&&[^"]]))*)"`, which prefers the escaped quote
+    /// alternative over a single character. When the last character of a string
+    /// is a backslash, the closing quote is consumed as part of a `\"` escape and
+    /// the literal keeps running until the next quote of the source.
+    fn has_string_ending_with_backslash(snippet: &str) -> bool {
+        let mut chars = snippet.chars();
+
+        while let Some(c) = chars.next() {
+            if c != '"' {
+                continue;
+            }
+
+            // inside a string literal, until its closing quote
+            let mut ends_with_backslash = false;
+            while let Some(c) = chars.next() {
+                match c {
+                    '\\' => ends_with_backslash = chars.next() == Some('\\'),
+                    '"' => break,
+                    _ => ends_with_backslash = false,
+                }
+            }
+
+            if ends_with_backslash {
+                return true;
+            }
+        }
+
+        false
     }
 
     /// Allows to detect if an error suffers from this issue:
@@ -603,13 +648,15 @@ impl CrossEvalResult {
 }
 
 fn crosseval(snippet: &str, env: TestEnvironment) -> Result<CrossEvalResult, KnownBug> {
+    let (version, epoch) = (env.version, env.epoch);
+
     let mut env_interpreted = env.clone();
     let interpreted = env_interpreted.interpret(snippet);
 
     let mut env_compiled = env;
     let compiled = env_compiled.evaluate(snippet);
 
-    match KnownBug::check_for_known_bugs(&compiled, &interpreted) {
+    match KnownBug::check_for_known_bugs(&compiled, &interpreted, snippet, version, epoch) {
         Some(bug) => {
             println!("KNOW BUG TRIGGERED <{bug:?}>:\n\t{snippet}");
             Err(bug)
@@ -821,6 +868,8 @@ pub fn crosscheck_multi_contract_with_env(
     expected: Result<Option<Value>, VmExecutionError>,
     env: TestEnvironment,
 ) {
+    let (version, epoch) = (env.version, env.epoch);
+
     // compiled version
     let mut compiled_env = env.clone();
     let compiled_results: Vec<_> = contracts
@@ -836,11 +885,18 @@ pub fn crosscheck_multi_contract_with_env(
         .collect();
 
     // compare results contract by contract
-    for ((cmp_res, int_res), (contract_name, _)) in compiled_results
+    for ((cmp_res, int_res), (contract_name, snippet)) in compiled_results
         .iter()
         .zip(interpreted_results)
         .zip(contracts)
     {
+        if let Some(bug) =
+            KnownBug::check_for_known_bugs(cmp_res, &int_res, snippet, version, epoch)
+        {
+            println!("KNOW BUG TRIGGERED <{bug:?}>:\n\t{snippet}");
+            return;
+        }
+
         assert_eq!(
             cmp_res, &int_res,
             "Compiled and interpreted results diverge in contract \"{contract_name}\"\ncompiled: {cmp_res:?}\ninterpreted: {int_res:?}"
@@ -1315,6 +1371,50 @@ mod tests {
         "#;
             let res = interpret(snippet_different_err).expect_err("Should detect a syntax error");
             assert!(!KnownBug::has_list_of_qualified_principal_issue(&res));
+        }
+    }
+
+    #[test]
+    fn detect_string_ending_with_backslash_issue() {
+        // A second string literal is needed after the offending one: the parser
+        // v1 extends the first literal up to the next quote of the source, and
+        // resumes lexing on the content of the second one. Depending on that
+        // content, the failure is either an unlexable remainder or a missing
+        // separator.
+        for snippet in [
+            r#"(list "a\\" "\\")"#,
+            r#"(list u"a\\" u"\\")"#,
+            r#"(list "a\\" "b")"#,
+            r#"(list u"a\\" u"b")"#,
+            r#"(list "\"a\\" "b")"#,
+            r#"(list u"\u{1F600}a\\" u"b")"#,
+        ] {
+            let bug = crosseval(
+                snippet,
+                TestEnvironment::new(StacksEpochId::Epoch2_05, ClarityVersion::Clarity1),
+            )
+            .err()
+            .expect("Snippet should trigger the known bug");
+            assert!(matches!(bug, KnownBug::StringEndingWithBackslash));
+
+            // The parser v2, used from epoch 2.1 on, lexes those snippets fine.
+            crosseval(
+                snippet,
+                TestEnvironment::new(TestConfig::latest_epoch(), ClarityVersion::Clarity1),
+            )
+            .unwrap_or_else(|bug| panic!("Unexpected known bug <{bug:?}>"))
+            .compare(snippet);
+        }
+
+        // A backslash which is not the last character of a string is lexed
+        // correctly, even by the parser v1.
+        for snippet in [r#"(list "a\\b" "c")"#, r#"(list u"a\\b" u"c")"#] {
+            crosseval(
+                snippet,
+                TestEnvironment::new(StacksEpochId::Epoch2_05, ClarityVersion::Clarity1),
+            )
+            .unwrap_or_else(|bug| panic!("Unexpected known bug <{bug:?}>"))
+            .compare(snippet);
         }
     }
 
