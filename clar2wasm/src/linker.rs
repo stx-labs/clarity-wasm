@@ -110,6 +110,7 @@ pub fn link_host_functions(
     link_exit_restrict_assets_fn(linker)?;
     link_cleanup_restrict_assets_fn(linker)?;
     link_with_all_assets_unsafe_fn(linker)?;
+    link_with_pox_fn(linker)?;
     link_with_ft_fn(linker)?;
     link_with_nft_fn(linker)?;
     link_with_stacking_fn(linker)?;
@@ -1597,6 +1598,26 @@ fn link_with_all_assets_unsafe_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "with_all_assets_unsafe".to_string(),
+                e,
+            ))
+        })
+}
+
+fn link_with_pox_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExecutionError> {
+    linker
+        .func_wrap(
+            "clarity",
+            "with_pox",
+            |_caller: Caller<'_, ClarityWasmContext>, allowance_ref: Option<ExternRef>| {
+                AllowanceContext::push(&allowance_ref, Allowance::Pox)?;
+
+                Ok(())
+            },
+        )
+        .map(|_| ())
+        .map_err(|e| {
+            VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
+                "with_pox".to_string(),
                 e,
             ))
         })
@@ -6580,6 +6601,15 @@ pub fn dummy_linker<T>(engine: &Engine) -> Result<Linker<T>, wasmtime::Error> {
         "with_all_assets_unsafe",
         |_: Caller<'_, T>, _allowance_ref: Option<ExternRef>| {
             println!("with_all_assets_unsafe: enter");
+            Ok(())
+        },
+    )?;
+
+    linker.func_wrap(
+        "clarity",
+        "with_pox",
+        |_: Caller<'_, T>, _allowance_ref: Option<ExternRef>| {
+            println!("with_pox");
             Ok(())
         },
     )?;
