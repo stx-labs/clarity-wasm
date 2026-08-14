@@ -645,6 +645,35 @@ impl ComplexWord for WithStx {
 }
 
 #[derive(Debug)]
+pub struct WithPox;
+
+impl Word for WithPox {
+    fn name(&self) -> ClarityName {
+        ClarityName::from_literal("with-pox")
+    }
+}
+
+impl ComplexWord for WithPox {
+    fn traverse(
+        &self,
+        generator: &mut WasmGenerator,
+        builder: &mut walrus::InstrSeqBuilder,
+        _expr: &SymbolicExpression,
+        args: &[SymbolicExpression],
+    ) -> Result<(), GeneratorError> {
+        check_args!(generator, builder, 0, args.len(), ArgumentCountCheck::Exact);
+
+        self.charge(generator, builder, 0)?;
+
+        with_allowance_context(|allowance_context| {
+            builder.local_get(allowance_context);
+            builder.call(generator.func_by_name("stdlib.with_pox"));
+            Ok(())
+        })
+    }
+}
+
+#[derive(Debug)]
 pub struct ContractCall;
 
 impl Word for ContractCall {
