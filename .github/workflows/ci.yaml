@@ -52,7 +52,7 @@ jobs:
     needs: [fmt, clippy]
     strategy:
       matrix:
-        clarity_version: [1, 2, 3, 4, 5]
+        clarity_version: [1, 2, 3, 4, 5, 6]
 
     name: Clarity::V${{ matrix.clarity_version }} Artifacts
     steps:
@@ -89,7 +89,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        clarity_version: [1, 2, 3, 4, 5]
+        clarity_version: [1, 2, 3, 4, 5, 6]
     name: Clarity::V${{ matrix.clarity_version }} Tests
     steps:
       - name: Checkout PR
