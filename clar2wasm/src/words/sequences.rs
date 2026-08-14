@@ -1961,11 +1961,19 @@ mod tests {
     #[test]
     fn concat_less_than_two_args() {
         let result = evaluate("(concat (list 1 2 3))");
+        let expected_err = if cfg!(any(
+            feature = "test-clarity-v1",
+            feature = "test-clarity-v2",
+            feature = "test-clarity-v3",
+            feature = "test-clarity-v4",
+            feature = "test-clarity-v5"
+        )) {
+            "expecting 2 arguments, got 1"
+        } else {
+            "expecting >= 2 arguments, got 1"
+        };
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("expecting 2 arguments, got 1"));
+        assert!(result.unwrap_err().to_string().contains(expected_err));
     }
 
     #[cfg(any(
