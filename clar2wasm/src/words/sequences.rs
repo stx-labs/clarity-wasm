@@ -1976,6 +1976,27 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains(expected_err));
     }
 
+    #[cfg(not(any(
+        feature = "test-clarity-v1",
+        feature = "test-clarity-v2",
+        feature = "test-clarity-v3",
+        feature = "test-clarity-v4",
+        feature = "test-clarity-v5"
+    )))]
+    #[test]
+    fn concat_3args() {
+        let snippet = "(concat (list (ok true)) (list (err u1)) (list (ok true) (err u42)))";
+        let expected = Value::cons_list_unsanitized(vec![
+            Value::okay_true(),
+            Value::err_uint(1),
+            Value::okay_true(),
+            Value::err_uint(42),
+        ])
+        .unwrap();
+
+        crosscheck(snippet, Ok(Some(expected)));
+    }
+
     #[cfg(any(
         feature = "test-clarity-v1",
         feature = "test-clarity-v2",
