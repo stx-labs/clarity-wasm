@@ -57,6 +57,7 @@
     (import "clarity" "cleanup_restrict_assets" (func $stdlib.cleanup_restrict_assets))
 
     (import "clarity" "with_all_assets_unsafe" (func $stdlib.with_all_assets_unsafe (param externref)))
+    (import "clarity" "with_pox" (func $stdlib.with_pox (param externref)))
     (import "clarity" "with_ft" (func $stdlib.with_ft (param externref)
                                                       (param $contract_id_offset i32)
                                                       (param $contract_id_length i32)
