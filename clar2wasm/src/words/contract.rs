@@ -1102,7 +1102,9 @@ mod tests {
     /// Regression test: dynamic dispatch through a trait defined in the
     /// calling contract itself (`define-trait`, no `use-trait` import) used
     /// to fail codegen with "Usage of an unimported trait", because only
-    /// `use-trait` registered traits in `used_traits`.
+    /// `use-trait` registered traits in `used_traits`. In Clarity 1 it then
+    /// failed analysis, because the trait was looked up in the analysis
+    /// database, where the contract being compiled is not stored yet.
     #[test]
     fn dynamic_with_locally_defined_trait() {
         let mut env = TestEnvironment::default();
@@ -2410,7 +2412,7 @@ mod tests {
                 (contract-call? .callee mint-nft u1)
                 (let ((result (contract-call? .callee transfer-token u1)))
                     {
-                        result: result, 
+                        result: result,
                         owner: (contract-call? .callee get-nft-owner u1)
                     }
                 )
