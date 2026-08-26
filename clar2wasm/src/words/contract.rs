@@ -1099,6 +1099,40 @@ mod tests {
         assert_eq!(val.unwrap(), Value::okay(Value::UInt(42)).unwrap());
     }
 
+    /// Regression test: dynamic dispatch through a trait defined in the
+    /// calling contract itself (`define-trait`, no `use-trait` import) used
+    /// to fail codegen with "Usage of an unimported trait", because only
+    /// `use-trait` registered traits in `used_traits`.
+    #[test]
+    fn dynamic_with_locally_defined_trait() {
+        let mut env = TestEnvironment::default();
+        env.init_contract_with_snippet(
+            "contract-callee",
+            r#"
+(define-public (no-args)
+    (ok u42)
+)
+            "#,
+        )
+        .expect("Failed to init contract.");
+        env.init_contract_with_snippet(
+            "contract-caller",
+            r#"
+(define-trait test-trait ((no-args () (response uint uint))))
+(define-public (call-it (t <test-trait>))
+    (contract-call? t no-args)
+)
+            "#,
+        )
+        .expect("Failed to init contract.");
+
+        let val = env
+            .evaluate("(contract-call? .contract-caller call-it .contract-callee)")
+            .expect("Failed to call contract.");
+
+        assert_eq!(val.unwrap(), Value::okay(Value::UInt(42)).unwrap());
+    }
+
     #[test]
     fn dynamic_one_simple_arg() {
         let mut env = TestEnvironment::default();
