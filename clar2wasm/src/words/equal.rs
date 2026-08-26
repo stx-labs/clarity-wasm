@@ -1,5 +1,4 @@
 use clarity::types::StacksEpochId;
-use clarity::vm::types::signatures::CallableSubtype;
 use clarity::vm::types::{SequenceSubtype, TupleTypeSignature, TypeSignature};
 use clarity::vm::{ClarityName, SymbolicExpression};
 use walrus::ir::{BinaryOp, Block, IfElse, Loop, UnaryOp};
@@ -130,10 +129,12 @@ pub(super) fn wasm_equal(
         | TypeSignature::SequenceType(SequenceSubtype::StringType(_)) => {
             wasm_equal_bytes(generator, builder, first_op, nth_op)
         }
+        // All callable types (traits, contract principals, and unions of
+        // them) are principals at runtime, with the same representation.
         TypeSignature::PrincipalType
-        | TypeSignature::CallableType(CallableSubtype::Principal(_)) => {
-            wasm_equal_bytes(generator, builder, first_op, nth_op)
-        }
+        | TypeSignature::CallableType(_)
+        | TypeSignature::TraitReferenceType(_)
+        | TypeSignature::ListUnionType(_) => wasm_equal_bytes(generator, builder, first_op, nth_op),
         TypeSignature::OptionalType(some_ty) => {
             wasm_equal_optional(generator, builder, first_op, nth_op, some_ty)
         }
@@ -157,8 +158,6 @@ pub(super) fn wasm_equal(
             nth_op,
             list_ty.get_list_item_type(),
         ),
-
-        _ => Err(GeneratorError::NotImplemented),
     }
 }
 
