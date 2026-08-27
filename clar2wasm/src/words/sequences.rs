@@ -3,7 +3,6 @@ use clarity::vm::types::{
     FixedFunction, FunctionType, ListTypeData, SequenceSubtype, StringSubtype, TypeSignature,
 };
 use clarity::vm::{ClarityName, SymbolicExpression};
-use clarity_types::ClarityVersion::Clarity5;
 use walrus::ir::{self, BinaryOp, IfElse, InstrSeqType, Loop, UnaryOp};
 use walrus::ValType;
 
@@ -568,17 +567,21 @@ impl ComplexWord for Concat {
         expr: &SymbolicExpression,
         args: &[clarity::vm::SymbolicExpression],
     ) -> Result<(), GeneratorError> {
-        if generator.contract_analysis.clarity_version <= Clarity5 {
-            check_args!(generator, builder, 2, args.len(), ArgumentCountCheck::Exact);
-        } else {
-            check_args!(
-                generator,
-                builder,
-                2,
-                args.len(),
+        check_args!(
+            generator,
+            builder,
+            2,
+            args.len(),
+            if !generator
+                .contract_analysis
+                .clarity_version
+                .supports_variadic_concat()
+            {
+                ArgumentCountCheck::Exact
+            } else {
                 ArgumentCountCheck::AtLeast
-            );
-        }
+            }
+        );
 
         let memory = generator.get_memory()?;
 
@@ -1896,7 +1899,7 @@ impl ComplexWord for Slice {
 mod tests {
     use clarity::vm::Value;
 
-    use crate::tools::{crosscheck, crosscheck_compare_only, evaluate, interpret};
+    use crate::tools::{crosscheck, crosscheck_compare_only, evaluate, interpret, TestConfig};
 
     #[test]
     fn fold_less_than_three_args() {
@@ -1961,13 +1964,7 @@ mod tests {
     #[test]
     fn concat_less_than_two_args() {
         let result = evaluate("(concat (list 1 2 3))");
-        let expected_err = if cfg!(any(
-            feature = "test-clarity-v1",
-            feature = "test-clarity-v2",
-            feature = "test-clarity-v3",
-            feature = "test-clarity-v4",
-            feature = "test-clarity-v5"
-        )) {
+        let expected_err = if !TestConfig::clarity_version().supports_variadic_concat() {
             "expecting 2 arguments, got 1"
         } else {
             "expecting >= 2 arguments, got 1"
