@@ -18,8 +18,9 @@ impl WasmGenerator {
     ///
     /// We can pass the offset to a preallocated memory where the duck-typed value will be written.
     /// This can be necessary to avoid an overwriting of this value if any operation is done right after the duck-typing.
-    /// If the duck-typed value is used immediately after, we can ignore this argument and the duck-typed value will be written
-    /// at the current value of $stack-pointer. The initial value of $stack-pointer will not be reset after the usage of this function.
+    /// If we ignore this argument, the duck-typed value will be written on top of the current call stack frame,
+    /// and $stack-pointer will be moved past it. It is the caller's responsibility to reset $stack-pointer once
+    /// the duck-typed value is not needed anymore.
     pub(crate) fn duck_type(
         &mut self,
         builder: &mut InstrSeqBuilder,
@@ -33,9 +34,17 @@ impl WasmGenerator {
         }
 
         let memory_pointer = preallocated_memory.unwrap_or_else(|| {
-            self.ensure_work_space(dt_needed_workspace(target_ty));
+            let needed_space = dt_needed_workspace(target_ty);
+            self.ensure_work_space(needed_space);
             let pointer = self.module.locals.add(ValType::I32);
-            builder.global_get(self.stack_pointer).local_set(pointer);
+            // we reserve the space on the stack frame, so that the duck-typed value cannot be
+            // overwritten by a subsequent duck-typing or stack allocation.
+            builder
+                .global_get(self.stack_pointer)
+                .local_tee(pointer)
+                .i32_const(needed_space as i32)
+                .binop(BinaryOp::I32Add)
+                .global_set(self.stack_pointer);
             pointer
         });
 
