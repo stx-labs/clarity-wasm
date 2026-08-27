@@ -1,3 +1,4 @@
+use clarity::vm::types::TraitIdentifier;
 use clarity::vm::{ClarityName, SymbolicExpression, SymbolicExpressionType};
 
 use super::{ComplexWord, Word};
@@ -31,6 +32,16 @@ impl ComplexWord for DefineTrait {
                 "Name already used {name:?}"
             )));
         }
+
+        // A locally-defined trait can be used for dynamic dispatch in this
+        // contract without a `use-trait` import, so register it in
+        // `used_traits` like an imported one.
+        let trait_id = TraitIdentifier {
+            name: name.clone(),
+            contract_identifier: generator.contract_analysis.contract_identifier.clone(),
+        };
+        let offset_len = generator.add_trait_identifier(&trait_id)?;
+        generator.used_traits.insert(trait_id, offset_len);
 
         // Store the identifier as a string literal in the memory
         let (name_offset, name_length) = generator.add_string_literal(name)?;

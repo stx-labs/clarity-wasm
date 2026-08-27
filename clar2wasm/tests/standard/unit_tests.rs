@@ -2254,8 +2254,11 @@ fn sha256_prerequisite() {
         .read(&mut store, 0, &mut buffer)
         .expect("Could not read initial hash from memory");
     let buffer: Vec<_> = buffer
-        .chunks_exact(4)
-        .map(|i| u32::from_le_bytes(i.try_into().unwrap()))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .copied()
+        .map(u32::from_le_bytes)
         .collect();
     assert_eq!(
         buffer,
@@ -2271,8 +2274,11 @@ fn sha256_prerequisite() {
         .read(&mut store, 32, &mut buffer)
         .expect("could not read K values from memory");
     let buffer: Vec<_> = buffer
-        .chunks_exact(4)
-        .map(|i| i32::from_le_bytes(i.try_into().unwrap()))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .copied()
+        .map(i32::from_le_bytes)
         .collect();
     assert_eq!(
         buffer,
@@ -2566,8 +2572,11 @@ fn hash160_prerequisite() {
         .read(&mut store, 608, &mut buffer)
         .expect("Could not read initial hash from memory");
     let buffer: Vec<_> = buffer
-        .chunks_exact(4)
-        .map(|i| u32::from_le_bytes(i.try_into().unwrap()))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .copied()
+        .map(u32::from_le_bytes)
         .collect();
     assert_eq!(buffer, [0, 0x5a827999, 0x6ed9eba1, 0x8f1bbcdc, 0xa953fd4e]);
 
@@ -2577,8 +2586,11 @@ fn hash160_prerequisite() {
         .read(&mut store, 628, &mut buffer)
         .expect("Could not read initial hash from memory");
     let buffer: Vec<_> = buffer
-        .chunks_exact(4)
-        .map(|i| u32::from_le_bytes(i.try_into().unwrap()))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .copied()
+        .map(u32::from_le_bytes)
         .collect();
     assert_eq!(buffer, [0x50a28be6, 0x5c4dd124, 0x6d703ef3, 0x7a6d76e9, 0]);
 }
@@ -3773,8 +3785,11 @@ fn uint_to_utf8() {
             .expect("could not read string answer from memory");
 
         let buffer: Option<String> = buffer
-            .chunks_exact(4)
-            .map(|c| u32::from_be_bytes(c.try_into().unwrap()))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .copied()
+            .map(u32::from_be_bytes)
             .map(char::from_u32)
             .collect();
 
@@ -3840,8 +3855,11 @@ fn int_to_utf8() {
             .expect("could not read string answer from memory");
 
         let buffer: Option<String> = buffer
-            .chunks_exact(4)
-            .map(|c| u32::from_be_bytes(c.try_into().unwrap()))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .copied()
+            .map(u32::from_be_bytes)
             .map(char::from_u32)
             .collect();
 
@@ -4059,8 +4077,11 @@ fn utf8_to_string_utf8_valid() {
             .read(&mut store, 3000, &mut buffer)
             .expect("Could not read from memory");
         let buffer: Vec<_> = buffer
-            .chunks_exact(4)
-            .map(|c| u32::from_be_bytes(c.try_into().unwrap()))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .copied()
+            .map(u32::from_be_bytes)
             .collect();
         assert_eq!(buffer, unicodes_result);
     };

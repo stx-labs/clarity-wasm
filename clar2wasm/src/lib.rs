@@ -181,14 +181,14 @@ pub fn compile_contract(contract_analysis: ContractAnalysis) -> Result<Module, G
 }
 
 mod utils {
-    use std::collections::HashMap;
+    use std::collections::{BTreeMap, HashMap};
 
     use clarity::types::StacksEpochId;
     use clarity::vm::analysis::{AnalysisDatabase, ContractAnalysis};
     use clarity::vm::ast::ContractAST;
     use clarity::vm::errors::StaticCheckError;
-    use clarity::vm::types::signatures::FunctionReturnsSignature;
-    use clarity::vm::types::{FixedFunction, FunctionType};
+    use clarity::vm::types::signatures::{FunctionReturnsSignature, FunctionSignature};
+    use clarity::vm::types::{FixedFunction, FunctionType, QualifiedContractIdentifier};
     use clarity::vm::SymbolicExpression;
     use clarity_types::representations::TraitDefinition;
     use clarity_types::types::PrincipalData::Contract;
@@ -256,13 +256,19 @@ mod utils {
     ///
     /// `trait_args` maps an in-scope function argument name to the local alias of
     /// the trait it was declared with (e.g. `tt` -> `printer`), so that dynamic
-    /// calls through a trait reference can be resolved too.
-    /// See issue #819
+    /// calls through a trait reference can be resolved too. See issue #819.
+    ///
+    /// `contract_identifier` and `defined_traits` describe the contract currently
+    /// being compiled. A trait it defines itself is not in the analysis database
+    /// yet, so it has to be resolved from the in-progress analysis instead.
+    #[allow(clippy::too_many_arguments)]
     fn add_type_annotation_for_contracts(
         ast: &ContractAST,
         expr: &SymbolicExpression,
         analysis_db: &mut AnalysisDatabase,
         epoch: StacksEpochId,
+        contract_identifier: &QualifiedContractIdentifier,
+        defined_traits: &BTreeMap<ClarityName, BTreeMap<ClarityName, FunctionSignature>>,
         trait_args: &mut HashMap<ClarityName, ClarityName>,
     ) -> Result<Vec<(SymbolicExpression, TypeSignature)>, StaticCheckError> {
         let Some(list @ [first, rest @ ..]) = expr.match_list() else {
@@ -303,11 +309,18 @@ mod utils {
                     TraitDefinition::Imported(trait_id) | TraitDefinition::Defined(trait_id),
                 ) = ast.get_referenced_trait(alias)
                 {
-                    if let Some(trait_signature) = analysis_db.get_defined_trait(
-                        &trait_id.contract_identifier,
-                        &trait_id.name,
-                        &epoch,
-                    )? {
+                    // A locally defined trait is not in the analysis database yet,
+                    // so take it from the in-progress analysis instead.
+                    let trait_signature = if trait_id.contract_identifier == *contract_identifier {
+                        defined_traits.get(&trait_id.name).cloned()
+                    } else {
+                        analysis_db.get_defined_trait(
+                            &trait_id.contract_identifier,
+                            &trait_id.name,
+                            &epoch,
+                        )?
+                    };
+                    if let Some(trait_signature) = trait_signature {
                         if let Some(function_signature) = trait_signature.get(function_name) {
                             return Ok(call_args
                                 .iter()
@@ -344,7 +357,15 @@ mod utils {
 
         list.iter()
             .map(|child| {
-                add_type_annotation_for_contracts(ast, child, analysis_db, epoch, trait_args)
+                add_type_annotation_for_contracts(
+                    ast,
+                    child,
+                    analysis_db,
+                    epoch,
+                    contract_identifier,
+                    defined_traits,
+                    trait_args,
+                )
             })
             .collect::<Result<Vec<_>, _>>()
             .map(|a| a.into_iter().flatten().collect())
@@ -369,6 +390,8 @@ mod utils {
                         expr,
                         analysis_db,
                         epoch,
+                        &contract_analysis.contract_identifier,
+                        &contract_analysis.defined_traits,
                         &mut trait_args,
                     )
                 })
