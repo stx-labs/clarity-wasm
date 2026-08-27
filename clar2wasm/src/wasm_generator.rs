@@ -108,8 +108,8 @@ impl Bindings {
         self.0.contains_key(name)
     }
 
-    pub(crate) fn get_locals(&self, name: &ClarityName) -> Option<&[LocalId]> {
-        self.0.get(name).map(|b| b.locals.as_slice())
+    fn get(&self, name: &ClarityName) -> Option<(&[LocalId], &TypeSignature)> {
+        self.0.get(name).map(|b| (b.locals.as_slice(), &b.ty))
     }
 
     pub(crate) fn get_trait_identifier(&self, name: &ClarityName) -> Option<&TraitIdentifier> {
@@ -1794,12 +1794,19 @@ impl WasmGenerator {
         }
 
         // Handle parameters and local bindings
-        let values = self.bindings.get_locals(atom).ok_or_else(|| {
+        let (values, binding_ty) = self.bindings.get(atom).ok_or_else(|| {
             GeneratorError::InternalError(format!("unable to find local for {}", atom.as_str()))
         })?;
+        let binding_ty = binding_ty.clone();
 
         for value in values {
             builder.local_get(*value);
+        }
+
+        // The type-checker doesn't annotate every expression: a binding used as the trait
+        // argument of a `contract-call?` is resolved as a trait reference and never gets a type.
+        if let Some(actual_ty) = self.get_expr_type(expr).cloned() {
+            self.duck_type(builder, &binding_ty, &actual_ty, None)?;
         }
 
         Ok(())
