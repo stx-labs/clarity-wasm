@@ -565,7 +565,7 @@ impl ComplexWord for Concat {
         generator: &mut crate::wasm_generator::WasmGenerator,
         builder: &mut walrus::InstrSeqBuilder,
         expr: &SymbolicExpression,
-        args: &[clarity::vm::SymbolicExpression],
+        args: &[SymbolicExpression],
     ) -> Result<(), GeneratorError> {
         check_args!(
             generator,
