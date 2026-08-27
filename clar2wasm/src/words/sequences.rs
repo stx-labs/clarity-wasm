@@ -1997,6 +1997,56 @@ mod tests {
         crosscheck(snippet, Ok(Some(expected)));
     }
 
+    #[test]
+    fn concat_2args_with_ducktyping() {
+        let snippet = r#"
+            (let
+                (
+                    (a (list (ok 0x99)))
+                    (b (list (err u42)))
+                )
+                (concat a b)
+            )
+        "#;
+        let expected = Value::cons_list_unsanitized(vec![
+            Value::okay(Value::buff_from_byte(0x99)).unwrap(),
+            Value::err_uint(42),
+        ])
+        .unwrap();
+
+        crosscheck(snippet, Ok(Some(expected)));
+    }
+
+    #[cfg(not(any(
+        feature = "test-clarity-v1",
+        feature = "test-clarity-v2",
+        feature = "test-clarity-v3",
+        feature = "test-clarity-v4",
+        feature = "test-clarity-v5"
+    )))]
+    #[test]
+    fn concat_3args_with_ducktyping() {
+        let snippet = r#"
+            (let
+                (
+                    (a (list (ok 0x99)))
+                    (b (list (err u42)))
+                    (c (list (ok 0xef) (err u1)))
+                )
+                (concat a b c)
+            )
+        "#;
+        let expected = Value::cons_list_unsanitized(vec![
+            Value::okay(Value::buff_from_byte(0x99)).unwrap(),
+            Value::err_uint(42),
+            Value::okay(Value::buff_from_byte(0xef)).unwrap(),
+            Value::err_uint(1),
+        ])
+        .unwrap();
+
+        crosscheck(snippet, Ok(Some(expected)));
+    }
+
     #[cfg(any(
         feature = "test-clarity-v1",
         feature = "test-clarity-v2",
@@ -2012,6 +2062,99 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("expecting 2 arguments, got 3"));
+    }
+
+    #[test]
+    fn map_concat_2args_with_ducktyping() {
+        let snippet = "
+            (define-private (foo
+                (a (list 2 (response (buff 1) uint)))
+                (b (list 3 (response (buff 1) uint)))
+            )
+                (concat a b)
+            )
+
+            (let
+                (
+                    (a (list (ok 0xca)))
+                    (b (list (err u42)))
+                    (c (list (ok 0xfe)))
+                    (d (list (err u24)))
+                    (e (list a c))
+                    (f (list b d))
+                )
+                (map foo e f)
+            )
+        ";
+
+        let expected = Value::cons_list_unsanitized(vec![
+            Value::cons_list_unsanitized(vec![
+                Value::okay(Value::buff_from_byte(0xca)).unwrap(),
+                Value::err_uint(42),
+            ])
+            .unwrap(),
+            Value::cons_list_unsanitized(vec![
+                Value::okay(Value::buff_from_byte(0xfe)).unwrap(),
+                Value::err_uint(24),
+            ])
+            .unwrap(),
+        ])
+        .unwrap();
+
+        crosscheck(snippet, Ok(Some(expected)));
+    }
+
+    #[cfg(not(any(
+        feature = "test-clarity-v1",
+        feature = "test-clarity-v2",
+        feature = "test-clarity-v3",
+        feature = "test-clarity-v4",
+        feature = "test-clarity-v5"
+    )))]
+    #[test]
+    fn map_concat_3args_with_ducktyping() {
+        let snippet = "
+            (define-private (foo
+                (a (list 2 (response (buff 1) uint)))
+                (b (list 3 (response (buff 1) uint)))
+                (c (list 1 (response (buff 1) uint)))
+            )
+                (concat a b c)
+            )
+
+            (let
+                (
+                    (a (list (ok 0xca)))
+                    (b (list (err u42)))
+                    (c (list (ok 0xfe)))
+                    (d (list (err u24)))
+                    (e (list (ok 0xbd)))
+                    (f (list (err u99)))
+                    (ac (list a c))
+                    (bd (list b d))
+                    (ef (list e f))
+                )
+                (map foo ac bd ef)
+            )
+        ";
+
+        let expected = Value::cons_list_unsanitized(vec![
+            Value::cons_list_unsanitized(vec![
+                Value::okay(Value::buff_from_byte(0xca)).unwrap(),
+                Value::err_uint(42),
+                Value::okay(Value::buff_from_byte(0xbd)).unwrap(),
+            ])
+            .unwrap(),
+            Value::cons_list_unsanitized(vec![
+                Value::okay(Value::buff_from_byte(0xfe)).unwrap(),
+                Value::err_uint(24),
+                Value::err_uint(99),
+            ])
+            .unwrap(),
+        ])
+        .unwrap();
+
+        crosscheck(snippet, Ok(Some(expected)));
     }
 
     #[test]
