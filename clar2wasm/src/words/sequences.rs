@@ -2155,6 +2155,18 @@ mod tests {
     }
 
     #[test]
+    fn concat_multiple_duck_typing() {
+        crosscheck(
+            "
+            (let ((a (list (ok (unwrap-panic (as-max-len? 0x99 u60000)))))
+                  (b (list (err u1))))
+              (+ (len (concat a b)) (len (concat b a))))
+            ",
+            Ok(Some(Value::UInt(4))),
+        );
+    }
+
+    #[test]
     fn map_less_than_two_args() {
         let result = evaluate("(map +)");
         assert!(result.is_err());

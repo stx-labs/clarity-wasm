@@ -33,20 +33,14 @@ impl WasmGenerator {
             return Ok(());
         }
 
-        let memory_pointer = preallocated_memory.unwrap_or_else(|| {
-            let needed_space = dt_needed_workspace(target_ty);
-            self.ensure_work_space(needed_space);
-            let pointer = self.module.locals.add(ValType::I32);
-            // we reserve the space on the stack frame, so that the duck-typed value cannot be
-            // overwritten by a subsequent duck-typing or stack allocation.
-            builder
-                .global_get(self.stack_pointer)
-                .local_tee(pointer)
-                .i32_const(needed_space as i32)
-                .binop(BinaryOp::I32Add)
-                .global_set(self.stack_pointer);
-            pointer
-        });
+        let memory_pointer = match preallocated_memory {
+            Some(p) => p,
+            None => {
+                let (pointer, _) =
+                    self.create_call_stack_bytes(builder, dt_needed_workspace(target_ty) as i32);
+                pointer
+            }
+        };
 
         let locals = self.create_locals_for_ty(target_ty);
         self.duck_type_stack(builder, og_ty, target_ty, &locals, memory_pointer)?;
