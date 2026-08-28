@@ -565,9 +565,23 @@ impl ComplexWord for Concat {
         generator: &mut crate::wasm_generator::WasmGenerator,
         builder: &mut walrus::InstrSeqBuilder,
         expr: &SymbolicExpression,
-        args: &[clarity::vm::SymbolicExpression],
+        args: &[SymbolicExpression],
     ) -> Result<(), GeneratorError> {
-        check_args!(generator, builder, 2, args.len(), ArgumentCountCheck::Exact);
+        check_args!(
+            generator,
+            builder,
+            2,
+            args.len(),
+            if !generator
+                .contract_analysis
+                .clarity_version
+                .supports_variadic_concat()
+            {
+                ArgumentCountCheck::Exact
+            } else {
+                ArgumentCountCheck::AtLeast
+            }
+        );
 
         let memory = generator.get_memory()?;
 
@@ -578,54 +592,87 @@ impl ComplexWord for Concat {
             .clone();
         let (offset, _) = generator.create_call_stack_local(builder, &ty, false, true);
 
+        // set the correct type for all the arguments if we are dealing with lists
+        if let TypeSignature::SequenceType(SequenceSubtype::ListType(expr_ltd)) = &ty {
+            for arg in args {
+                let arg_type = generator.get_expr_type(arg).ok_or_else(|| {
+                    GeneratorError::TypeError("concat argument must be typed".to_owned())
+                })?;
+                let arg_len = match arg_type {
+                    TypeSignature::SequenceType(SequenceSubtype::ListType(arg_ltd)) => {
+                        arg_ltd.get_max_len()
+                    }
+                    t => {
+                        return Err(GeneratorError::TypeError(format!(
+                            "mismatched type for a concat argument: expected a list, got {t}"
+                        )))
+                    }
+                };
+                generator.set_expr_type(
+                    arg,
+                    // since we are building a type which will necessarily be shorter than the expression type,
+                    // and the expression type was validated by the type checker, this operation cannot fail.
+                    #[allow(clippy::unwrap_used)]
+                    TypeSignature::list_of(expr_ltd.get_list_item_type().clone(), arg_len).unwrap(),
+                )?;
+            }
+        }
+
+        let [fst_arg, rest_args @ ..] = args else {
+            return Err(GeneratorError::InternalError(
+                "concat should have at least 2 arguments".to_owned(),
+            ));
+        };
+
+        // this will contain the result size
+        let size = generator.borrow_local(ValType::I32);
+
+        // handling the first argument:
+        // copy destination
         builder.local_get(offset);
 
-        // Traverse the lhs, leaving it on the data stack (offset, size)
-        let lhs = args.get_expr(0)?;
-        // WORKAROUND: typechecker issue for lists
-        generator.set_expr_type(lhs, ty.clone())?;
-        generator.traverse_expr(builder, lhs)?;
+        // traverse the first argument, leaves on the stack (offset, size) which are the
+        // correct arguments for the memory copy operation right after.
+        generator.traverse_expr(builder, fst_arg)?;
 
-        // Save the length of the lhs
-        let lhs_length = generator.module.locals.add(ValType::I32);
-        builder.local_tee(lhs_length);
+        // we save the size
+        builder.local_tee(*size);
 
-        // Copy the lhs to the new sequence
+        // and finally, the copy of the first argument
         builder.memory_copy(memory, memory);
 
-        // Load the adjusted destination offset
-        builder
-            .local_get(offset)
-            .local_get(lhs_length)
-            .binop(BinaryOp::I32Add);
+        // here we can traverse and copy the rest of the arguments
+        for arg in rest_args {
+            let tmp = generator.borrow_local(ValType::I32);
 
-        // Traverse the rhs, leaving it on the data stack (offset, size)
-        let rhs = args.get_expr(1)?;
-        // WORKAROUND: typechecker issue for lists
-        generator.set_expr_type(rhs, ty.clone())?;
-        generator.traverse_expr(builder, rhs)?;
+            // copy destination is the result offset + the number of bytes already copied
+            builder
+                .local_get(offset)
+                .local_get(*size)
+                .binop(BinaryOp::I32Add);
 
-        // Save the length of the rhs
-        let rhs_length = generator.module.locals.add(ValType::I32);
-        builder.local_tee(rhs_length);
+            // traverse the argument, leaving on the stack (offset, size)
+            generator.traverse_expr(builder, arg)?;
 
-        // Copy the rhs to the new sequence
-        builder.memory_copy(memory, memory);
+            // we keep the argument size on the stack, but use it to update the result size
+            builder
+                .local_tee(*tmp)
+                .local_get(*size)
+                .binop(BinaryOp::I32Add)
+                .local_set(*size);
+            builder.local_get(*tmp);
 
-        // Load the offset of the new sequence
-        builder.local_get(offset);
+            // Copy the argument to the new sequence
+            builder.memory_copy(memory, memory);
+        }
 
-        // Total size = lhs_length + rhs_length
-        builder
-            .local_get(lhs_length)
-            .local_get(rhs_length)
-            .binop(BinaryOp::I32Add);
-
+        // TODO: check if this is still correct for Clarity 6+
         // we charge after the operation since that's the only time we have the
         // length of the resulting list
-        let length = generator.module.locals.add(ValType::I32);
-        builder.local_tee(length);
-        self.charge(generator, builder, length)?;
+        self.charge(generator, builder, *size)?;
+
+        // Put the result sequence on the stack
+        builder.local_get(offset).local_get(*size);
 
         Ok(())
     }
@@ -1852,7 +1899,7 @@ impl ComplexWord for Slice {
 mod tests {
     use clarity::vm::Value;
 
-    use crate::tools::{crosscheck, crosscheck_compare_only, evaluate, interpret};
+    use crate::tools::{crosscheck, crosscheck_compare_only, evaluate, interpret, TestConfig};
 
     #[test]
     fn fold_less_than_three_args() {
@@ -1914,21 +1961,87 @@ mod tests {
             .contains("expecting 2 arguments, got 3"));
     }
 
-    #[cfg(any(
+    #[test]
+    fn concat_less_than_two_args() {
+        let result = evaluate("(concat (list 1 2 3))");
+        let expected_err = if !TestConfig::clarity_version().supports_variadic_concat() {
+            "expecting 2 arguments, got 1"
+        } else {
+            "expecting >= 2 arguments, got 1"
+        };
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains(expected_err));
+    }
+
+    #[cfg(not(any(
         feature = "test-clarity-v1",
         feature = "test-clarity-v2",
         feature = "test-clarity-v3",
         feature = "test-clarity-v4",
         feature = "test-clarity-v5"
-    ))]
+    )))]
     #[test]
-    fn concat_less_than_two_args() {
-        let result = evaluate("(concat (list 1 2 3))");
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("expecting 2 arguments, got 1"));
+    fn concat_3args() {
+        let snippet = "(concat (list (ok true)) (list (err u1)) (list (ok true) (err u42)))";
+        let expected = Value::cons_list_unsanitized(vec![
+            Value::okay_true(),
+            Value::err_uint(1),
+            Value::okay_true(),
+            Value::err_uint(42),
+        ])
+        .unwrap();
+
+        crosscheck(snippet, Ok(Some(expected)));
+    }
+
+    #[test]
+    fn concat_2args_with_ducktyping() {
+        let snippet = r#"
+            (let
+                (
+                    (a (list (ok 0x99)))
+                    (b (list (err u42)))
+                )
+                (concat a b)
+            )
+        "#;
+        let expected = Value::cons_list_unsanitized(vec![
+            Value::okay(Value::buff_from_byte(0x99)).unwrap(),
+            Value::err_uint(42),
+        ])
+        .unwrap();
+
+        crosscheck(snippet, Ok(Some(expected)));
+    }
+
+    #[cfg(not(any(
+        feature = "test-clarity-v1",
+        feature = "test-clarity-v2",
+        feature = "test-clarity-v3",
+        feature = "test-clarity-v4",
+        feature = "test-clarity-v5"
+    )))]
+    #[test]
+    fn concat_3args_with_ducktyping() {
+        let snippet = r#"
+            (let
+                (
+                    (a (list (ok 0x99)))
+                    (b (list (err u42)))
+                    (c (list (ok 0xef) (err u1)))
+                )
+                (concat a b c)
+            )
+        "#;
+        let expected = Value::cons_list_unsanitized(vec![
+            Value::okay(Value::buff_from_byte(0x99)).unwrap(),
+            Value::err_uint(42),
+            Value::okay(Value::buff_from_byte(0xef)).unwrap(),
+            Value::err_uint(1),
+        ])
+        .unwrap();
+
+        crosscheck(snippet, Ok(Some(expected)));
     }
 
     #[cfg(any(
@@ -1946,6 +2059,111 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("expecting 2 arguments, got 3"));
+    }
+
+    #[test]
+    fn map_concat_2args_with_ducktyping() {
+        let snippet = "
+            (define-private (foo
+                (a (list 2 (response (buff 1) uint)))
+                (b (list 3 (response (buff 1) uint)))
+            )
+                (concat a b)
+            )
+
+            (let
+                (
+                    (a (list (ok 0xca)))
+                    (b (list (err u42)))
+                    (c (list (ok 0xfe)))
+                    (d (list (err u24)))
+                    (e (list a c))
+                    (f (list b d))
+                )
+                (map foo e f)
+            )
+        ";
+
+        let expected = Value::cons_list_unsanitized(vec![
+            Value::cons_list_unsanitized(vec![
+                Value::okay(Value::buff_from_byte(0xca)).unwrap(),
+                Value::err_uint(42),
+            ])
+            .unwrap(),
+            Value::cons_list_unsanitized(vec![
+                Value::okay(Value::buff_from_byte(0xfe)).unwrap(),
+                Value::err_uint(24),
+            ])
+            .unwrap(),
+        ])
+        .unwrap();
+
+        crosscheck(snippet, Ok(Some(expected)));
+    }
+
+    #[cfg(not(any(
+        feature = "test-clarity-v1",
+        feature = "test-clarity-v2",
+        feature = "test-clarity-v3",
+        feature = "test-clarity-v4",
+        feature = "test-clarity-v5"
+    )))]
+    #[test]
+    fn map_concat_3args_with_ducktyping() {
+        let snippet = "
+            (define-private (foo
+                (a (list 2 (response (buff 1) uint)))
+                (b (list 3 (response (buff 1) uint)))
+                (c (list 1 (response (buff 1) uint)))
+            )
+                (concat a b c)
+            )
+
+            (let
+                (
+                    (a (list (ok 0xca)))
+                    (b (list (err u42)))
+                    (c (list (ok 0xfe)))
+                    (d (list (err u24)))
+                    (e (list (ok 0xbd)))
+                    (f (list (err u99)))
+                    (ac (list a c))
+                    (bd (list b d))
+                    (ef (list e f))
+                )
+                (map foo ac bd ef)
+            )
+        ";
+
+        let expected = Value::cons_list_unsanitized(vec![
+            Value::cons_list_unsanitized(vec![
+                Value::okay(Value::buff_from_byte(0xca)).unwrap(),
+                Value::err_uint(42),
+                Value::okay(Value::buff_from_byte(0xbd)).unwrap(),
+            ])
+            .unwrap(),
+            Value::cons_list_unsanitized(vec![
+                Value::okay(Value::buff_from_byte(0xfe)).unwrap(),
+                Value::err_uint(24),
+                Value::err_uint(99),
+            ])
+            .unwrap(),
+        ])
+        .unwrap();
+
+        crosscheck(snippet, Ok(Some(expected)));
+    }
+
+    #[test]
+    fn concat_multiple_duck_typing() {
+        crosscheck(
+            "
+            (let ((a (list (ok (unwrap-panic (as-max-len? 0x99 u60000)))))
+                  (b (list (err u1))))
+              (+ (len (concat a b)) (len (concat b a))))
+            ",
+            Ok(Some(Value::UInt(4))),
+        );
     }
 
     #[test]

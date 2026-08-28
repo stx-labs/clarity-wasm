@@ -79,6 +79,44 @@ proptest! {
 
         crosscheck(&snippet, Ok(Some(expected)));
     }
+
+    #[cfg(not(any(
+        feature = "test-clarity-v1",
+        feature = "test-clarity-v2",
+        feature = "test-clarity-v3",
+        feature = "test-clarity-v4",
+        feature = "test-clarity-v5"
+    )))]
+    #[test]
+    fn concat_variad_crosscheck(
+        seqs in prop_sequence_type(10).prop_flat_map(|ty| proptest::collection::vec(PropValue::from_type(ty), 2..10))
+            .prop_filter("skip large values", |seqs| seqs.iter().map(|s| s.inner().size().unwrap()).sum::<u32>() <= MAX_VALUE_SIZE)
+    ) {
+        let [head, tail @ ..] = &seqs[..] else {
+            unreachable!()
+        };
+        let snippet = format!(
+            "(concat {head}{})",
+            tail.iter().map(|s| format!(" {s}")).collect::<String>()
+        );
+
+        let expected = Value::Sequence(
+            seqs.into_iter()
+                .map(|s| {
+                    let Value::Sequence(data) = s.into() else {
+                        unreachable!()
+                    };
+                    data
+                })
+                .reduce(|mut a, b| {
+                    a.concat(&clarity::types::StacksEpochId::latest(), b).unwrap();
+                    a
+                })
+                .unwrap(),
+        );
+
+        crosscheck(&snippet, Ok(Some(expected)));
+    }
 }
 
 proptest! {
@@ -647,4 +685,8 @@ mod clarity_v2_v3 {
             crosscheck(&snippet, Ok(Some(expected)));
         }
     }
+}
+
+pub fn prop_sequence_type(size: usize) -> impl Strategy<Value = TypeSignature> {
+    PropValue::any_sequence(size).prop_map(|s| TypeSignature::type_of(s.inner()).unwrap())
 }
