@@ -1,6 +1,6 @@
 use clar2wasm::tools::{
-    as_oom_check_snippet, crosscheck_multi_contract, crosscheck_oom, crosscheck_oom_with_env,
-    crosscheck_oom_with_non_literal_args, TestConfig, TestEnvironment,
+    as_oom_check_snippet, crosscheck_multi_contract, crosscheck_oom, crosscheck_oom_multi_contract,
+    crosscheck_oom_with_env, crosscheck_oom_with_non_literal_args, TestConfig, TestEnvironment,
 };
 use clarity::vm::types::{PrincipalData, TypeSignature};
 use clarity::vm::{ClarityName, ContractName, Value};
@@ -315,6 +315,36 @@ fn contract_call_with_workspace_oom() {
     .unwrap();
 
     crosscheck_multi_contract(
+        &[
+            (ContractName::from_literal("callee"), &callee),
+            (ContractName::from_literal("caller"), caller),
+        ],
+        Ok(Some(expected)),
+    );
+}
+
+#[test]
+fn contract_call_args_space_oom() {
+    // The result slot for `(response (buff RESULT_LEN) NoType)` is
+    // `get_type_size` (16) + `get_type_in_memory_size` (RESULT_LEN + 16), so
+    // this makes it exactly one Wasm page: after padding, the caller has room
+    // for the result and nothing more. The buffer is returned at full length so
+    // that the write really reaches the last byte of the slot.
+    const RESULT_LEN: usize = 65536 - 32;
+
+    let callee = format!(
+        r#"
+            (define-public (foo (a uint) (b uint))
+                (ok 0x{})
+            )
+        "#,
+        "00".repeat(RESULT_LEN)
+    );
+    let caller = "(contract-call? .callee foo u1 u2)";
+
+    let expected = Value::okay(Value::buff_from(vec![0; RESULT_LEN]).unwrap()).unwrap();
+
+    crosscheck_oom_multi_contract(
         &[
             (ContractName::from_literal("callee"), &callee),
             (ContractName::from_literal("caller"), caller),
