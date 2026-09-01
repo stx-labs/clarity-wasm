@@ -5,7 +5,7 @@ use clarity::vm::clarity_wasm::get_type_size;
 use clarity::vm::types::signatures::CallableSubtype;
 use clarity::vm::types::{PrincipalData, TypeSignature};
 use clarity::vm::{ClarityName, SymbolicExpression, SymbolicExpressionType, Value};
-use walrus::ir::{BinaryOp, Block, InstrSeqType};
+use walrus::ir::{Block, InstrSeqType};
 use walrus::{LocalId, ValType};
 
 use super::{ComplexWord, Word};
@@ -796,14 +796,8 @@ impl ComplexWord for ContractCall {
             .i32_const(fn_length as i32);
 
         // Write the arguments to the call stack, to be read by the host
-        let arg_offset = generator.module.locals.add(ValType::I32);
         let total_args_size = args_ty.iter().map(get_type_size).sum();
-        builder
-            .global_get(generator.stack_pointer)
-            .local_tee(arg_offset)
-            .i32_const(total_args_size)
-            .binop(BinaryOp::I32Add)
-            .global_set(generator.stack_pointer);
+        let (arg_offset, _) = generator.create_call_stack_bytes(builder, total_args_size);
 
         let mut arg_length = 0;
         for (arg, arg_ty) in args.iter().zip(args_ty) {

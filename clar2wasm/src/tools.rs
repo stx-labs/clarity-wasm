@@ -1106,7 +1106,48 @@ pub fn as_oom_check_snippet(
     epoch: StacksEpochId,
     version: ClarityVersion,
 ) -> String {
-    let compiled_module = Datastore::new()
+    inner_as_oom_check_snippet(snippet, &[], args_types, epoch, version)
+}
+
+#[allow(clippy::expect_used)]
+fn inner_as_oom_check_snippet(
+    snippet: &str,
+    contracts: &[(ContractName, &str)],
+    args_types: &[TypeSignature],
+    epoch: StacksEpochId,
+    version: ClarityVersion,
+) -> String {
+    let mut datastore = Datastore::new();
+
+    for (name, contract) in contracts {
+        let contract_id =
+            QualifiedContractIdentifier::new(StandardPrincipalData::transient(), name.clone());
+        let contract_analysis = datastore
+            .as_analysis_db()
+            .execute(|analysis_db| {
+                compile(
+                    contract,
+                    &contract_id,
+                    LimitedCostTracker::new_free(),
+                    version,
+                    epoch,
+                    analysis_db,
+                    false,
+                )
+                .map_err(|e| {
+                    StaticCheckErrorKind::Unreachable(format!("Compilation failure {e:?}"))
+                })
+            })
+            .expect("Could not compile contract")
+            .contract_analysis;
+
+        datastore
+            .as_analysis_db()
+            .execute(|analysis_db| analysis_db.insert_contract(&contract_id, &contract_analysis))
+            .expect("Could not insert contract analysis");
+    }
+
+    let compiled_module = datastore
         .as_analysis_db()
         .execute(|analysis_db| {
             compile(
@@ -1197,6 +1238,32 @@ pub fn crosscheck_oom_with_non_literal_args_compare_only(
 
 pub fn crosscheck_oom(snippet: &str, expected: Result<Option<Value>, VmExecutionError>) {
     crosscheck_oom_with_non_literal_args(snippet, &[], expected)
+}
+
+/// Same as [`crosscheck_multi_contract`], but the last contract is padded to
+/// fill its memory, so that it will run out of memory if it needs more space
+/// than what was allocated for it.
+#[allow(clippy::expect_used)]
+pub fn crosscheck_oom_multi_contract(
+    contracts: &[(ContractName, &str)],
+    expected: Result<Option<Value>, VmExecutionError>,
+) {
+    let ((name, snippet), previous_contracts) = contracts
+        .split_last()
+        .expect("There should be at least one contract");
+
+    let padded_snippet = inner_as_oom_check_snippet(
+        snippet,
+        previous_contracts,
+        &[],
+        TestConfig::latest_epoch(),
+        TestConfig::clarity_version(),
+    );
+
+    let mut contracts = previous_contracts.to_vec();
+    contracts.push((name.clone(), &padded_snippet));
+
+    crosscheck_multi_contract(&contracts, expected);
 }
 
 pub fn crosscheck_oom_compare_only_with_epoch_and_version(
