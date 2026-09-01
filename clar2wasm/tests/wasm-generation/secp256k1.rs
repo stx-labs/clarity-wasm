@@ -1,7 +1,7 @@
 use std::ops::RangeInclusive;
 
 use clar2wasm::tools::{crosscheck, crosscheck_validate};
-use clarity::types::{PrivateKey, PublicKey};
+use clarity::types::PrivateKey;
 use clarity::util::hash::to_hex;
 use clarity::util::secp256k1::{Secp256k1PrivateKey, Secp256k1PublicKey};
 use clarity::vm::types::{SequenceSubtype, TypeSignature};

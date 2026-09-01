@@ -161,7 +161,7 @@ mod tests {
     };
     use clarity::vm::Value;
 
-    use crate::tools::{crosscheck, crosscheck_expect_failure, evaluate};
+    use crate::tools::{crosscheck, evaluate};
 
     /// Uncompressed form of the compressed key
     /// 0x0250863ad64a87ae8a2fe83c1af1a8403cb53f53e486d8511dad8a04887e5b2352,
@@ -530,7 +530,7 @@ mod tests {
     )))]
     #[test]
     fn test_secp256k1_decompress_public_key_too_long() {
-        crosscheck_expect_failure(
+        crate::tools::crosscheck_expect_failure(
             "(secp256k1-decompress? 0x02000000000000000000000000000000000000000000000000000000000000000000)",
         );
     }
