@@ -9,6 +9,7 @@ use crate::{GeneratorError, WasmGenerator};
 
 pub mod arithmetic;
 pub mod bindings;
+pub mod bitcoin;
 pub mod bitwise;
 pub mod blockinfo;
 pub mod buff_to_integer;
@@ -59,6 +60,7 @@ pub trait ComplexWord: Word {
 pub(crate) static COMPLEX_WORDS: &[&'static dyn ComplexWord] = &[
     &to_ascii::ToAscii,
     &bindings::Let,
+    &bitcoin::VerifyMerkleProof,
     &blockinfo::AtBlock,
     &blockinfo::GetBlockInfo,
     &blockinfo::GetBurnBlockInfo,
