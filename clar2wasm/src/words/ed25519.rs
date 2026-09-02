@@ -32,15 +32,7 @@ impl ComplexWord for Verify {
         generator.traverse_expr(builder, args.get_expr(2)?)?;
 
         // Call the host interface function, `ed25519_verify`
-        builder.call(
-            generator
-                .module
-                .funcs
-                .by_name("stdlib.ed25519_verify")
-                .ok_or_else(|| {
-                    GeneratorError::InternalError("stdlib.ed25519_verify not found".to_owned())
-                })?,
-        );
+        builder.call(generator.func_by_name("stdlib.ed25519_verify"));
 
         Ok(())
     }
