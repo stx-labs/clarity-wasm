@@ -14,9 +14,9 @@ sha2 = { version = "0.10.7" }
 chrono = { version = "0.4.20" }
 rusqlite = { version = "0.31.0" }
 
-clarity = { git = "https://github.com/stacks-network/stacks-core", branch = "feat/clarity-wasm-develop" }
-stacks-common = { git = "https://github.com/stacks-network/stacks-core", branch = "feat/clarity-wasm-develop" }
-clarity-types = { git = "https://github.com/stacks-network/stacks-core", branch = "feat/clarity-wasm-develop" }
+clarity = { git = "https://github.com/stacks-network/stacks-core", rev = "adbc89f929bf94cea743ef3e79dae14c688c6261" }
+stacks-common = { git = "https://github.com/stacks-network/stacks-core", rev = "adbc89f929bf94cea743ef3e79dae14c688c6261" }
+clarity-types = { git = "https://github.com/stacks-network/stacks-core", rev = "adbc89f929bf94cea743ef3e79dae14c688c6261" }
 
 [build-dependencies]
 wat = "1.0.74"
