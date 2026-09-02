@@ -1,6 +1,7 @@
 #![cfg(test)]
 pub mod arithmetic;
 pub mod bindings;
+pub mod bitcoin;
 pub mod bitwise;
 pub mod blockinfo;
 pub mod comparison;
