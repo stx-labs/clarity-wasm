@@ -3,6 +3,7 @@ use clarity::vm::analysis::{run_analysis, AnalysisDatabase, ContractAnalysis};
 use clarity::vm::ast::{build_ast_with_diagnostics, ContractAST};
 use clarity::vm::costs::{ExecutionCost, LimitedCostTracker};
 use clarity::vm::diagnostic::Diagnostic;
+use clarity::vm::errors::StaticCheckError;
 use clarity::vm::resource_limiter::ResourceLimiter;
 use clarity::vm::types::QualifiedContractIdentifier;
 use clarity::vm::ClarityVersion;
@@ -11,7 +12,12 @@ use wasm_generator::{GeneratorError, WasmGenerator};
 
 use crate::utils::annotate_types_for_contract_calls;
 
+pub mod analysis_lookup;
 mod cost;
+mod deployed;
+
+pub use analysis_lookup::AnalysisLookup;
+pub use deployed::{compile_deployed_contract, DeployedCompileError};
 
 mod deserialize;
 pub mod initialize;
@@ -109,49 +115,7 @@ pub fn compile(
         }
     };
 
-    if clarity_version == ClarityVersion::Clarity1 {
-        if let Err(e) =
-            annotate_types_for_contract_calls(&mut contract_analysis, &ast, analysis_db, epoch)
-        {
-            diagnostics.push(e.diagnostic);
-            #[allow(clippy::expect_used)]
-            return Err(CompileError::Generic {
-                ast: Box::new(ast),
-                diagnostics: diagnostics.clone(),
-                cost_tracker: Box::new(
-                    contract_analysis
-                        .cost_track
-                        .take()
-                        .expect("Failed to take cost tracker from contract analysis"),
-                ),
-            });
-        }
-    }
-
-    // Now that the typechecker pass is done, we can concretize the expressions types which
-    // might contain `ListUnionType` or `CallableType`
-    #[allow(clippy::expect_used)]
-    if let Err(e) = utils::concretize(&mut contract_analysis) {
-        diagnostics.push(e.diagnostic);
-        return Err(CompileError::Generic {
-            ast: Box::new(ast),
-            diagnostics: diagnostics.clone(),
-            cost_tracker: Box::new(
-                contract_analysis
-                    .cost_track
-                    .take()
-                    .expect("Failed to take cost tracker from contract analysis"),
-            ),
-        });
-    }
-
-    #[allow(clippy::expect_used)]
-    let generator = match emit_cost_code {
-        false => WasmGenerator::new(contract_analysis.clone()),
-        true => WasmGenerator::with_cost_code(contract_analysis.clone()),
-    };
-
-    match generator.and_then(WasmGenerator::generate) {
+    match generate_module_from_analysis(&mut contract_analysis, &ast, analysis_db, emit_cost_code) {
         Ok(module) => Ok(CompileResult {
             ast,
             diagnostics,
@@ -159,11 +123,11 @@ pub fn compile(
             contract_analysis,
         }),
         Err(e) => {
-            diagnostics.push(Diagnostic::err(&e));
+            diagnostics.push(e.diagnostic());
+            #[allow(clippy::expect_used)]
             Err(CompileError::Generic {
                 ast: Box::new(ast),
                 diagnostics,
-                #[allow(clippy::expect_used)]
                 cost_tracker: Box::new(
                     contract_analysis
                         .cost_track
@@ -175,16 +139,92 @@ pub fn compile(
     }
 }
 
-pub fn compile_contract(contract_analysis: ContractAnalysis) -> Result<Module, GeneratorError> {
-    let generator = WasmGenerator::new(contract_analysis)?;
-    generator.generate()
+/// Why generating a Wasm module from an analyzed contract failed: see [`compile_contract`].
+#[derive(Debug)]
+pub enum ModuleGenerationError {
+    /// Annotating or concretizing the contract's types failed.
+    StaticCheck(StaticCheckError),
+    /// Code generation failed.
+    Generator(GeneratorError),
+}
+
+impl ModuleGenerationError {
+    pub fn diagnostic(&self) -> Diagnostic {
+        match self {
+            ModuleGenerationError::StaticCheck(e) => e.diagnostic.clone(),
+            ModuleGenerationError::Generator(e) => Diagnostic::err(e),
+        }
+    }
+
+    pub fn message(&self) -> String {
+        match self {
+            ModuleGenerationError::StaticCheck(e) => e.to_string(),
+            ModuleGenerationError::Generator(e) => {
+                clarity::vm::diagnostic::DiagnosableError::message(e)
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for ModuleGenerationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message())
+    }
+}
+
+impl std::error::Error for ModuleGenerationError {}
+
+/// Compile an already-analyzed contract to a Wasm module, without cost instrumentation.
+///
+/// This runs the same post-analysis pipeline as [`compile`] -- Clarity 1 type-map annotation for
+/// `contract-call?` arguments, concretization of the analysis types, then code generation -- so
+/// that a caller which has already run the analysis (like the transaction deploy path) generates
+/// exactly the same code as one compiling from source. `analysis_lookup` resolves the analyses
+/// of the contracts this one refers to; the analysis passed in is consumed, and the annotation
+/// and concretization it undergoes are not reflected back to the caller.
+pub fn compile_contract(
+    mut contract_analysis: ContractAnalysis,
+    ast: &ContractAST,
+    analysis_lookup: &mut dyn AnalysisLookup,
+) -> Result<Module, ModuleGenerationError> {
+    generate_module_from_analysis(&mut contract_analysis, ast, analysis_lookup, false)
+}
+
+/// The post-analysis compilation pipeline shared by every compile path: Clarity 1 type-map
+/// annotation for `contract-call?` arguments, concretization of the analysis types, then Wasm
+/// code generation. The annotation and concretization mutate `contract_analysis` in place.
+fn generate_module_from_analysis(
+    contract_analysis: &mut ContractAnalysis,
+    ast: &ContractAST,
+    analysis_lookup: &mut dyn AnalysisLookup,
+    emit_cost_code: bool,
+) -> Result<Module, ModuleGenerationError> {
+    let epoch = contract_analysis.epoch;
+
+    if contract_analysis.clarity_version == ClarityVersion::Clarity1 {
+        annotate_types_for_contract_calls(contract_analysis, ast, analysis_lookup, epoch)
+            .map_err(ModuleGenerationError::StaticCheck)?;
+    }
+
+    // Now that the typechecker pass is done, we can concretize the expressions types which
+    // might contain `ListUnionType` or `CallableType`
+    utils::concretize(contract_analysis).map_err(ModuleGenerationError::StaticCheck)?;
+
+    let generator = match emit_cost_code {
+        false => WasmGenerator::new(contract_analysis.clone()),
+        true => WasmGenerator::with_cost_code(contract_analysis.clone()),
+    };
+
+    generator
+        .and_then(WasmGenerator::generate)
+        .map_err(ModuleGenerationError::Generator)
 }
 
 mod utils {
     use std::collections::{BTreeMap, HashMap};
 
     use clarity::types::StacksEpochId;
-    use clarity::vm::analysis::{AnalysisDatabase, ContractAnalysis};
+    use clarity::vm::analysis::ContractAnalysis;
     use clarity::vm::ast::ContractAST;
     use clarity::vm::errors::StaticCheckError;
     use clarity::vm::types::signatures::{FunctionReturnsSignature, FunctionSignature};
@@ -194,6 +234,8 @@ mod utils {
     use clarity_types::types::PrincipalData::Contract;
     use clarity_types::types::TypeSignature;
     use clarity_types::ClarityName;
+
+    use crate::analysis_lookup::{self, AnalysisLookup};
 
     pub fn concretize(contract_analysis: &mut ContractAnalysis) -> Result<(), StaticCheckError> {
         // concretize Values types
@@ -265,7 +307,7 @@ mod utils {
     fn add_type_annotation_for_contracts(
         ast: &ContractAST,
         expr: &SymbolicExpression,
-        analysis_db: &mut AnalysisDatabase,
+        analysis_lookup: &mut dyn AnalysisLookup,
         epoch: StacksEpochId,
         contract_identifier: &QualifiedContractIdentifier,
         defined_traits: &BTreeMap<ClarityName, BTreeMap<ClarityName, FunctionSignature>>,
@@ -286,14 +328,12 @@ mod utils {
             // Static call through a literal `.contract` principal.
             if let Some(literal) = contract_expr.match_literal_value() {
                 if let Ok(Contract(contract)) = literal.clone().expect_principal() {
-                    if let Some(FunctionType::Fixed(f)) = analysis_db
-                        .get_public_function_type(&contract, function_name, &epoch)?
-                        .or(analysis_db.get_read_only_function_type(
-                            &contract,
-                            function_name,
-                            &epoch,
-                        )?)
-                    {
+                    if let Some(FunctionType::Fixed(f)) = analysis_lookup::function_type(
+                        analysis_lookup,
+                        &contract,
+                        function_name,
+                        &epoch,
+                    )? {
                         return Ok(call_args
                             .iter()
                             .zip(f.args.iter().map(|a| &a.signature))
@@ -314,7 +354,8 @@ mod utils {
                     let trait_signature = if trait_id.contract_identifier == *contract_identifier {
                         defined_traits.get(&trait_id.name).cloned()
                     } else {
-                        analysis_db.get_defined_trait(
+                        analysis_lookup::defined_trait(
+                            analysis_lookup,
                             &trait_id.contract_identifier,
                             &trait_id.name,
                             &epoch,
@@ -360,7 +401,7 @@ mod utils {
                 add_type_annotation_for_contracts(
                     ast,
                     child,
-                    analysis_db,
+                    analysis_lookup,
                     epoch,
                     contract_identifier,
                     defined_traits,
@@ -376,7 +417,7 @@ mod utils {
     pub fn annotate_types_for_contract_calls(
         contract_analysis: &mut ContractAnalysis,
         ast: &ContractAST,
-        analysis_db: &mut AnalysisDatabase,
+        analysis_lookup: &mut dyn AnalysisLookup,
         epoch: StacksEpochId,
     ) -> Result<(), StaticCheckError> {
         if let Some(type_map) = contract_analysis.type_map.as_mut() {
@@ -388,7 +429,7 @@ mod utils {
                     add_type_annotation_for_contracts(
                         ast,
                         expr,
-                        analysis_db,
+                        analysis_lookup,
                         epoch,
                         &contract_analysis.contract_identifier,
                         &contract_analysis.defined_traits,
