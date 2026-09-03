@@ -147,6 +147,7 @@ proptest! {
     fn crossprop_secp256k1_decompress_real_key(
         private_key in prop::collection::vec(any::<u8>(), 32usize..=32usize))
     {
+        use clarity::types::PublicKey;
         let mut key = Secp256k1PrivateKey::from_slice(&private_key).unwrap();
 
         key.set_compress_public(true);
