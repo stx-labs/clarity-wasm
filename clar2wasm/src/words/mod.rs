@@ -22,6 +22,7 @@ pub mod control_flow;
 pub mod conversion;
 pub mod data_vars;
 pub mod default_to;
+pub mod ed25519;
 pub mod enums;
 pub mod equal;
 pub mod functions;
@@ -96,6 +97,7 @@ pub(crate) static COMPLEX_WORDS: &[&'static dyn ComplexWord] = &[
     &data_vars::GetDataVar,
     &data_vars::SetDataVar,
     &default_to::DefaultTo,
+    &ed25519::Verify,
     &enums::ClarityErr,
     &enums::ClarityOk,
     &enums::ClaritySome,
