@@ -12,6 +12,7 @@ pub mod contracts;
 pub mod control_flow;
 pub mod copy;
 pub mod default_to;
+pub mod ed25519;
 pub mod equal;
 pub mod function_calls;
 pub mod functions;
