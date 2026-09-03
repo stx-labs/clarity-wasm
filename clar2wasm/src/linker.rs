@@ -1,5 +1,6 @@
 use std::io::{Cursor, Write as _};
 
+use clarity::util::secp256k1::secp256k1_decompress;
 use clarity::util::secp256r1::{secp256r1_verify, secp256r1_verify_digest};
 use clarity::vm::callables::{DefineType, DefinedFunction};
 use clarity::vm::clarity_wasm::{Cost, CostGlobals};
@@ -169,6 +170,7 @@ pub fn link_host_functions(
     link_sha512_256_fn(linker)?;
     link_secp256k1_recover_fn(linker)?;
     link_secp256k1_verify_fn(linker)?;
+    link_secp256k1_decompress_fn(linker)?;
     link_secp256r1_verify_double_hash_fn(linker)?;
     link_secp256r1_verify_simple_hash_fn(linker)?;
     link_verify_merkle_proof_fn(linker)?;
@@ -5963,6 +5965,72 @@ fn link_secp256k1_verify_fn(
         })
 }
 
+/// Link host interface function, `secp256k1_decompress`, into the Wasm module.
+/// This function is called for the Clarity expression, `secp256k1-decompress?`.
+fn link_secp256k1_decompress_fn(
+    linker: &mut Linker<ClarityWasmContext>,
+) -> Result<(), VmExecutionError> {
+    linker
+        .func_wrap(
+            "clarity",
+            "secp256k1_decompress",
+            |mut caller: Caller<'_, ClarityWasmContext>,
+             msg_offset: i32,
+             msg_length: i32,
+             return_offset: i32,
+             _return_length: i32| {
+                // Get the memory from the caller
+                let memory = caller
+                    .get_export("memory")
+                    .and_then(|export| export.into_memory())
+                    .ok_or(VmExecutionError::Wasm(WasmError::MemoryNotFound))?;
+
+                let ret_ty = TypeSignature::new_response(
+                    TypeSignature::BUFFER_65.clone(),
+                    TypeSignature::UIntType,
+                )?;
+                let repr_size = get_type_size(&ret_ty);
+
+                // Read the message bytes from the memory
+                let msg_bytes = read_bytes_from_wasm(memory, &mut caller, msg_offset, msg_length)?;
+                // To match the interpreter behavior, if the message is the
+                // wrong length, throw a runtime type error.
+                if msg_bytes.len() != 33 {
+                    return Err(RuntimeCheckErrorKind::TypeValueError(
+                        Box::new(TypeSignature::BUFFER_33.clone()),
+                        Value::buff_from(msg_bytes)?.to_error_string(),
+                    )
+                    .into());
+                }
+
+                let result = match secp256k1_decompress(&msg_bytes) {
+                    Ok(pubkey) => Value::okay(Value::buff_from(pubkey.to_vec())?)?,
+                    _ => Value::err_uint(1),
+                };
+
+                // Write the result to the return buffer
+                write_to_wasm(
+                    caller,
+                    memory,
+                    &ret_ty,
+                    return_offset,
+                    return_offset + repr_size,
+                    &result,
+                    true,
+                )?;
+
+                Ok(())
+            },
+        )
+        .map(|_| ())
+        .map_err(|e| {
+            VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
+                "secp256k1_decompress".to_string(),
+                e,
+            ))
+        })
+}
+
 fn link_secp256r1_verify_double_hash_fn(
     linker: &mut Linker<ClarityWasmContext>,
 ) -> Result<(), VmExecutionError> {
@@ -6259,7 +6327,7 @@ fn link_principal_of_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), V
         .map(|_| ())
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
-                "secp256k1_verify".to_string(),
+                "principal-of".to_string(),
                 e,
             ))
         })
@@ -7292,6 +7360,12 @@ pub fn dummy_linker<T>(engine: &Engine) -> Result<Linker<T>, wasmtime::Error> {
             println!("secp256k1_verify");
             Ok(0i32)
         },
+    )?;
+
+    linker.func_wrap(
+        "clarity",
+        "secp256k1_decompress",
+        |_msg_offset: i32, _msg_length: i32, _return_offset: i32, _return_length: i32| Ok(()),
     )?;
 
     linker.func_wrap(
