@@ -780,12 +780,22 @@ impl ComplexWord for ContractCall {
             .map(|arg| {
                 generator
                     .get_expr_type(arg)
+                    .cloned()
+                    .or({
+                        // In case some old type-checker didn't annotate a
+                        // literal principal passed in a trait position.
+                        if let SymbolicExpressionType::LiteralValue(Value::Principal(_)) = &arg.expr
+                        {
+                            Some(TypeSignature::PrincipalType)
+                        } else {
+                            None
+                        }
+                    })
                     .ok_or_else(|| {
                         GeneratorError::TypeError(
                             "contract-call? argument must be typed".to_owned(),
                         )
                     })
-                    .cloned()
             })
             .collect::<Result<_, _>>()?;
 
@@ -1127,6 +1137,103 @@ mod tests {
             .expect("Failed to call contract.");
 
         assert_eq!(val.unwrap(), Value::okay(Value::UInt(42)).unwrap());
+    }
+
+    /// Regression test: under Clarity 1, a literal contract principal passed
+    /// in trait position of a static `contract-call?` gets no entry in the
+    /// analysis type map, so codegen used to fail with "contract-call?
+    /// argument must be typed". The generator now falls back to the type of
+    /// the literal itself.
+    #[test]
+    fn static_call_literal_principal_in_trait_position_clarity1() {
+        use clarity::types::StacksEpochId;
+        use clarity::vm::ClarityVersion;
+
+        let mut env = TestEnvironment::new(StacksEpochId::Epoch2_05, ClarityVersion::Clarity1);
+        env.init_contract_with_snippet(
+            "trait-def",
+            "(define-trait simple ((get-value () (response uint uint))))",
+        )
+        .expect("Failed to init contract.");
+        env.init_contract_with_snippet("impl-simple", "(define-public (get-value) (ok u7))")
+            .expect("Failed to init contract.");
+        env.init_contract_with_snippet(
+            "callee",
+            r#"
+(use-trait simple .trait-def.simple)
+(define-public (do-it (t <simple>))
+    (contract-call? t get-value)
+)
+            "#,
+        )
+        .expect("Failed to init contract.");
+        env.init_contract_with_snippet(
+            "caller",
+            r#"
+(define-public (go)
+    (contract-call? .callee do-it .impl-simple)
+)
+            "#,
+        )
+        .expect("Failed to init contract.");
+
+        let val = env
+            .evaluate("(contract-call? .caller go)")
+            .expect("Failed to call contract.");
+        assert_eq!(val.unwrap(), Value::okay(Value::UInt(7)).unwrap());
+    }
+
+    /// Regression test: under Clarity 1 a trait value's type is
+    /// `TraitReferenceType`, which `type_for_serialization` did not map to
+    /// `PrincipalType`, so `print`-ing a trait value (directly or nested)
+    /// failed codegen with "serialized type cannot be deserialized:
+    /// ... SeparatorExpected". `is-eq` on trait values similarly failed with
+    /// "Unserializable type found for serialization size computation"
+    /// because the serialization-size computation had no arm for callable
+    /// types.
+    #[test]
+    fn print_and_eq_trait_value_clarity1() {
+        use clarity::types::StacksEpochId;
+        use clarity::vm::ClarityVersion;
+
+        for (epoch, version) in [
+            (StacksEpochId::Epoch2_05, ClarityVersion::Clarity1),
+            (StacksEpochId::Epoch21, ClarityVersion::Clarity2),
+            (StacksEpochId::Epoch30, ClarityVersion::Clarity3),
+        ] {
+            let mut env = TestEnvironment::new(epoch, version);
+            env.init_contract_with_snippet(
+                "ft-trait",
+                "(define-trait ft ((get-balance (principal) (response uint uint))))",
+            )
+            .expect("Failed to init contract.");
+            env.init_contract_with_snippet(
+                "tok-a",
+                "(define-public (get-balance (who principal)) (if true (ok u1) (err u2)))",
+            )
+            .expect("Failed to init contract.");
+            env.init_contract_with_snippet(
+                "shower",
+                r#"
+(use-trait ft .ft-trait.ft)
+(define-public (show (t <ft>))
+    (begin
+        (print t)
+        (print { token: t, amount: u5 })
+        (ok (is-eq t t))
+    )
+)
+                "#,
+            )
+            .unwrap_or_else(|e| panic!("Failed to init contract for {version:?}/{epoch:?}: {e:?}"));
+
+            let val = env
+                .evaluate("(contract-call? .shower show .tok-a)")
+                .unwrap_or_else(|e| {
+                    panic!("Failed to call contract for {version:?}/{epoch:?}: {e:?}")
+                });
+            assert_eq!(val.unwrap(), Value::okay(Value::Bool(true)).unwrap());
+        }
     }
 
     #[test]

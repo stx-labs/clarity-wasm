@@ -829,7 +829,10 @@ impl WasmGenerator {
             // NoType and BoolType have the same size (both type and inner)
             NoType => BoolType,
             // Avoid serialization like `(list 2 <S1G2081040G2081040G2081040G208105NK8PE5.my-trait.my-trait>)`
-            CallableType(CallableSubtype::Trait(_)) => PrincipalType,
+            // `TraitReferenceType` is the Clarity 1 representation of a trait
+            // value, and `ListUnionType` is a union of callables; all of them
+            // are principals at runtime.
+            CallableType(_) | TraitReferenceType(_) | ListUnionType(_) => PrincipalType,
             // Recursive types
             ResponseType(types) => ResponseType(Box::new((
                 self.type_for_serialization(&types.0),
