@@ -6190,24 +6190,6 @@ fn link_verify_merkle_proof_fn(
         })
 }
 
-/// The return type of `get-bitcoin-tx-output?`:
-/// `(response { script: (buff 1024), amount: uint, txid: (buff 32) } uint)`.
-fn get_bitcoin_tx_output_result_type() -> Result<TypeSignature, VmExecutionError> {
-    let ok_ty: TypeSignature = TupleTypeSignature::try_from(vec![
-        (
-            ClarityName::from_literal("script"),
-            TypeSignature::BUFFER_1024.clone(),
-        ),
-        (ClarityName::from_literal("amount"), TypeSignature::UIntType),
-        (
-            ClarityName::from_literal("txid"),
-            TypeSignature::BUFFER_32.clone(),
-        ),
-    ])?
-    .into();
-    Ok(TypeSignature::new_response(ok_ty, TypeSignature::UIntType)?)
-}
-
 /// Link host interface function, `get_bitcoin_tx_output`, into the Wasm module.
 /// This function is called for the Clarity expression, `get-bitcoin-tx-output?`.
 fn link_get_bitcoin_tx_output_fn(
