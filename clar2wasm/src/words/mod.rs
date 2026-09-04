@@ -62,6 +62,7 @@ pub(crate) static COMPLEX_WORDS: &[&'static dyn ComplexWord] = &[
     &to_ascii::ToAscii,
     &bindings::Let,
     &bitcoin::VerifyMerkleProof,
+    &bitcoin::GetTxOutput,
     &blockinfo::AtBlock,
     &blockinfo::GetBlockInfo,
     &blockinfo::GetBurnBlockInfo,

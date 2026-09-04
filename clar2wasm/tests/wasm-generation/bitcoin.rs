@@ -8,7 +8,8 @@
 mod clarity_v6 {
     use clar2wasm::tools::{crosscheck, crosscheck_validate};
     use clarity::util::hash::{to_hex, Sha256Sum};
-    use clarity::vm::Value;
+    use clarity::vm::types::TupleData;
+    use clarity::vm::{ClarityName, Value};
     use proptest::prelude::*;
 
     /// Bitcoin's double-SHA-256.
@@ -55,6 +56,34 @@ mod clarity_v6 {
         (0..count)
             .map(|i| dsha256(&(i as u64).to_le_bytes()))
             .collect()
+    }
+    /// Serialize a single-output, single-input non-SegWit transaction.
+    fn build_tx(amount: u64, script: &[u8]) -> Vec<u8> {
+        let mut raw = Vec::new();
+        raw.extend_from_slice(&1u32.to_le_bytes()); // version
+        raw.push(0x01); // n_in
+        raw.extend_from_slice(&[0u8; 32]); // prev txid
+        raw.extend_from_slice(&[0u8; 4]); // prev vout
+        raw.push(0x00); // scriptSig len
+        raw.extend_from_slice(&[0xff; 4]); // sequence
+        raw.push(0x01); // n_out
+        raw.extend_from_slice(&amount.to_le_bytes());
+        if script.len() < 0xfd {
+            raw.push(script.len() as u8);
+        } else {
+            raw.push(0xfd);
+            raw.extend_from_slice(&(script.len() as u16).to_le_bytes());
+        }
+        raw.extend_from_slice(script);
+        raw.extend_from_slice(&[0u8; 4]); // locktime
+        raw
+    }
+
+    /// Bitcoin's double-SHA-256, in internal byte order.
+    fn txid_of(raw: &[u8]) -> Vec<u8> {
+        Sha256Sum::from_data(Sha256Sum::from_data(raw).as_bytes())
+            .0
+            .to_vec()
     }
 
     proptest! {
@@ -125,6 +154,64 @@ mod clarity_v6 {
                 ),
                 |_|{}
             )
+        }
+        /// Arbitrary bytes are almost never a valid transaction, but whatever
+        /// the outcome, the compiled version must agree with the interpreter.
+        #[test]
+        fn crossprop_get_bitcoin_tx_output_arbitrary_bytes(
+            raw in prop::collection::vec(any::<u8>(), 0usize..=128usize),
+            vout in 0u32..4)
+        {
+            crosscheck_validate(
+                &format!("(get-bitcoin-tx-output? 0x{} u{vout})", to_hex(&raw)), |_|{}
+            )
+        }
+
+        /// A well-formed transaction round-trips to its own output.
+        #[test]
+        fn crossprop_get_bitcoin_tx_output_valid_tx(
+            amount in any::<u64>(),
+            script in prop::collection::vec(any::<u8>(), 0usize..=1024usize))
+        {
+            let raw = build_tx(amount, &script);
+            let tuple = TupleData::from_data(vec![
+                (ClarityName::from_literal("script"), Value::buff_from(script).unwrap()),
+                (ClarityName::from_literal("amount"), Value::UInt(u128::from(amount))),
+                (ClarityName::from_literal("txid"), Value::buff_from(txid_of(&raw)).unwrap()),
+            ]).unwrap();
+
+            crosscheck(
+                &format!("(get-bitcoin-tx-output? 0x{} u0)", to_hex(&raw)),
+                Ok(Some(Value::okay(Value::Tuple(tuple)).unwrap()))
+            );
+        }
+
+        /// The transaction has exactly one output, so every other index is
+        /// out of range.
+        #[test]
+        fn crossprop_get_bitcoin_tx_output_out_of_range(
+            amount in any::<u64>(),
+            script in prop::collection::vec(any::<u8>(), 0usize..=64usize),
+            vout in 1u128..=u128::MAX)
+        {
+            let raw = build_tx(amount, &script);
+            crosscheck(
+                &format!("(get-bitcoin-tx-output? 0x{} u{vout})", to_hex(&raw)),
+                Ok(Some(Value::err_uint(2)))
+            );
+        }
+
+        /// Anything over the 1024-byte `scriptPubKey` cap is `(err u3)`.
+        #[test]
+        fn crossprop_get_bitcoin_tx_output_oversized_script(
+            amount in any::<u64>(),
+            extra in 1usize..=512usize)
+        {
+            let raw = build_tx(amount, &vec![0x51u8; 1024 + extra]);
+            crosscheck(
+                &format!("(get-bitcoin-tx-output? 0x{} u0)", to_hex(&raw)),
+                Ok(Some(Value::err_uint(3)))
+            );
         }
     }
 }
