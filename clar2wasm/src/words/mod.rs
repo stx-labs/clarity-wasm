@@ -122,6 +122,7 @@ pub(crate) static COMPLEX_WORDS: &[&'static dyn ComplexWord] = &[
     &responses::IsOk,
     &secp256k1::Recover,
     &secp256k1::Verify,
+    &secp256k1::Decompress,
     &secp256r1::Verify,
     &sequences::Append,
     &sequences::AsMaxLen,
