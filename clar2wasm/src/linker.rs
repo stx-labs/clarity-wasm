@@ -11,7 +11,9 @@ use clarity::vm::errors::{
     RuntimeCheckErrorKind, RuntimeError, StaticCheckErrorKind, VmExecutionError, VmInternalError,
     WasmError,
 };
-use clarity::vm::functions::bitcoin::{native_verify_merkle_proof, VERIFY_MERKLE_PROOF_MAX_DEPTH};
+use clarity::vm::functions::bitcoin::{
+    native_get_bitcoin_tx_output, native_verify_merkle_proof, VERIFY_MERKLE_PROOF_MAX_DEPTH,
+};
 use clarity::vm::functions::crypto::{pubkey_to_address_v1, pubkey_to_address_v2};
 use clarity::vm::functions::post_conditions::{
     check_allowances, Allowance, FtAllowance, NftAllowance, StackingAllowance, StxAllowance,
@@ -174,6 +176,7 @@ pub fn link_host_functions(
     link_secp256r1_verify_double_hash_fn(linker)?;
     link_secp256r1_verify_simple_hash_fn(linker)?;
     link_verify_merkle_proof_fn(linker)?;
+    link_get_bitcoin_tx_output_fn(linker)?;
     link_ed25519_verify_fn(linker)?;
     link_principal_of_fn(linker)?;
     link_save_constant_fn(linker)?;
@@ -6187,6 +6190,80 @@ fn link_verify_merkle_proof_fn(
         })
 }
 
+/// The return type of `get-bitcoin-tx-output?`:
+/// `(response { script: (buff 1024), amount: uint, txid: (buff 32) } uint)`.
+fn get_bitcoin_tx_output_result_type() -> Result<TypeSignature, VmExecutionError> {
+    let ok_ty: TypeSignature = TupleTypeSignature::try_from(vec![
+        (
+            ClarityName::from_literal("script"),
+            TypeSignature::BUFFER_1024.clone(),
+        ),
+        (ClarityName::from_literal("amount"), TypeSignature::UIntType),
+        (
+            ClarityName::from_literal("txid"),
+            TypeSignature::BUFFER_32.clone(),
+        ),
+    ])?
+    .into();
+    Ok(TypeSignature::new_response(ok_ty, TypeSignature::UIntType)?)
+}
+
+/// Link host interface function, `get_bitcoin_tx_output`, into the Wasm module.
+/// This function is called for the Clarity expression, `get-bitcoin-tx-output?`.
+fn link_get_bitcoin_tx_output_fn(
+    linker: &mut Linker<ClarityWasmContext>,
+) -> Result<(), VmExecutionError> {
+    linker
+        .func_wrap(
+            "clarity",
+            "get_bitcoin_tx_output",
+            |mut caller: Caller<'_, ClarityWasmContext>,
+             tx_offset: i32,
+             tx_length: i32,
+             vout_lo: i64,
+             vout_hi: i64,
+             return_offset: i32,
+             _return_length: i32| {
+                // Get the memory from the caller
+                let memory = caller
+                    .get_export("memory")
+                    .and_then(|export| export.into_memory())
+                    .ok_or(VmExecutionError::Wasm(WasmError::MemoryNotFound))?;
+
+                let ret_ty = get_bitcoin_tx_output_result_type()?;
+                let repr_size = get_type_size(&ret_ty);
+
+                let tx_bytes = read_bytes_from_wasm(memory, &mut caller, tx_offset, tx_length)?;
+
+                // `vout` is a Clarity `uint`, passed as a low/high `i64` pair
+                let vout = ((vout_hi as u64 as u128) << 64) | (vout_lo as u64 as u128);
+
+                let result =
+                    native_get_bitcoin_tx_output(Value::buff_from(tx_bytes)?, Value::UInt(vout))?;
+
+                // Write the result to the return buffer
+                write_to_wasm(
+                    caller,
+                    memory,
+                    &ret_ty,
+                    return_offset,
+                    return_offset + repr_size,
+                    &result,
+                    true,
+                )?;
+
+                Ok(())
+            },
+        )
+        .map(|_| ())
+        .map_err(|e| {
+            VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
+                "get_bitcoin_tx_output".to_string(),
+                e,
+            ))
+        })
+}
+
 /// Link host interface function, `ed25519_verify`, into the Wasm module.
 /// This function is called for the Clarity expression, `ed25519-verify`.
 fn link_ed25519_verify_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), VmExecutionError> {
@@ -7393,6 +7470,20 @@ pub fn dummy_linker<T>(engine: &Engine) -> Result<Linker<T>, wasmtime::Error> {
          _pk_length: i32| {
             println!("secp256r1_verify_simple_hash");
             Ok(0i32)
+        },
+    )?;
+
+    linker.func_wrap(
+        "clarity",
+        "get_bitcoin_tx_output",
+        |_tx_offset: i32,
+         _tx_length: i32,
+         _vout_lo: i64,
+         _vout_hi: i64,
+         _return_offset: i32,
+         _return_length: i32| {
+            println!("get_bitcoin_tx_output");
+            Ok(())
         },
     )?;
 

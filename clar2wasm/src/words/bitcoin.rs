@@ -37,6 +37,53 @@ impl ComplexWord for VerifyMerkleProof {
     }
 }
 
+#[derive(Debug)]
+pub struct GetTxOutput;
+
+impl Word for GetTxOutput {
+    fn name(&self) -> ClarityName {
+        ClarityName::from_literal("get-bitcoin-tx-output?")
+    }
+}
+
+impl ComplexWord for GetTxOutput {
+    fn traverse(
+        &self,
+        generator: &mut WasmGenerator,
+        builder: &mut walrus::InstrSeqBuilder,
+        expr: &SymbolicExpression,
+        args: &[SymbolicExpression],
+    ) -> Result<(), GeneratorError> {
+        check_args!(generator, builder, 2, args.len(), ArgumentCountCheck::Exact);
+
+        generator.traverse_expr(builder, args.get_expr(0)?)?;
+
+        // `vout`, pushed as the low/high `i64` pair of a Clarity `uint`
+        generator.traverse_expr(builder, args.get_expr(1)?)?;
+
+        // Reserve stack space for the host-function to write the result
+        let ret_ty = generator
+            .get_expr_type(expr)
+            .ok_or_else(|| {
+                GeneratorError::TypeError(
+                    "result of get-bitcoin-tx-output? should be typed".to_owned(),
+                )
+            })?
+            .clone();
+
+        let (result_local, result_size) =
+            generator.create_call_stack_local(builder, &ret_ty, true, true);
+        builder.local_get(result_local).i32_const(result_size);
+
+        // Call the host interface function, `get_bitcoin_tx_output`
+        builder.call(generator.func_by_name("stdlib.get_bitcoin_tx_output"));
+
+        generator.read_from_memory(builder, result_local, 0, &ret_ty)?;
+
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 #[cfg(not(any(
     feature = "test-clarity-v1",
@@ -46,11 +93,12 @@ impl ComplexWord for VerifyMerkleProof {
     feature = "test-clarity-v5"
 )))]
 mod tests {
+    use clarity::util::hash::{to_hex, Sha256Sum};
     use clarity::vm::errors::{RuntimeCheckErrorKind, VmExecutionError};
     use clarity::vm::types::{
-        BuffData, BufferLength, SequenceData, SequenceSubtype, TypeSignature,
+        BuffData, BufferLength, SequenceData, SequenceSubtype, TupleData, TypeSignature,
     };
-    use clarity::vm::Value;
+    use clarity::vm::{ClarityName, Value};
 
     use crate::tools::{crosscheck, evaluate};
 
@@ -232,6 +280,210 @@ mod tests {
                     .to_error_string(),
                 ),
             )),
+        );
+    }
+
+    /// A minimal non-SegWit tx: version 1, one input, one P2WPKH output of
+    /// 1000 sats, locktime 0.
+    const SAMPLE_TX: &str = concat!(
+        "01000000",                                                         // version
+        "01",                                                               // n_in
+        "0000000000000000000000000000000000000000000000000000000000000000", // prev txid
+        "00000000",                                                         // prev vout
+        "00",                                                               // scriptSig len
+        "ffffffff",                                                         // sequence
+        "01",                                                               // n_out
+        "e803000000000000",                                                 // amount = 1000
+        "16",                                                               // script len = 22
+        "0014aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",                     // P2WPKH
+        "00000000",                                                         // locktime
+    );
+    const SAMPLE_SCRIPT: &str = "0014aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    /// Internal byte order, i.e. the raw double-SHA-256 of `SAMPLE_TX`.
+    const SAMPLE_TXID: &str = "026ac2ecda2e5b8be7e9ba0658e9bebe75671fe06335116a4c6712bc822438e4";
+
+    /// The same transaction serialized with a SegWit marker, flag and witness
+    /// stack. The witness is excluded from the txid preimage, so this yields
+    /// the same txid as `SAMPLE_TX`.
+    const SAMPLE_TX_SEGWIT: &str = concat!(
+        "01000000",                                                         // version
+        "0001",                                                             // marker + flag
+        "01",                                                               // n_in
+        "0000000000000000000000000000000000000000000000000000000000000000", // prev txid
+        "00000000",                                                         // prev vout
+        "00",                                                               // scriptSig len
+        "ffffffff",                                                         // sequence
+        "01",                                                               // n_out
+        "e803000000000000",                                                 // amount = 1000
+        "16",                                                               // script len = 22
+        "0014aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",                     // P2WPKH
+        "01",                                                               // 1 witness item
+        "02",                                                               // item length
+        "5151",                                                             // OP_1 OP_1
+        "00000000",                                                         // locktime
+    );
+
+    /// The Bitcoin genesis block coinbase transaction. Its txid is
+    /// [`GENESIS_TXID`].
+    const GENESIS_COINBASE: &str = concat!(
+        "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff4d",
+        "04ffff001d0104455468652054696d65732030332f4a616e2f32303039204368616e63656c6c6f72206f",
+        "6e206272696e6b206f66207365636f6e64206261696c6f757420666f722062616e6b73ffffffff0100f2",
+        "052a01000000434104678afdb0fe5548271967f1a67130b7105cd6a828e03909a67962e0ea1f61deb649",
+        "f6bc3f4cef38c4f35504e51ec112de5c384df7ba0b8d578a4c702b6bf11d5fac00000000",
+    );
+    const GENESIS_SCRIPT: &str = concat!(
+        "4104678afdb0fe5548271967f1a67130b7105cd6a828e03909a67962e0ea1f61deb649f6bc3f4cef38c4",
+        "f35504e51ec112de5c384df7ba0b8d578a4c702b6bf11d5fac",
+    );
+
+    /// The expected `(ok { script, amount, txid })` value.
+    fn expect_output(
+        script: &str,
+        amount: u128,
+        txid: &str,
+    ) -> Result<Option<Value>, VmExecutionError> {
+        let tuple = TupleData::from_data(vec![
+            (
+                ClarityName::from_literal("script"),
+                Value::buff_from(hex::decode(script).unwrap()).unwrap(),
+            ),
+            (ClarityName::from_literal("amount"), Value::UInt(amount)),
+            (
+                ClarityName::from_literal("txid"),
+                Value::buff_from(hex::decode(txid).unwrap()).unwrap(),
+            ),
+        ])
+        .unwrap();
+        Ok(Some(Value::okay(Value::Tuple(tuple)).unwrap()))
+    }
+
+    /// Bitcoin's double-SHA-256, in internal byte order. For a non-SegWit
+    /// transaction the txid preimage is the raw serialization.
+    fn txid_of(raw: &[u8]) -> String {
+        to_hex(&Sha256Sum::from_data(Sha256Sum::from_data(raw).as_bytes()).0)
+    }
+
+    /// A single-output tx whose `scriptPubKey` is `script_len` bytes of OP_1.
+    fn tx_with_script_of_len(script_len: usize) -> Vec<u8> {
+        let mut raw = hex::decode(concat!(
+            "01000000",                                                         // version
+            "01",                                                               // n_in
+            "0000000000000000000000000000000000000000000000000000000000000000", // prev txid
+            "00000000",                                                         // prev vout
+            "00",                                                               // scriptSig len
+            "ffffffff",                                                         // sequence
+            "01",                                                               // n_out
+            "e803000000000000",                                                 // amount = 1000
+        ))
+        .unwrap();
+        // CompactSize length prefix, always in the 0xfd + u16 range here
+        raw.push(0xfd);
+        raw.extend_from_slice(&(script_len as u16).to_le_bytes());
+        raw.extend(std::iter::repeat_n(0x51u8, script_len));
+        raw.extend_from_slice(&[0, 0, 0, 0]); // locktime
+        raw
+    }
+
+    #[test]
+    fn less_than_two_args() {
+        let result = evaluate(&format!("(get-bitcoin-tx-output? 0x{SAMPLE_TX})"));
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("expecting 2 arguments, got 1"));
+    }
+
+    #[test]
+    fn more_than_two_args() {
+        let result = evaluate(&format!("(get-bitcoin-tx-output? 0x{SAMPLE_TX} u0 u0)"));
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("expecting 2 arguments, got 3"));
+    }
+
+    #[test]
+    fn non_segwit_output() {
+        crosscheck(
+            &format!("(get-bitcoin-tx-output? 0x{SAMPLE_TX} u0)"),
+            expect_output(SAMPLE_SCRIPT, 1000, SAMPLE_TXID),
+        );
+    }
+
+    #[test]
+    fn segwit_output_has_the_same_txid() {
+        crosscheck(
+            &format!("(get-bitcoin-tx-output? 0x{SAMPLE_TX_SEGWIT} u0)"),
+            expect_output(SAMPLE_SCRIPT, 1000, SAMPLE_TXID),
+        );
+    }
+
+    #[test]
+    fn genesis_coinbase() {
+        crosscheck(
+            &format!("(get-bitcoin-tx-output? 0x{GENESIS_COINBASE} u0)"),
+            expect_output(GENESIS_SCRIPT, 5_000_000_000, GENESIS_TXID),
+        );
+    }
+
+    /// `(err u1)`: the bytes do not deserialize as a Bitcoin transaction.
+    #[test]
+    fn truncated_tx_is_err_u1() {
+        let truncated = &SAMPLE_TX[..SAMPLE_TX.len() - 2];
+        crosscheck(
+            &format!("(get-bitcoin-tx-output? 0x{truncated} u0)"),
+            Ok(Some(Value::err_uint(1))),
+        );
+    }
+
+    #[test]
+    fn empty_tx_is_err_u1() {
+        crosscheck(
+            "(get-bitcoin-tx-output? 0x u0)",
+            Ok(Some(Value::err_uint(1))),
+        );
+    }
+
+    /// `(err u2)`: the transaction parses, but has no such output.
+    #[test]
+    fn vout_out_of_range_is_err_u2() {
+        crosscheck(
+            &format!("(get-bitcoin-tx-output? 0x{SAMPLE_TX} u1)"),
+            Ok(Some(Value::err_uint(2))),
+        );
+    }
+
+    /// A `vout` past `u64::MAX` is out of range rather than a truncation.
+    #[test]
+    fn huge_vout_is_err_u2() {
+        crosscheck(
+            &format!(
+                "(get-bitcoin-tx-output? 0x{SAMPLE_TX} u340282366920938463463374607431768211455)"
+            ),
+            Ok(Some(Value::err_uint(2))),
+        );
+    }
+
+    /// `(err u3)`: the output's `scriptPubKey` is over the 1024-byte cap.
+    #[test]
+    fn oversized_script_is_err_u3() {
+        let raw = tx_with_script_of_len(1025);
+        crosscheck(
+            &format!("(get-bitcoin-tx-output? 0x{} u0)", to_hex(&raw)),
+            Ok(Some(Value::err_uint(3))),
+        );
+    }
+
+    /// A `scriptPubKey` of exactly 1024 bytes is still accepted.
+    #[test]
+    fn script_at_the_size_limit_is_accepted() {
+        let raw = tx_with_script_of_len(1024);
+        crosscheck(
+            &format!("(get-bitcoin-tx-output? 0x{} u0)", to_hex(&raw)),
+            expect_output(&"51".repeat(1024), 1000, &txid_of(&raw)),
         );
     }
 }
