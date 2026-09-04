@@ -99,6 +99,60 @@ impl ComplexWord for Verify {
     }
 }
 
+#[derive(Debug)]
+pub struct Decompress;
+
+impl Word for Decompress {
+    fn name(&self) -> ClarityName {
+        ClarityName::from_literal("secp256k1-decompress?")
+    }
+}
+
+impl ComplexWord for Decompress {
+    fn traverse(
+        &self,
+        generator: &mut WasmGenerator,
+        builder: &mut walrus::InstrSeqBuilder,
+        expr: &SymbolicExpression,
+        args: &[SymbolicExpression],
+    ) -> Result<(), GeneratorError> {
+        check_args!(generator, builder, 1, args.len(), ArgumentCountCheck::Exact);
+
+        generator.traverse_expr(builder, args.get_expr(0)?)?;
+
+        // Reserve stack space for the host-function to write the result
+        let ret_ty = generator
+            .get_expr_type(expr)
+            .ok_or_else(|| {
+                GeneratorError::TypeError(
+                    "result of secp256k1-decompress? should be typed".to_owned(),
+                )
+            })?
+            .clone();
+
+        let (result_local, result_size) =
+            generator.create_call_stack_local(builder, &ret_ty, true, true);
+        builder.local_get(result_local).i32_const(result_size);
+
+        // Call the host interface function, `secp256k1_decompress?`
+        builder.call(
+            generator
+                .module
+                .funcs
+                .by_name("stdlib.secp256k1_decompress")
+                .ok_or_else(|| {
+                    GeneratorError::InternalError(
+                        "stdlib.secp256k1_decompress not found".to_owned(),
+                    )
+                })?,
+        );
+
+        generator.read_from_memory(builder, result_local, 0, &ret_ty)?;
+
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use clarity::vm::errors::VmExecutionError;
@@ -108,6 +162,20 @@ mod tests {
     use clarity::vm::Value;
 
     use crate::tools::{crosscheck, evaluate};
+
+    /// Expected `(ok <65-byte buffer>)` for the given hex-encoded public key.
+    #[cfg(not(any(
+        feature = "test-clarity-v1",
+        feature = "test-clarity-v2",
+        feature = "test-clarity-v3",
+        feature = "test-clarity-v4",
+        feature = "test-clarity-v5"
+    )))]
+    fn ok_pubkey(hex_key: &str) -> Result<Option<Value>, VmExecutionError> {
+        Ok(Some(
+            Value::okay(Value::buff_from(hex::decode(hex_key).unwrap()).unwrap()).unwrap(),
+        ))
+    }
 
     #[test]
     fn secp256k1_recover_less_than_two_args() {
@@ -304,5 +372,138 @@ mod tests {
                     })).to_error_string(),
                 ),
             )));
+    }
+
+    #[cfg(not(any(
+        feature = "test-clarity-v1",
+        feature = "test-clarity-v2",
+        feature = "test-clarity-v3",
+        feature = "test-clarity-v4",
+        feature = "test-clarity-v5"
+    )))]
+    mod decompress {
+        use super::*;
+
+        /// Uncompressed form of the compressed key
+        /// 0x0250863ad64a87ae8a2fe83c1af1a8403cb53f53e486d8511dad8a04887e5b2352,
+        /// reused across the `secp256k1-decompress?` tests.
+        const UNCOMPRESSED: &str = "0450863ad64a87ae8a2fe83c1af1a8403cb53f53e486d8511dad8a04887e5b23522cd470243453a299fa9e77237716103abc11a1df38855ed6f2ee187e9c582ba6";
+
+        #[test]
+        fn test_secp256k1_decompress_0_arguments() {
+            let result = evaluate("(secp256k1-decompress? )");
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("expecting 1 arguments, got 0"));
+        }
+
+        #[test]
+        fn test_secp256k1_decompress_2_arguments() {
+            let result = evaluate("(secp256k1-decompress? 1 2)");
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("expecting 1 arguments, got 2"));
+        }
+
+        #[test]
+        fn test_secp256k1_decompress_bad_public_key_buffer_length() {
+            let result = evaluate("(secp256k1-decompress? 0x1)");
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("invalid buffer length, 1"));
+        }
+
+        #[test]
+        fn test_secp256k1_decompress_bad_public_key_size() {
+            crosscheck(
+                "(secp256k1-decompress? 0x11)",
+                Err(clarity::vm::errors::RuntimeCheckErrorKind::TypeValueError(
+                    Box::new(TypeSignature::BUFFER_33),
+                    Value::Sequence(SequenceData::Buffer(BuffData {
+                        data: hex::decode("11").unwrap(),
+                    }))
+                    .to_error_string(),
+                )
+                .into()),
+            );
+        }
+
+        #[test]
+        fn test_secp256k1_decompress_bad_public_key() {
+            crosscheck(
+                "(secp256k1-decompress? 0x111111111111111111111111111111111111111111111111111111111111111111)",
+                Ok(Some(Value::err_uint(1)))
+            );
+        }
+
+        #[test]
+        fn test_secp256k1_decompress_0x02_prefix() {
+            crosscheck(
+                "(secp256k1-decompress? 0x0250863ad64a87ae8a2fe83c1af1a8403cb53f53e486d8511dad8a04887e5b2352)",
+                ok_pubkey(UNCOMPRESSED),
+            );
+        }
+
+        #[test]
+        fn test_secp256k1_decompress_0x03_prefix() {
+            // i.e. `p - y` of the 0x02 form.
+            crosscheck(
+                "(secp256k1-decompress? 0x0379be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798)",
+                ok_pubkey("0479be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798b7c52588d95c3b9aa25b0403f1eef75702e84bb7597aabe663b82f6f04ef2777"),
+            );
+        }
+
+        #[test]
+        fn test_secp256k1_decompress_all_zero_key() {
+            // x = 0 is a valid field element, but y^2 = 7 has no solution mod p.
+            crosscheck(
+                "(secp256k1-decompress? 0x000000000000000000000000000000000000000000000000000000000000000000)",
+                Ok(Some(Value::err_uint(1))),
+            );
+        }
+
+        #[test]
+        fn test_secp256k1_decompress_public_key_too_long() {
+            let result = evaluate("(secp256k1-decompress? 0x02000000000000000000000000000000000000000000000000000000000000000000)");
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("expecting expression of type '(buff 33)', found '(buff 34)'"));
+        }
+
+        #[test]
+        fn test_secp256k1_decompress_oom() {
+            crate::tools::crosscheck_oom(
+                "(secp256k1-decompress? 0x0250863ad64a87ae8a2fe83c1af1a8403cb53f53e486d8511dad8a04887e5b2352)",
+                ok_pubkey(UNCOMPRESSED),
+            );
+        }
+
+        #[test]
+        fn test_secp256k1_decompress_x_out_of_range() {
+            // x = 2^256 - 1 is not a field element (x >= p), so it is rejected
+            // before the curve equation is evaluated.
+            crosscheck(
+                "(secp256k1-decompress? 0x02ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff)",
+                Ok(Some(Value::err_uint(1))),
+            );
+        }
+
+        #[test]
+        fn test_secp256k1_decompress_of_recover_result() {
+            // `secp256k1-recover?` yields the compressed key
+            // 0x03adb8de...786110, which decompresses to the value below.
+            crosscheck(
+                "(secp256k1-decompress? (unwrap-panic (secp256k1-recover? 0xde5b9eb9e7c5592930eb2e30a01369c36586d872082ed8181ee83d2a0ec20f04 0x8738487ebe69b93d8e51583be8eee50bb4213fc49c767d329632730cc193b873554428fc936ca3569afc15f1c9365f6591d6251a89fee9c9ac661116824d3a1301)))",
+                ok_pubkey("04adb8de4bfb65db2cfd6120d55c6526ae9c52e675db7e47308636534ba7786110f600feb84ae5a7b551be5fd6a33e07a04ae1e20f8bac89e58e684625c1292af3"),
+            );
+        }
     }
 }

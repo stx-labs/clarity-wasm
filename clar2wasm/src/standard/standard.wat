@@ -354,6 +354,19 @@
                                                                  (param $pk_offset i32)
                                                                  (param $pk_length i32)
                                                                  (result i32)))
+
+    (import "clarity" "secp256k1_decompress" (func $stdlib.secp256k1_decompress (param $msg_offset i32)
+                                                                 (param $msg_length i32)
+                                                                 (param $result_offset i32)
+                                                                 (param $result_length i32)))
+
+    (import "clarity" "get_bitcoin_tx_output" (func $stdlib.get_bitcoin_tx_output
+                                                                 (param $tx_offset i32)
+                                                                 (param $tx_length i32)
+                                                                 (param $vout_lo i64)
+                                                                 (param $vout_hi i64)
+                                                                 (param $return_offset i32)
+                                                                 (param $return_length i32)))
     (import "clarity" "principal_of" (func $stdlib.principal_of (param $key_offset i32)
                                                                 (param $key_length i32)
                                                                 (param $principal_offset i32)
