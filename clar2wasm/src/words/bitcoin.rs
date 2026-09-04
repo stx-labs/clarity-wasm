@@ -57,8 +57,6 @@ impl ComplexWord for GetTxOutput {
         check_args!(generator, builder, 2, args.len(), ArgumentCountCheck::Exact);
 
         generator.traverse_expr(builder, args.get_expr(0)?)?;
-
-        // `vout`, pushed as the low/high `i64` pair of a Clarity `uint`
         generator.traverse_expr(builder, args.get_expr(1)?)?;
 
         // Reserve stack space for the host-function to write the result
