@@ -63,26 +63,46 @@ impl ComplexWord for UnwrapPanic {
         &self,
         generator: &mut WasmGenerator,
         builder: &mut walrus::InstrSeqBuilder,
-        _expr: &SymbolicExpression,
+        expr: &SymbolicExpression,
         args: &[SymbolicExpression],
     ) -> Result<(), GeneratorError> {
         check_args!(generator, builder, 1, args.len(), ArgumentCountCheck::Exact);
 
         self.charge(generator, builder, 0)?;
 
+        let expr_ty = generator
+            .get_expr_type(expr)
+            .ok_or_else(|| {
+                GeneratorError::TypeError("'unwrap-panic' expression must be typed".to_owned())
+            })?
+            .clone();
+
         let input = args.get_expr(0)?;
+
+        // The type of the whole expression may have been refined by a parent
+        // word (e.g. `(unwrap-panic (ok none))` is `(optional NoType)` until a
+        // `default-to` makes it `(optional uint)`). Push that refined type back
+        // down into the `some`/`ok` side of the input, so that the code
+        // generated for the input matches what we unwrap here.
+        let input_ty = match generator.get_expr_type(input).ok_or_else(|| {
+            GeneratorError::TypeError("'unwrap-panic' input expression must be typed".to_owned())
+        })? {
+            TypeSignature::OptionalType(_) => TypeSignature::OptionalType(Box::new(expr_ty)),
+            TypeSignature::ResponseType(resp) => {
+                TypeSignature::ResponseType(Box::new((expr_ty, resp.as_ref().1.clone())))
+            }
+            _ => {
+                return Err(GeneratorError::TypeError(
+                    "'unwrap-panic' expects an optional or response input".to_owned(),
+                ))
+            }
+        };
+        generator.set_expr_type(input, input_ty.clone())?;
+
         generator.traverse_expr(builder, input)?;
         // There must be either an `optional` or a `response` on the top of the
         // stack. Both use an i32 indicator, where 0 means `none` or `err`. In
         // both cases, if this indicator is a 0, then we need to panic.
-
-        // Get the type of the input expression
-        let input_ty = generator
-            .get_expr_type(input)
-            .ok_or_else(|| {
-                GeneratorError::TypeError("'unwrap-err' input expression must be typed".to_owned())
-            })?
-            .clone();
 
         match &input_ty {
             TypeSignature::OptionalType(val_ty) => {
@@ -205,27 +225,43 @@ impl ComplexWord for UnwrapErrPanic {
         &self,
         generator: &mut WasmGenerator,
         builder: &mut walrus::InstrSeqBuilder,
-        _expr: &SymbolicExpression,
+        expr: &SymbolicExpression,
         args: &[SymbolicExpression],
     ) -> Result<(), GeneratorError> {
         check_args!(generator, builder, 1, args.len(), ArgumentCountCheck::Exact);
 
         self.charge(generator, builder, 0)?;
 
+        let expr_ty = generator
+            .get_expr_type(expr)
+            .ok_or_else(|| {
+                GeneratorError::TypeError("'unwrap-err-panic' expression must be typed".to_owned())
+            })?
+            .clone();
+
         let input = args.get_expr(0)?;
+
+        // Same as for `unwrap-panic`: push the (possibly refined) type of the
+        // whole expression back down into the `err` side of the input.
+        let input_ty = match generator.get_expr_type(input).ok_or_else(|| {
+            GeneratorError::TypeError(
+                "'unwrap-err-panic' input expression must be typed".to_owned(),
+            )
+        })? {
+            TypeSignature::ResponseType(resp) => {
+                TypeSignature::ResponseType(Box::new((resp.as_ref().0.clone(), expr_ty)))
+            }
+            _ => {
+                return Err(GeneratorError::TypeError(
+                    "'unwrap-err-panic' expects a response input".to_owned(),
+                ))
+            }
+        };
+        generator.set_expr_type(input, input_ty.clone())?;
+
         generator.traverse_expr(builder, input)?;
         // The input must be a `response` type. It uses an i32 indicator, where
         // 0 means `err`. If this indicator is a 1, then we need to panic.
-
-        // Get the type of the input expression
-        let input_ty = generator
-            .get_expr_type(input)
-            .ok_or_else(|| {
-                GeneratorError::TypeError(
-                    "'unwrap-err-panic' input expression must be typed".to_owned(),
-                )
-            })?
-            .clone();
 
         match &input_ty {
             TypeSignature::ResponseType(inner_types) => {
@@ -343,6 +379,101 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("expecting 1 arguments, got 2"));
+    }
+
+    mod type_propagation {
+        use clarity::vm::Value;
+
+        use crate::tools::crosscheck;
+
+        #[test]
+        fn unwrap_panic_ok_none_in_default_to() {
+            crosscheck(
+                "(default-to u0 (unwrap-panic (ok none)))",
+                Ok(Some(Value::UInt(0))),
+            );
+        }
+
+        #[test]
+        fn unwrap_panic_some_none_in_default_to() {
+            crosscheck(
+                "(default-to u0 (unwrap-panic (some none)))",
+                Ok(Some(Value::UInt(0))),
+            );
+        }
+
+        #[test]
+        fn unwrap_err_panic_err_none_in_default_to() {
+            crosscheck(
+                "(default-to u0 (unwrap-err-panic (err none)))",
+                Ok(Some(Value::UInt(0))),
+            );
+        }
+
+        #[test]
+        fn unwrap_panic_none_in_is_eq() {
+            crosscheck(
+                "(is-eq (unwrap-panic (some none)) (some u1))",
+                Ok(Some(Value::Bool(false))),
+            );
+        }
+
+        #[test]
+        fn unwrap_err_panic_none_in_list() {
+            crosscheck(
+                "(list (unwrap-err-panic (err none)) (some 1))",
+                Ok(Some(
+                    Value::cons_list_unsanitized(vec![
+                        Value::none(),
+                        Value::some(Value::Int(1)).unwrap(),
+                    ])
+                    .unwrap(),
+                )),
+            );
+        }
+
+        #[test]
+        fn unwrap_panic_none_as_function_argument() {
+            crosscheck(
+                "
+                    (define-private (pass (x (optional uint))) x)
+                    (pass (unwrap-panic (ok none)))
+                ",
+                Ok(Some(Value::none())),
+            );
+        }
+
+        #[test]
+        fn unwrap_panic_none_in_var_set() {
+            crosscheck(
+                "
+                    (define-data-var v (optional int) (some 1))
+                    (var-set v (unwrap-panic (some none)))
+                    (var-get v)
+                ",
+                Ok(Some(Value::none())),
+            );
+        }
+
+        #[test]
+        fn nested_unwrap_panic_in_default_to() {
+            crosscheck(
+                "(default-to u0 (unwrap-panic (unwrap-panic (ok (some none)))))",
+                Ok(Some(Value::UInt(0))),
+            );
+        }
+
+        #[test]
+        fn unwrap_panic_in_public_function_body() {
+            crosscheck(
+                "
+                    (define-public (foo (flag bool))
+                        (ok (if flag (unwrap-panic (ok none)) (some u1))))
+                    (foo true)
+                ",
+                Ok(Some(Value::okay(Value::none()).unwrap())),
+            );
+        }
     }
 
     #[test]
