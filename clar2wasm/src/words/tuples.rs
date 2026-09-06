@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use clarity::types::StacksEpochId;
+use clarity::vm::types::TupleTypeSignature;
 use clarity::vm::types::TypeSignature;
 use clarity::vm::{ClarityName, SymbolicExpression};
 use walrus::ir::BinaryOp;
@@ -224,13 +225,55 @@ impl ComplexWord for TupleMerge {
             .get_expr_type(expr)
             .ok_or_else(|| GeneratorError::TypeError("merge expression must be typed".to_owned()));
 
-        // Those locals will contain the resulting tuple after the merge operation
-        let result_locals: BTreeMap<_, Vec<_>> = result_ty
+        let result_type_map = result_ty
             .and_then(|expr_ty| match expr_ty {
                 TypeSignature::TupleType(tuple) => Ok(tuple),
                 _ => Err(GeneratorError::TypeError("expected tuple type".to_string())),
             })
-            .map(|tuple| tuple.get_type_map().clone())?
+            .map(|tuple| tuple.get_type_map().clone())?;
+
+        // Merge result types into the LHS and RHS tuple types.
+        let rhs_tuple_ty = TupleTypeSignature::try_from(
+            rhs_tuple_ty
+                .get_type_map()
+                .iter()
+                .map(|(name, ty_)| {
+                    (
+                        name.clone(),
+                        result_type_map
+                            .get(name)
+                            .cloned()
+                            .unwrap_or_else(|| ty_.clone()),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        )
+        .map_err(|e| GeneratorError::TypeError(format!("merge: invalid RHS tuple type: {e}")))?;
+        generator.set_expr_type(&args[1], TypeSignature::TupleType(rhs_tuple_ty.clone()))?;
+
+        let lhs_tuple_ty = TupleTypeSignature::try_from(
+            lhs_tuple_ty
+                .get_type_map()
+                .iter()
+                .map(|(name, ty_)| {
+                    // Fields overridden by the RHS are dropped, so their own type is kept.
+                    let ty_ = if rhs_tuple_ty.get_type_map().contains_key(name) {
+                        ty_.clone()
+                    } else {
+                        result_type_map
+                            .get(name)
+                            .cloned()
+                            .unwrap_or_else(|| ty_.clone())
+                    };
+                    (name.clone(), ty_)
+                })
+                .collect::<Vec<_>>(),
+        )
+        .map_err(|e| GeneratorError::TypeError(format!("merge: invalid LHS tuple type: {e}")))?;
+        generator.set_expr_type(&args[0], TypeSignature::TupleType(lhs_tuple_ty.clone()))?;
+
+        // Those locals will contain the resulting tuple after the merge operation
+        let result_locals: BTreeMap<_, Vec<_>> = result_type_map
             .into_iter()
             .map(|(name, ty_)| {
                 (
@@ -414,6 +457,142 @@ mod tests {
         );
 
         crosscheck(snippet, Ok(Some(expected)));
+    }
+
+    /// Builds `{ a: <a>, b: <b> }` as a Clarity value.
+    fn tuple_ab(a: Value, b: Value) -> Value {
+        Value::from(
+            TupleData::from_data(vec![
+                (ClarityName::from_literal("a"), a),
+                (ClarityName::from_literal("b"), b),
+            ])
+            .unwrap(),
+        )
+    }
+
+    // The type of a `merge` expression is pushed down from its context (e.g. the declared
+    // value type of a map), which may be wider than the types of the operands' fields: a
+    // `none` literal is typed `(optional NoType)`. The following tests make sure that the
+    // operands are generated with the result's field types in such cases.
+
+    #[test]
+    fn merge_rhs_none_field_widened_by_map_value_type() {
+        let snippet = r#"
+(define-map m uint { a: uint, b: (optional uint) })
+(map-set m u1 (merge { a: u1 } { b: none }))
+(map-get? m u1)
+"#;
+
+        crosscheck(
+            snippet,
+            Ok(Some(
+                Value::some(tuple_ab(Value::UInt(1), Value::none())).unwrap(),
+            )),
+        );
+    }
+
+    #[test]
+    fn merge_lhs_none_field_widened_by_map_value_type() {
+        let snippet = r#"
+(define-map m uint { a: (optional uint), b: uint })
+(map-set m u1 (merge { a: none } { b: u2 }))
+(map-get? m u1)
+"#;
+
+        crosscheck(
+            snippet,
+            Ok(Some(
+                Value::some(tuple_ab(Value::none(), Value::UInt(2))).unwrap(),
+            )),
+        );
+    }
+
+    #[test]
+    fn merge_lhs_none_field_overridden_by_rhs() {
+        // The LHS field `a` is dropped from the result, so its own type must be kept
+        // rather than being replaced by the result's type for `a`.
+        let snippet = r#"
+(define-map m uint { a: (optional uint), b: uint })
+(map-set m u1 (merge { a: none, b: u1 } { a: (some u5) }))
+(map-get? m u1)
+"#;
+
+        crosscheck(
+            snippet,
+            Ok(Some(
+                Value::some(tuple_ab(
+                    Value::some(Value::UInt(5)).unwrap(),
+                    Value::UInt(1),
+                ))
+                .unwrap(),
+            )),
+        );
+    }
+
+    #[test]
+    fn merge_both_sides_none_fields_widened() {
+        let snippet = r#"
+(define-map m uint { a: (optional uint), b: (optional int) })
+(map-set m u1 (merge { a: none } { b: none }))
+(map-get? m u1)
+"#;
+
+        crosscheck(
+            snippet,
+            Ok(Some(
+                Value::some(tuple_ab(Value::none(), Value::none())).unwrap(),
+            )),
+        );
+    }
+
+    #[test]
+    fn merge_rhs_nested_tuple_none_field_widened() {
+        // The pushed-down type must propagate through the RHS `tuple` into its nested fields.
+        let snippet = r#"
+(define-map m uint { a: uint, b: { c: (optional uint), d: int } })
+(map-set m u1 (merge { a: u1 } { b: { c: none, d: -1 } }))
+(map-get? m u1)
+"#;
+
+        let nested = Value::from(
+            TupleData::from_data(vec![
+                (ClarityName::from_literal("c"), Value::none()),
+                (ClarityName::from_literal("d"), Value::Int(-1)),
+            ])
+            .unwrap(),
+        );
+
+        crosscheck(
+            snippet,
+            Ok(Some(Value::some(tuple_ab(Value::UInt(1), nested)).unwrap())),
+        );
+    }
+
+    #[test]
+    fn merge_rhs_none_field_widened_by_data_var_type() {
+        let snippet = r#"
+(define-data-var v { a: uint, b: (optional uint) } { a: u0, b: (some u0) })
+(var-set v (merge { a: u1 } { b: none }))
+(var-get v)
+"#;
+
+        crosscheck(snippet, Ok(Some(tuple_ab(Value::UInt(1), Value::none()))));
+    }
+
+    #[test]
+    fn merge_rhs_none_field_widened_by_map_insert_value_type() {
+        let snippet = r#"
+(define-map m uint { a: uint, b: (optional uint) })
+(map-insert m u1 (merge { a: u1 } { b: none }))
+(map-get? m u1)
+"#;
+
+        crosscheck(
+            snippet,
+            Ok(Some(
+                Value::some(tuple_ab(Value::UInt(1), Value::none())).unwrap(),
+            )),
+        );
     }
 
     //
