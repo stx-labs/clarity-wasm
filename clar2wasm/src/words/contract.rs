@@ -72,6 +72,11 @@ impl ComplexWord for AsContract {
 
         let inner = args.get_expr(0)?;
 
+        // Push the expected type of the whole expression down into the body.
+        if let Some(ty) = generator.get_expr_type(_expr).cloned() {
+            generator.set_expr_type(inner, ty)?;
+        }
+
         // Call the host interface function, `enter_as_contract`
         builder.call(generator.func_by_name("stdlib.enter_as_contract"));
 
@@ -922,6 +927,114 @@ mod tests {
         }
     }
 
+    /// The type checker gives `as-contract` the type of its body, which can be
+    /// less specific than the type a parent word later assigns to the whole
+    /// `as-contract` expression (e.g. `(ok u1)` is `(response uint NoType)`
+    /// until an `if` unifies it with `(err 2)`). These tests check that the
+    /// refined type is pushed down into the body so that the generated code
+    /// for the body matches what the parent expects on the stack.
+    ///
+    /// `as-contract` was removed in Clarity 4, so these tests are pinned to
+    /// Clarity 3.
+    mod as_contract_type_propagation {
+        use clarity::types::StacksEpochId;
+        use clarity::vm::errors::VmExecutionError;
+        use clarity::vm::{ClarityVersion, Value};
+
+        use crate::tools::crosscheck_with_epoch_and_version;
+
+        fn crosscheck(snippet: &str, expected: Result<Option<Value>, VmExecutionError>) {
+            crosscheck_with_epoch_and_version(
+                snippet,
+                expected,
+                StacksEpochId::Epoch32,
+                ClarityVersion::Clarity3,
+            );
+        }
+
+        #[test]
+        fn as_contract_ok_in_if_branch() {
+            crosscheck(
+                "(if true (as-contract (ok u1)) (err 2))",
+                Ok(Some(Value::okay(Value::UInt(1)).unwrap())),
+            );
+        }
+
+        #[test]
+        fn as_contract_err_in_if_branch() {
+            crosscheck(
+                "(if false (ok u1) (as-contract (err 2)))",
+                Ok(Some(Value::error(Value::Int(2)).unwrap())),
+            );
+        }
+
+        #[test]
+        fn as_contract_none_in_default_to() {
+            crosscheck(
+                "(default-to u0 (as-contract none))",
+                Ok(Some(Value::UInt(0))),
+            );
+        }
+
+        #[test]
+        fn as_contract_none_in_is_eq() {
+            crosscheck(
+                "(is-eq (as-contract none) (some u1))",
+                Ok(Some(Value::Bool(false))),
+            );
+        }
+
+        #[test]
+        fn as_contract_none_in_list() {
+            crosscheck(
+                "(list (as-contract none) (some 1))",
+                Ok(Some(
+                    Value::cons_list_unsanitized(vec![
+                        Value::none(),
+                        Value::some(Value::Int(1)).unwrap(),
+                    ])
+                    .unwrap(),
+                )),
+            );
+        }
+
+        #[test]
+        fn as_contract_ok_as_function_argument() {
+            crosscheck(
+                "
+                    (define-private (unwrap-it (r (response uint int)))
+                        (unwrap-panic r))
+                    (unwrap-it (as-contract (ok u1)))
+                ",
+                Ok(Some(Value::UInt(1))),
+            );
+        }
+
+        #[test]
+        fn as_contract_none_in_var_set() {
+            crosscheck(
+                "
+                    (define-data-var v (optional int) (some 1))
+                    (var-set v (as-contract none))
+                    (var-get v)
+                ",
+                Ok(Some(Value::none())),
+            );
+        }
+
+        #[test]
+        fn as_contract_in_public_function_body() {
+            crosscheck(
+                "
+                    (define-public (foo (flag bool))
+                        (if flag (as-contract (ok u1)) (err 2)))
+                    (foo true)
+                ",
+                Ok(Some(Value::okay(Value::UInt(1)).unwrap())),
+            );
+        }
+    }
+
     #[test]
     fn contract_call_less_than_two_args() {
         let mut env = TestEnvironment::default();
@@ -1696,6 +1809,74 @@ mod tests {
                     )
                 "#,
                 Ok(Some(Value::Bool(true))),
+            );
+        }
+
+        // `as-contract?` pushes the ok-side of its response type down into the
+        // last body expression, so a type refined by a parent word reaches the
+        // body. These mirror the `as_contract_type_propagation` tests for the
+        // legacy `as-contract`. Note that an `as-contract?` body may not itself
+        // be a response, so the refined types here are optionals and lists.
+        #[test]
+        fn as_contract_safe_none_in_if_branch() {
+            crosscheck(
+                "(if true (as-contract? () none) (ok (some u1)))",
+                Ok(Some(Value::okay(Value::none()).unwrap())),
+            );
+        }
+
+        #[test]
+        fn as_contract_safe_none_in_is_eq() {
+            crosscheck(
+                "(is-eq (as-contract? () none) (ok (some u1)))",
+                Ok(Some(Value::Bool(false))),
+            );
+        }
+
+        #[test]
+        fn as_contract_safe_empty_list_in_is_eq() {
+            crosscheck(
+                "(is-eq (as-contract? () (list)) (ok (list u1)))",
+                Ok(Some(Value::Bool(false))),
+            );
+        }
+
+        #[test]
+        fn as_contract_safe_none_in_list() {
+            crosscheck(
+                "(list (as-contract? () none) (ok (some u1)))",
+                Ok(Some(
+                    Value::cons_list_unsanitized(vec![
+                        Value::okay(Value::none()).unwrap(),
+                        Value::okay(Value::some(Value::UInt(1)).unwrap()).unwrap(),
+                    ])
+                    .unwrap(),
+                )),
+            );
+        }
+
+        #[test]
+        fn as_contract_safe_none_as_function_argument() {
+            crosscheck(
+                "
+                    (define-private (pass (r (response (optional uint) uint))) r)
+                    (pass (as-contract? () none))
+                ",
+                Ok(Some(Value::okay(Value::none()).unwrap())),
+            );
+        }
+
+        #[test]
+        fn as_contract_safe_in_public_function_body() {
+            crosscheck(
+                "
+                    (define-public (foo (flag bool))
+                        (ok (if flag (as-contract? () none) (ok (some u1)))))
+                    (foo true)
+                ",
+                Ok(Some(
+                    Value::okay(Value::okay(Value::none()).unwrap()).unwrap(),
+                )),
             );
         }
 
