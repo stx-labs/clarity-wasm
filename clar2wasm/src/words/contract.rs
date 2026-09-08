@@ -938,55 +938,53 @@ mod tests {
     /// Clarity 3.
     mod as_contract_type_propagation {
         use clarity::types::StacksEpochId;
-        use clarity::vm::errors::VmExecutionError;
         use clarity::vm::{ClarityVersion, Value};
 
         use crate::tools::crosscheck_with_epoch_and_version;
 
-        fn crosscheck(snippet: &str, expected: Result<Option<Value>, VmExecutionError>) {
+        #[test]
+        fn as_contract_ok_in_if_branch() {
             crosscheck_with_epoch_and_version(
-                snippet,
-                expected,
+                "(if true (as-contract (ok u1)) (err 2))",
+                Ok(Some(Value::okay(Value::UInt(1)).unwrap())),
                 StacksEpochId::Epoch32,
                 ClarityVersion::Clarity3,
             );
         }
 
         #[test]
-        fn as_contract_ok_in_if_branch() {
-            crosscheck(
-                "(if true (as-contract (ok u1)) (err 2))",
-                Ok(Some(Value::okay(Value::UInt(1)).unwrap())),
-            );
-        }
-
-        #[test]
         fn as_contract_err_in_if_branch() {
-            crosscheck(
+            crosscheck_with_epoch_and_version(
                 "(if false (ok u1) (as-contract (err 2)))",
                 Ok(Some(Value::error(Value::Int(2)).unwrap())),
+                StacksEpochId::Epoch32,
+                ClarityVersion::Clarity3,
             );
         }
 
         #[test]
         fn as_contract_none_in_default_to() {
-            crosscheck(
+            crosscheck_with_epoch_and_version(
                 "(default-to u0 (as-contract none))",
                 Ok(Some(Value::UInt(0))),
+                StacksEpochId::Epoch32,
+                ClarityVersion::Clarity3,
             );
         }
 
         #[test]
         fn as_contract_none_in_is_eq() {
-            crosscheck(
+            crosscheck_with_epoch_and_version(
                 "(is-eq (as-contract none) (some u1))",
                 Ok(Some(Value::Bool(false))),
+                StacksEpochId::Epoch32,
+                ClarityVersion::Clarity3,
             );
         }
 
         #[test]
         fn as_contract_none_in_list() {
-            crosscheck(
+            crosscheck_with_epoch_and_version(
                 "(list (as-contract none) (some 1))",
                 Ok(Some(
                     Value::cons_list_unsanitized(vec![
@@ -995,42 +993,50 @@ mod tests {
                     ])
                     .unwrap(),
                 )),
+                StacksEpochId::Epoch32,
+                ClarityVersion::Clarity3,
             );
         }
 
         #[test]
         fn as_contract_ok_as_function_argument() {
-            crosscheck(
+            crosscheck_with_epoch_and_version(
                 "
                     (define-private (unwrap-it (r (response uint int)))
                         (unwrap-panic r))
                     (unwrap-it (as-contract (ok u1)))
                 ",
                 Ok(Some(Value::UInt(1))),
+                StacksEpochId::Epoch32,
+                ClarityVersion::Clarity3,
             );
         }
 
         #[test]
         fn as_contract_none_in_var_set() {
-            crosscheck(
+            crosscheck_with_epoch_and_version(
                 "
                     (define-data-var v (optional int) (some 1))
                     (var-set v (as-contract none))
                     (var-get v)
                 ",
                 Ok(Some(Value::none())),
+                StacksEpochId::Epoch32,
+                ClarityVersion::Clarity3,
             );
         }
 
         #[test]
         fn as_contract_in_public_function_body() {
-            crosscheck(
+            crosscheck_with_epoch_and_version(
                 "
                     (define-public (foo (flag bool))
                         (if flag (as-contract (ok u1)) (err 2)))
                     (foo true)
                 ",
                 Ok(Some(Value::okay(Value::UInt(1)).unwrap())),
+                StacksEpochId::Epoch32,
+                ClarityVersion::Clarity3,
             );
         }
     }
