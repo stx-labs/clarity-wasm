@@ -1907,8 +1907,7 @@ impl ComplexWord for Slice {
 #[cfg(test)]
 mod tests {
     use clarity::vm::types::TupleData;
-    use clarity::vm::ClarityName;
-    use clarity::vm::Value;
+    use clarity::vm::{ClarityName, Value};
 
     use crate::tools::{crosscheck, crosscheck_compare_only, evaluate, interpret, TestConfig};
 
