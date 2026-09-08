@@ -1,5 +1,8 @@
 {
   "rust-analyzer.check.command": "clippy",
   "rust-analyzer.check.features": "all",
-  "rust-analyzer.showUnlinkedFileNotification": false
+  "rust-analyzer.showUnlinkedFileNotification": false,
+  "rust-analyzer.rustfmt.extraArgs": [
+    "+nightly"
+  ]
 }

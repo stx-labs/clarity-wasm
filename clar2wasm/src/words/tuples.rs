@@ -1,8 +1,7 @@
 use std::collections::BTreeMap;
 
 use clarity::types::StacksEpochId;
-use clarity::vm::types::TupleTypeSignature;
-use clarity::vm::types::TypeSignature;
+use clarity::vm::types::{TupleTypeSignature, TypeSignature};
 use clarity::vm::{ClarityName, SymbolicExpression};
 use walrus::ir::BinaryOp;
 use walrus::ValType;
