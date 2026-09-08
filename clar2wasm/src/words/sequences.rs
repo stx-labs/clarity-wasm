@@ -120,31 +120,36 @@ impl ComplexWord for Fold {
         // type without (offset, len), which is a behavior we don't have for now. We are allocating 8 bytes too many.
         let (return_offset, _) = generator.create_call_stack_local(builder, &expr_ty, true, true);
 
+        // The exact Clarity type of one element of the folded sequence, used later for duck-typing.
+        let seq_elem_ty = match generator.get_expr_type(sequence) {
+            Some(TypeSignature::SequenceType(seq_ty)) => seq_ty.unit_type(),
+            _ => {
+                return Err(GeneratorError::TypeError(
+                    "Folded sequence should be typed".to_owned(),
+                ))
+            }
+        };
+
         // We need to find the correct types expected by the function `func` and the result type of the fold expression
         // to make sure everything will be coherent in the end.
-        // This is only needed if we are folding a list and the function is user-defined.
+        // This is only needed if the function is user-defined.
         struct FoldFuncTy {
             elem_ty: TypeSignature,
             acc_ty: TypeSignature,
             return_ty: TypeSignature,
         }
-        let fold_func_ty = {
-            generator.get_expr_type(sequence).ok_or_else(|| {
-                GeneratorError::TypeError("Folded sequence should be typed".to_owned())
-            })?;
-            match generator.get_function_type(func) {
-                Some(FunctionType::Fixed(FixedFunction { args, returns })) if args.len() == 2 => {
-                    let fold_func_ty = FoldFuncTy {
-                        elem_ty: args[0].signature.clone(),
-                        acc_ty: args[1].signature.clone(),
-                        return_ty: returns.clone(),
-                    };
-                    // set the accumulator type
-                    generator.set_expr_type(initial, fold_func_ty.acc_ty.clone())?;
-                    Some(fold_func_ty)
-                }
-                _ => None,
+        let fold_func_ty = match generator.get_function_type(func) {
+            Some(FunctionType::Fixed(FixedFunction { args, returns })) if args.len() == 2 => {
+                let fold_func_ty = FoldFuncTy {
+                    elem_ty: args[0].signature.clone(),
+                    acc_ty: args[1].signature.clone(),
+                    return_ty: returns.clone(),
+                };
+                // set the accumulator type
+                generator.set_expr_type(initial, fold_func_ty.acc_ty.clone())?;
+                Some(fold_func_ty)
             }
+            _ => None,
         };
 
         // The result type must match the type of the initial value
@@ -237,7 +242,7 @@ impl ComplexWord for Fold {
         {
             let (l, _) = generator
                 .create_call_stack_bytes(&mut loop_, dt_needed_workspace(expected_elem_ty) as _);
-            generator.duck_type(&mut loop_, &(&elem_ty).into(), expected_elem_ty, Some(l))?;
+            generator.duck_type(&mut loop_, &seq_elem_ty, expected_elem_ty, Some(l))?;
         }
 
         // Copy the accumulator for the function call. We need a copy otherwise we would overwrite the value
