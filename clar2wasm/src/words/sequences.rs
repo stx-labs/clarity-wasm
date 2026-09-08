@@ -704,6 +704,8 @@ impl ComplexWord for Map {
 
         struct MapArg {
             element_type: SequenceElementType,
+            /// The actual Clarity type of one element.
+            clarity_type: TypeSignature,
             element_size: i32,
             offset: BorrowedLocal,
             length: BorrowedLocal,
@@ -748,12 +750,18 @@ impl ComplexWord for Map {
             .iter()
             .skip(1)
             .map(|arg| {
-                let element_type: SequenceElementType = generator
-                    .get_expr_type(arg)
-                    .ok_or_else(|| {
-                        GeneratorError::TypeError("sequence expression must be typed".to_owned())
-                    })?
-                    .try_into()?;
+                let arg_ty = generator.get_expr_type(arg).ok_or_else(|| {
+                    GeneratorError::TypeError("sequence expression must be typed".to_owned())
+                })?;
+                let element_type: SequenceElementType = arg_ty.try_into()?;
+                let clarity_type = match arg_ty {
+                    TypeSignature::SequenceType(seq_ty) => seq_ty.unit_type(),
+                    _ => {
+                        return Err(GeneratorError::TypeError(
+                            "expected sequence type".to_owned(),
+                        ))
+                    }
+                };
                 let element_size = element_type.type_size();
 
                 let offset = generator.borrow_local(ValType::I32);
@@ -764,6 +772,7 @@ impl ComplexWord for Map {
 
                 Ok(MapArg {
                     element_type,
+                    clarity_type,
                     element_size,
                     offset,
                     length,
@@ -946,8 +955,8 @@ impl ComplexWord for Map {
                     let size = user_defined_args_types
                         .iter()
                         .zip(mapargs.iter())
-                        .map(|(fn_arg, MapArg { element_type, .. })| {
-                            if need_ducktyping(&element_type.into(), fn_arg) {
+                        .map(|(fn_arg, MapArg { clarity_type, .. })| {
+                            if need_ducktyping(clarity_type, fn_arg) {
                                 dt_needed_workspace(fn_arg)
                             } else {
                                 0
@@ -974,6 +983,7 @@ impl ComplexWord for Map {
                 for (
                     MapArg {
                         element_type,
+                        clarity_type,
                         offset,
                         ..
                     },
@@ -983,7 +993,7 @@ impl ComplexWord for Map {
                     element_type.load(generator, &mut loop_, **offset)?;
                     generator.duck_type(
                         &mut loop_,
-                        &element_type.into(),
+                        clarity_type,
                         &expected_arg_ty,
                         args_memory.as_ref().map(|(_, l)| **l),
                     )?;
@@ -1896,6 +1906,8 @@ impl ComplexWord for Slice {
 
 #[cfg(test)]
 mod tests {
+    use clarity::vm::types::TupleData;
+    use clarity::vm::ClarityName;
     use clarity::vm::Value;
 
     use crate::tools::{crosscheck, crosscheck_compare_only, evaluate, interpret, TestConfig};
@@ -2306,6 +2318,70 @@ mod tests {
     "#,
             Ok(Some(Value::Int(42))),
         )
+    }
+
+    #[test]
+    fn test_map_string_ascii_wide_param() {
+        crosscheck(
+            r#"
+(define-private (widen (c (string-ascii 20)))
+    (unwrap-panic (as-max-len? (concat c "!") u20))
+)
+(map widen "abc")"#,
+            Ok(Some(
+                Value::cons_list_unsanitized(
+                    ["a!", "b!", "c!"]
+                        .into_iter()
+                        .map(|s| Value::string_ascii_from_bytes(s.as_bytes().to_vec()).unwrap())
+                        .collect(),
+                )
+                .unwrap(),
+            )),
+        );
+    }
+
+    #[test]
+    fn test_map_string_ascii_and_buffer_wide_params() {
+        // Both byte-sized element kinds at once: the string must be duck-typed to a
+        // string, the buffer to a buffer.
+        crosscheck(
+            r#"
+(define-private (pair (c (string-ascii 8)) (b (buff 8)))
+    { c: c, b: b }
+)
+(map pair "ab" 0x0102)"#,
+            Ok(Some(
+                Value::cons_list_unsanitized(vec![
+                    Value::from(
+                        TupleData::from_data(vec![
+                            (
+                                ClarityName::from_literal("c"),
+                                Value::string_ascii_from_bytes(b"a".to_vec()).unwrap(),
+                            ),
+                            (
+                                ClarityName::from_literal("b"),
+                                Value::buff_from(vec![1]).unwrap(),
+                            ),
+                        ])
+                        .unwrap(),
+                    ),
+                    Value::from(
+                        TupleData::from_data(vec![
+                            (
+                                ClarityName::from_literal("c"),
+                                Value::string_ascii_from_bytes(b"b".to_vec()).unwrap(),
+                            ),
+                            (
+                                ClarityName::from_literal("b"),
+                                Value::buff_from(vec![2]).unwrap(),
+                            ),
+                        ])
+                        .unwrap(),
+                    ),
+                ])
+                .unwrap(),
+            )),
+        );
     }
 
     #[test]
