@@ -4277,3 +4277,180 @@ test_multi_contract_call_response!(
         println!("response: {:?}", response);
     }
 );
+
+//
+// Nested context cleanup after runtime errors
+//
+// A runtime error is a Wasm trap, which skips the host calls the Wasm module
+// uses to close its nested contexts (`commit_call`/`roll_back_call`,
+// `exit_as_contract`). The host must unwind them itself.
+//
+
+/// Calls `$contract_func` in `$contract_name`, expecting a division by zero,
+/// and checks that every nested context opened during the call has been
+/// unwound and that the write made before the trap has been rolled back.
+macro_rules! test_nested_context_cleanup {
+    ($func: ident, $init_contracts: expr, $contract_name: literal, $contract_func: literal) => {
+        test_multi_contract_init!(
+            $func,
+            $init_contracts,
+            |global_context: &mut GlobalContext,
+             contract_contexts: &HashMap<&str, ContractContext>,
+             _return_val: Option<Value>| {
+                let depth = global_context.nesting_depth();
+
+                let mut call_stack = CallStack::new();
+                let result = clarity::vm::clarity_wasm::call_function(
+                    $contract_func,
+                    &[],
+                    global_context,
+                    contract_contexts.get($contract_name).unwrap(),
+                    &mut call_stack,
+                    Some(StandardPrincipalData::transient().into()),
+                    Some(StandardPrincipalData::transient().into()),
+                    None,
+                );
+                assert_eq!(
+                    result,
+                    Err(VmExecutionError::Runtime(
+                        RuntimeError::DivisionByZero,
+                        Some(Vec::new())
+                    ))
+                );
+                assert_eq!(
+                    global_context.nesting_depth(),
+                    depth,
+                    "the trapped call left nested contexts open"
+                );
+
+                // The write made before the trap must have been rolled back.
+                let mut call_stack = CallStack::new();
+                let counter = clarity::vm::clarity_wasm::call_function(
+                    "get-counter",
+                    &[],
+                    global_context,
+                    contract_contexts.get("runtime-error-nested").unwrap(),
+                    &mut call_stack,
+                    Some(StandardPrincipalData::transient().into()),
+                    Some(StandardPrincipalData::transient().into()),
+                    None,
+                )
+                .expect("get-counter failed");
+                assert_eq!(counter, Value::UInt(0));
+                assert_eq!(global_context.nesting_depth(), depth);
+            }
+        );
+    };
+}
+
+test_nested_context_cleanup!(
+    test_runtime_error_unwinds_public_call_context,
+    ["runtime-error-nested"],
+    "runtime-error-nested",
+    "call-trap"
+);
+
+test_nested_context_cleanup!(
+    test_runtime_error_unwinds_nested_public_call_contexts,
+    ["runtime-error-nested"],
+    "runtime-error-nested",
+    "call-call-trap"
+);
+
+test_nested_context_cleanup!(
+    test_runtime_error_unwinds_as_contract_context,
+    ["runtime-error-nested"],
+    "runtime-error-nested",
+    "as-contract-trap"
+);
+
+test_nested_context_cleanup!(
+    test_runtime_error_unwinds_contract_call_contexts,
+    [
+        "runtime-error-nested",
+        "multi-contract/runtime-error-nested-caller"
+    ],
+    "runtime-error-nested-caller",
+    "call-trap"
+);
+
+/// Initializes a contract whose top-level expression locally calls a public
+/// function that traps, using the host `initialize_contract`.
+#[test]
+fn test_runtime_error_during_init_unwinds_contexts() {
+    let contract_name = "runtime-error-nested-init";
+    let contract_id = QualifiedContractIdentifier::new(
+        StandardPrincipalData::transient(),
+        ContractName::try_from(contract_name).unwrap(),
+    );
+    let contract_path = format!(
+        "{}/tests/contracts/{}.clar",
+        env!("CARGO_MANIFEST_DIR"),
+        contract_name
+    );
+    let contract_str = std::fs::read_to_string(contract_path).unwrap();
+
+    let constants = StacksConstants::default();
+    let burn_datastore = BurnDatastore::new(constants);
+    let mut clarity_store = MemoryBackingStore::new();
+
+    let mut db = ClarityDatabase::new(&mut clarity_store, &burn_datastore, &burn_datastore);
+    db.begin();
+    db.set_clarity_epoch_version(StacksEpochId::latest())
+        .expect("Failed to set epoch version.");
+    db.commit().expect("Failed to commit.");
+
+    let mut compile_result = clarity_store
+        .as_analysis_db()
+        .execute(|analysis_db| {
+            compile(
+                contract_str.as_str(),
+                &contract_id,
+                LimitedCostTracker::new_free(),
+                ClarityVersion::Clarity2,
+                StacksEpochId::latest(),
+                analysis_db,
+                false,
+            )
+            .map_err(|e| StaticCheckErrorKind::Unreachable(format!("Compilation failure {e:?}")))
+        })
+        .expect("Failed to compile contract.");
+
+    let mut contract_context = ContractContext::new(contract_id.clone(), ClarityVersion::Clarity2);
+    contract_context.set_wasm_module(compile_result.module.emit_wasm());
+
+    let mut global_context = GlobalContext::new(
+        false,
+        CHAIN_ID_TESTNET,
+        clarity_store.as_clarity_db(),
+        LimitedCostTracker::new_free(),
+        StacksEpochId::latest(),
+    );
+    global_context.begin();
+    global_context
+        .execute(|g| g.database.insert_contract_hash(&contract_id, &contract_str))
+        .expect("Failed to insert contract hash.");
+    let depth = global_context.nesting_depth();
+
+    let result = clarity::vm::clarity_wasm::initialize_contract(
+        &mut global_context,
+        &mut contract_context,
+        None,
+        &compile_result.contract_analysis,
+    );
+    assert_eq!(
+        result,
+        Err(VmExecutionError::Runtime(
+            RuntimeError::DivisionByZero,
+            Some(Vec::new())
+        ))
+    );
+    assert_eq!(
+        global_context.nesting_depth(),
+        depth,
+        "the trapped initialization left nested contexts open"
+    );
+
+    global_context.roll_back().unwrap();
+    assert!(global_context.is_top_level());
+}
