@@ -293,8 +293,10 @@ pub fn need_ducktyping(og_ty: &TypeSignature, tg_ty: &TypeSignature) -> bool {
         // makes the code cleaner everywhere else, so this workaround exist.
         &TypeSignature::BUFFER_1 => !matches!(
             tg_ty,
-            TypeSignature::SequenceType(SequenceSubtype::BufferType(_))
-                | &TypeSignature::STRING_ASCII_MIN
+            TypeSignature::SequenceType(
+                SequenceSubtype::BufferType(_)
+                    | SequenceSubtype::StringType(StringSubtype::ASCII(_))
+            )
         ),
         TypeSignature::SequenceType(SequenceSubtype::BufferType(_)) => !matches!(
             tg_ty,
