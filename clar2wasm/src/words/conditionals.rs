@@ -597,7 +597,14 @@ impl ComplexWord for Filter {
             .local_tee(input_len)
             .br_if(loop_id);
 
-        builder.instr(Loop { seq: loop_id });
+        // Do not enter the loop on an empty sequence
+        builder.local_get(input_len).if_else(
+            None,
+            |then| {
+                then.instr(Loop { seq: loop_id });
+            },
+            |_| {},
+        );
 
         builder.local_get(output_offset);
         builder.local_get(output_len);
@@ -1045,7 +1052,7 @@ mod tests {
     use clarity::vm::types::ResponseData;
     use clarity::vm::Value;
 
-    use crate::tools::{crosscheck, crosscheck_expect_failure, evaluate};
+    use crate::tools::{crosscheck, crosscheck_compare_only, crosscheck_expect_failure, evaluate};
 
     #[test]
     fn trivial() {
@@ -1220,6 +1227,56 @@ mod tests {
 )
 (filter is-dash 0x612d62)",
             Ok(Some(Value::buff_from_byte(0x2d))),
+        );
+    }
+
+    #[test]
+    fn filter_empty_list_from_data_var() {
+        crosscheck_compare_only(
+            "
+(define-data-var top-donors (list 5 { donor: principal, amount: uint }) (list))
+(define-data-var scratch-principal principal tx-sender)
+(define-private (donor-is-not-scratch (entry { donor: principal, amount: uint }))
+    (not (is-eq (get donor entry) (var-get scratch-principal)))
+)
+(filter donor-is-not-scratch (var-get top-donors))",
+        );
+    }
+
+    #[test]
+    fn filter_empty_list_argument() {
+        crosscheck_compare_only(
+            "
+(define-private (is-great (number int))
+  (> number 2))
+(define-private (keep-great (numbers (list 5 int)))
+  (filter is-great numbers))
+
+(keep-great (list))",
+        );
+    }
+
+    #[test]
+    fn filter_empty_buff() {
+        crosscheck(
+            "
+(define-private (is-dash (char (buff 1)))
+    (is-eq char 0x2d) ;; -
+)
+(filter is-dash 0x)",
+            Ok(Some(Value::buff_from(vec![]).unwrap())),
+        );
+    }
+
+    #[test]
+    fn filter_empty_string_ascii() {
+        crosscheck(
+            r#"
+(define-private (is-dash (char (string-ascii 1)))
+    (is-eq char "-")
+)
+(filter is-dash "")"#,
+            Ok(Some(Value::string_ascii_from_bytes(vec![]).unwrap())),
         );
     }
 
