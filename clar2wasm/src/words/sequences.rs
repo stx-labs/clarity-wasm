@@ -1898,6 +1898,8 @@ impl ComplexWord for Slice {
 #[cfg(test)]
 mod tests {
     use clarity::vm::Value;
+    use clarity_types::types::TupleData;
+    use clarity_types::ClarityName;
 
     use crate::tools::{crosscheck, crosscheck_compare_only, evaluate, interpret, TestConfig};
 
@@ -3368,5 +3370,71 @@ mod tests {
         );
 
         crosscheck(snippet, expected);
+    }
+
+    #[test]
+    fn test_map_string_ascii_wide_param() {
+        crosscheck(
+            r#"
+                (define-private (widen (c (string-ascii 20)))
+                    (unwrap-panic (as-max-len? (concat c "!") u20))
+                )
+                (map widen "abc")
+            "#,
+            Ok(Some(
+                Value::cons_list_unsanitized(
+                    ["a!", "b!", "c!"]
+                        .into_iter()
+                        .map(|s| Value::string_ascii_from_bytes(s.as_bytes().to_vec()).unwrap())
+                        .collect(),
+                )
+                .unwrap(),
+            )),
+        );
+    }
+
+    #[test]
+    fn test_map_string_ascii_and_buffer_wide_params() {
+        // Both byte-sized element kinds at once: the string must be duck-typed to a
+        // string, the buffer to a buffer.
+        crosscheck(
+            r#"
+                (define-private (pair (c (string-ascii 8)) (b (buff 8)))
+                    { c: c, b: b }
+                )
+                (map pair "ab" 0x0102)
+            "#,
+            Ok(Some(
+                Value::cons_list_unsanitized(vec![
+                    Value::from(
+                        TupleData::from_data(vec![
+                            (
+                                ClarityName::from_literal("c"),
+                                Value::string_ascii_from_bytes(b"a".to_vec()).unwrap(),
+                            ),
+                            (
+                                ClarityName::from_literal("b"),
+                                Value::buff_from(vec![1]).unwrap(),
+                            ),
+                        ])
+                        .unwrap(),
+                    ),
+                    Value::from(
+                        TupleData::from_data(vec![
+                            (
+                                ClarityName::from_literal("c"),
+                                Value::string_ascii_from_bytes(b"b".to_vec()).unwrap(),
+                            ),
+                            (
+                                ClarityName::from_literal("b"),
+                                Value::buff_from(vec![2]).unwrap(),
+                            ),
+                        ])
+                        .unwrap(),
+                    ),
+                ])
+                .unwrap(),
+            )),
+        );
     }
 }
