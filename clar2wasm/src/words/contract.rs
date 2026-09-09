@@ -927,15 +927,8 @@ mod tests {
         }
     }
 
-    /// The type checker gives `as-contract` the type of its body, which can be
-    /// less specific than the type a parent word later assigns to the whole
-    /// `as-contract` expression (e.g. `(ok u1)` is `(response uint NoType)`
-    /// until an `if` unifies it with `(err 2)`). These tests check that the
-    /// refined type is pushed down into the body so that the generated code
-    /// for the body matches what the parent expects on the stack.
-    ///
-    /// `as-contract` was removed in Clarity 4, so these tests are pinned to
-    /// Clarity 3.
+    /// Validate the `as-contract` type propagation workaround. `as-contract`
+    /// was removed in Clarity 4, so these tests are pinned to Clarity 3.
     mod as_contract_type_propagation {
         use clarity::types::StacksEpochId;
         use clarity::vm::{ClarityVersion, Value};
