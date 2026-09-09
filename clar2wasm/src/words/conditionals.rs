@@ -1,14 +1,14 @@
 use clarity::vm::types::{FixedFunction, FunctionType, TypeSignature};
 use clarity::vm::{ClarityName, SymbolicExpression};
-use walrus::ir::{self, Block, IfElse, Loop, UnaryOp};
+use walrus::ir::{self, Block, IfElse, InstrSeqId, InstrSeqType, Loop, UnaryOp};
 use walrus::{InstrSeqBuilder, LocalId, ValType};
 
 use super::{ComplexWord, SimpleWord, Word};
 use crate::cost::WordCharge;
 use crate::duck_type::dt_needed_workspace;
-use crate::error_mapping::ErrorMap;
+use crate::error_mapping::{self, ErrorMap};
 use crate::wasm_generator::{
-    add_placeholder_for_clarity_type, drop_value, ArgumentsExt, GeneratorError,
+    add_placeholder_for_clarity_type, clar2wasm_ty, drop_value, ArgumentsExt, GeneratorError,
     SequenceElementType, WasmGenerator,
 };
 use crate::wasm_utils::ArgumentCountCheck;
@@ -313,6 +313,31 @@ impl ComplexWord for If {
     }
 }
 
+/// Generates the instruction block for a `match` branch. The interpreter
+/// raises `NameAlreadyUsed` at runtime when the binding collides with a
+/// reserved or contract-defined name if the branch is actually taken.
+fn match_branch_block(
+    generator: &mut WasmGenerator,
+    builder: &mut InstrSeqBuilder,
+    binding: &ClarityName,
+    body: &SymbolicExpression,
+) -> Result<InstrSeqId, GeneratorError> {
+    if generator.is_already_used_name(binding) {
+        let return_type = clar2wasm_ty(generator.get_expr_type(body).ok_or_else(|| {
+            GeneratorError::TypeError("Expression results must be typed".to_owned())
+        })?);
+        let mut block = builder.dangling_instr_seq(InstrSeqType::new(
+            &mut generator.module.types,
+            &[],
+            &return_type,
+        ));
+        error_mapping::generate_name_already_used_error(generator, &mut block, binding)?;
+        Ok(block.id())
+    } else {
+        generator.block_from_expr(builder, body)
+    }
+}
+
 #[derive(Debug)]
 pub struct Match;
 
@@ -343,13 +368,6 @@ impl ComplexWord for Match {
 
         let match_on = args.get_expr(0)?;
         let success_binding = args.get_name(1)?;
-
-        if generator.is_reserved_name(success_binding) {
-            return Err(GeneratorError::InternalError(format!(
-                "Name already used {success_binding:?}"
-            )));
-        }
-
         let success_body = args.get_expr(2)?;
         // WORKAROND: type set on some/ok body
         generator.set_expr_type(success_body, expr_ty.clone())?;
@@ -374,7 +392,8 @@ impl ComplexWord for Match {
                     .bindings
                     .insert(success_binding.clone(), *inner_type, some_locals);
 
-                let some_block = generator.block_from_expr(builder, success_body)?;
+                let some_block =
+                    match_branch_block(generator, builder, success_binding, success_body)?;
 
                 // we can restore early, since the none branch does not bind anything
                 generator.bindings = saved_bindings;
@@ -394,13 +413,6 @@ impl ComplexWord for Match {
                 let (ok_ty, err_ty) = &*inner_types;
 
                 let err_binding = args.get_name(3)?;
-
-                if generator.is_reserved_name(err_binding) {
-                    return Err(GeneratorError::InternalError(format!(
-                        "Name already used {err_binding:?}"
-                    )));
-                }
-
                 let err_body = args.get_expr(4)?;
                 // Workaround: set type on err body
                 generator.set_expr_type(err_body, expr_ty)?;
@@ -411,7 +423,8 @@ impl ComplexWord for Match {
                 generator
                     .bindings
                     .insert(success_binding.clone(), ok_ty.clone(), ok_locals);
-                let ok_block = generator.block_from_expr(builder, success_body)?;
+                let ok_block =
+                    match_branch_block(generator, builder, success_binding, success_body)?;
 
                 // restore named locals
                 generator.bindings.clone_from(&saved_bindings);
@@ -421,7 +434,7 @@ impl ComplexWord for Match {
                     .bindings
                     .insert(err_binding.clone(), err_ty.clone(), err_locals);
 
-                let err_block = generator.block_from_expr(builder, err_body)?;
+                let err_block = match_branch_block(generator, builder, err_binding, err_body)?;
 
                 // restore named locals again
                 generator.bindings = saved_bindings;
@@ -1037,6 +1050,48 @@ mod tests {
     #[test]
     fn trivial() {
         crosscheck("true", Ok(Some(Value::Bool(true))));
+    }
+
+    /// A `match` binding named after a reserved name is accepted at deploy
+    /// time, then raises `NameAlreadyUsed` at runtime if the branch is
+    /// actually taken.
+    #[test]
+    fn match_binding_shadowing_reserved_name_fails_only_when_branch_taken() {
+        use clarity::vm::errors::RuntimeCheckErrorKind::NameAlreadyUsed;
+
+        // The `err` branch is not taken: the contract publishes and runs.
+        crosscheck(
+            r#"
+(define-private (m (x (response uint uint)))
+    (match x val (+ val u1) err (+ err u10)))
+(m (if true (ok u5) (err u1)))
+            "#,
+            Ok(Some(Value::UInt(6))),
+        );
+
+        // The `err`-named binding's branch is taken: runtime error, as in
+        // the interpreter.
+        crosscheck(
+            r#"
+(define-private (m (x (response uint uint)))
+    (match x val (+ val u1) err (+ err u10)))
+(m (if false (ok u5) (err u1)))
+            "#,
+            Err(VmExecutionError::RuntimeCheck(NameAlreadyUsed(
+                "err".into(),
+            ))),
+        );
+
+        crosscheck(
+            r#"
+(define-private (m (x (optional uint)))
+    (match x err (+ err u2) u0))
+(m (some u5))
+            "#,
+            Err(VmExecutionError::RuntimeCheck(NameAlreadyUsed(
+                "err".into(),
+            ))),
+        );
     }
 
     #[test]
