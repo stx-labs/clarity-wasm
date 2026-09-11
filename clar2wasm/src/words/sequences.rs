@@ -3279,6 +3279,36 @@ mod tests {
         }
 
         #[test]
+        fn map_string_to_int_over_string_ascii() {
+            crosscheck(
+                r#"(map string-to-int? "123")"#,
+                Ok(Some(
+                    Value::cons_list_unsanitized(vec![
+                        Value::some(Value::Int(1)).unwrap(),
+                        Value::some(Value::Int(2)).unwrap(),
+                        Value::some(Value::Int(3)).unwrap(),
+                    ])
+                    .unwrap(),
+                )),
+            );
+        }
+
+        #[test]
+        fn map_string_to_uint_over_string_ascii() {
+            crosscheck(
+                r#"(map string-to-uint? "409")"#,
+                Ok(Some(
+                    Value::cons_list_unsanitized(vec![
+                        Value::some(Value::UInt(4)).unwrap(),
+                        Value::some(Value::UInt(0)).unwrap(),
+                        Value::some(Value::UInt(9)).unwrap(),
+                    ])
+                    .unwrap(),
+                )),
+            );
+        }
+
+        #[test]
         fn map_int_to_ascii() {
             let a = "(map int-to-ascii (list u1 u2 u3))";
             crosscheck(a, evaluate("(list \"1\" \"2\" \"3\")"));
