@@ -1225,13 +1225,17 @@ impl ComplexWord for ElementAt {
 
                     Ok(SequenceElementType::Other(elem_ty.clone()))
                 }
-                TypeSignature::SequenceType(SequenceSubtype::BufferType(_))
-                | TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::ASCII(
+                TypeSignature::SequenceType(SequenceSubtype::BufferType(_)) => {
+                    // The index is the same as the byte-offset, so just leave
+                    // it as-is.
+                    Ok(SequenceElementType::Byte)
+                }
+                TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::ASCII(
                     _,
                 ))) => {
                     // The index is the same as the byte-offset, so just leave
                     // it as-is.
-                    Ok(SequenceElementType::Byte)
+                    Ok(SequenceElementType::AsciiChar)
                 }
                 TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::UTF8(
                     _,
@@ -1282,7 +1286,9 @@ impl ComplexWord for ElementAt {
 
         // Then push a placeholder for the element type.
         match &element_ty {
-            SequenceElementType::Byte | SequenceElementType::UnicodeScalar => {
+            SequenceElementType::Byte
+            | SequenceElementType::AsciiChar
+            | SequenceElementType::UnicodeScalar => {
                 // The element type is an in-memory type, so we need
                 // placeholders for offset and length
                 then.i32_const(0).i32_const(0);
@@ -1312,7 +1318,7 @@ impl ComplexWord for ElementAt {
 
         // Load the value at the specified offset.
         match &element_ty {
-            SequenceElementType::Byte => {
+            SequenceElementType::Byte | SequenceElementType::AsciiChar => {
                 // The element type is a byte (from a string or buffer), so
                 // we need to push the offset and length (1) to the
                 // stack.
@@ -1385,7 +1391,7 @@ impl ComplexWord for ReplaceAt {
         // At this point, we can compute the cost of the function call using the number of elements in the list
         builder.local_get(length);
         match &element_ty {
-            SequenceElementType::Byte => {
+            SequenceElementType::Byte | SequenceElementType::AsciiChar => {
                 // nothing to change here
             }
             SequenceElementType::UnicodeScalar => {
@@ -1449,7 +1455,7 @@ impl ComplexWord for ReplaceAt {
                 // byte-offset into the list.
                 builder.binop(BinaryOp::I64Mul);
             }
-            SequenceElementType::Byte => {
+            SequenceElementType::Byte | SequenceElementType::AsciiChar => {
                 // The index is the same as the byte-offset, so just leave
                 // it as-is.
             }
@@ -1483,7 +1489,9 @@ impl ComplexWord for ReplaceAt {
         // valid value with a max-len of 1. However, using one is a runtime error.
         if matches!(
             element_ty,
-            SequenceElementType::Byte | SequenceElementType::UnicodeScalar
+            SequenceElementType::Byte
+                | SequenceElementType::AsciiChar
+                | SequenceElementType::UnicodeScalar
         ) {
             let repl_len = generator.module.locals.add(ValType::I32);
             let error_id = {
@@ -1545,7 +1553,9 @@ impl ComplexWord for ReplaceAt {
                 // Read the element type from the list.
                 drop_value(&mut then, elem_ty);
             }
-            SequenceElementType::Byte | SequenceElementType::UnicodeScalar => {
+            SequenceElementType::Byte
+            | SequenceElementType::AsciiChar
+            | SequenceElementType::UnicodeScalar => {
                 // The value is a byte or 32-bit scalar, but it's represented by an offset
                 // and length, so drop those.
                 then.drop().drop();
@@ -1576,7 +1586,7 @@ impl ComplexWord for ReplaceAt {
 
         // Write the value to the specified offset.
         match &element_ty {
-            SequenceElementType::Byte => {
+            SequenceElementType::Byte | SequenceElementType::AsciiChar => {
                 // The element type is a byte (from a string or buffer), so
                 // we need to just copy that byte to the specified offset.
 

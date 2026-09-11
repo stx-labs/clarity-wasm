@@ -124,7 +124,7 @@ impl ComplexWord for IndexOf {
         // and again on the stack for the cost computation for epoch <= 2.05.
         builder.local_get(seq_size).local_get(seq_size);
         match &elem_ty {
-            SequenceElementType::Byte => {
+            SequenceElementType::Byte | SequenceElementType::AsciiChar => {
                 // nothing to change here
             }
             SequenceElementType::UnicodeScalar => {
@@ -191,7 +191,7 @@ impl ComplexWord for IndexOf {
                             // STACK: []
                         )
                     }
-                    SequenceElementType::Byte => {
+                    SequenceElementType::Byte | SequenceElementType::AsciiChar => {
                         // The element type is a byte, so we can just push the
                         // offset and size = 1 to the stack.
                         let size = 1;
