@@ -3485,4 +3485,61 @@ mod tests {
             )),
         );
     }
+
+    #[test]
+    fn test_fold_buffer_reverse_32() {
+        let input: Vec<u8> = (0u8..32).collect();
+        let reversed = input.iter().rev().copied().collect();
+        crosscheck(
+            &format!(
+                "
+                    (define-private (prepend-byte (byte (buff 1)) (acc (buff 32)))
+                        (unwrap-panic (as-max-len? (concat byte acc) u32))
+                    )
+                    (define-private (reverse-32 (input (buff 32)))
+                        (fold prepend-byte input 0x)
+                    )
+                    (reverse-32 0x{})
+                ",
+                input.iter().map(|b| format!("{b:02x}")).collect::<String>()
+            ),
+            Ok(Some(Value::buff_from(reversed).unwrap())),
+        );
+    }
+
+    #[test]
+    fn test_fold_buffer_wide_accumulator_from_narrow_initial() {
+        // Same shape with the initial value passed through a function argument, so the
+        // narrow type comes from a parameter rather than a literal.
+        crosscheck(
+            "
+                (define-private (prepend-byte (byte (buff 1)) (acc (buff 40)))
+                    (unwrap-panic (as-max-len? (concat byte acc) u40))
+                )
+                (define-private (reverse-with (input (buff 32)) (init (buff 8)))
+                    (fold prepend-byte input init)
+                )
+                (reverse-with 0x0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20 0xaabb)
+            ",
+            Ok(Some(
+                Value::buff_from((1u8..=32).rev().chain([0xaa, 0xbb]).collect()).unwrap(),
+            )),
+        );
+    }
+
+    #[test]
+    fn test_fold_string_ascii_reverse() {
+        crosscheck(
+            r#"
+                (define-private (prepend-char (c (string-ascii 1)) (acc (string-ascii 32)))
+                    (unwrap-panic (as-max-len? (concat c acc) u32))
+                )
+                (fold prepend-char "abcdefghijklmnopqrstuvwxyz012345" "")
+            "#,
+            Ok(Some(
+                Value::string_ascii_from_bytes(b"543210zyxwvutsrqponmlkjihgfedcba".to_vec())
+                    .unwrap(),
+            )),
+        );
+    }
 }
