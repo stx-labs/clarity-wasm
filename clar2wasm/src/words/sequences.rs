@@ -112,46 +112,47 @@ impl ComplexWord for Fold {
         // (- 6 (- 4 (- 2 0)))
         // ```
 
-        // We allocate some space for the return value
         let expr_ty = generator.get_expr_type(expr).cloned().ok_or_else(|| {
             GeneratorError::TypeError("Fold expression should be typed".to_owned())
         })?;
-        // the `include_repr` argument should be false here, but with our current implementation, we need the full size of the
-        // type without (offset, len), which is a behavior we don't have for now. We are allocating 8 bytes too many.
-        let (return_offset, _) = generator.create_call_stack_local(builder, &expr_ty, true, true);
 
         // We need to find the correct types expected by the function `func` and the result type of the fold expression
         // to make sure everything will be coherent in the end.
-        // This is only needed if we are folding a list and the function is user-defined.
+        // This is only needed if the function is user-defined.
         struct FoldFuncTy {
             elem_ty: TypeSignature,
             acc_ty: TypeSignature,
             return_ty: TypeSignature,
         }
-        let fold_func_ty = {
-            match generator.get_expr_type(sequence).ok_or_else(|| {
-                GeneratorError::TypeError("Folded sequence should be typed".to_owned())
-            })? {
-                TypeSignature::SequenceType(SequenceSubtype::ListType(_)) => {
-                    match generator.get_function_type(func) {
-                        Some(FunctionType::Fixed(FixedFunction { args, returns }))
-                            if args.len() == 2 =>
-                        {
-                            let fold_func_ty = FoldFuncTy {
-                                elem_ty: args[0].signature.clone(),
-                                acc_ty: args[1].signature.clone(),
-                                return_ty: returns.clone(),
-                            };
-                            // set the accumulator type
-                            generator.set_expr_type(initial, fold_func_ty.acc_ty.clone())?;
-                            Some(fold_func_ty)
-                        }
-                        _ => None,
-                    }
-                }
-                _ => None,
+        let fold_func_ty = match generator.get_function_type(func) {
+            Some(FunctionType::Fixed(FixedFunction { args, returns })) if args.len() == 2 => {
+                let fold_func_ty = FoldFuncTy {
+                    elem_ty: args[0].signature.clone(),
+                    acc_ty: args[1].signature.clone(),
+                    return_ty: returns.clone(),
+                };
+                // The initial value can be narrower than the accumulator, like the `0x` of
+                // `(fold prepend-byte input 0x)` for an accumulator of type `(buff 32)`. Since the
+                // typechecker checks the function against both the initial value and the function's
+                // own result, its accumulator argument is the type of everything we hold in the
+                // accumulator during the fold, and the one we have to allocate for.
+                generator.set_expr_type(initial, fold_func_ty.acc_ty.clone())?;
+                Some(fold_func_ty)
             }
+            _ => None,
         };
+
+        // We allocate some space for the return value. When the sequence is empty, the fold returns
+        // the initial value untouched, which can be wider than the expression type: the typechecker
+        // only bounds the function's result with the accumulator type, not with the initial value.
+        // the `include_repr` argument should be false here, but with our current implementation, we need the full size of the
+        // type without (offset, len), which is a behavior we don't have for now. We are allocating 8 bytes too many.
+        let (return_offset, _) = generator.create_call_stack_local(
+            builder,
+            fold_func_ty.as_ref().map_or(&expr_ty, |fft| &fft.acc_ty),
+            true,
+            true,
+        );
 
         // The result type must match the type of the initial value
         let result_clar_ty = generator
@@ -241,9 +242,16 @@ impl ComplexWord for Fold {
             ..
         }) = &fold_func_ty
         {
-            let (l, _) = generator
-                .create_call_stack_bytes(&mut loop_, dt_needed_workspace(expected_elem_ty) as _);
-            generator.duck_type(&mut loop_, &(&elem_ty).into(), expected_elem_ty, Some(l))?;
+            // Only the elements of a list can be represented differently from the type the
+            // function expects. A byte or a unicode scalar is an in-memory sequence, represented
+            // like any wider sequence type the function could ask for.
+            if matches!(elem_ty, SequenceElementType::Other(_)) {
+                let (l, _) = generator.create_call_stack_bytes(
+                    &mut loop_,
+                    dt_needed_workspace(expected_elem_ty) as _,
+                );
+                generator.duck_type(&mut loop_, &(&elem_ty).into(), expected_elem_ty, Some(l))?;
+            }
         }
 
         // Copy the accumulator for the function call. We need a copy otherwise we would overwrite the value
