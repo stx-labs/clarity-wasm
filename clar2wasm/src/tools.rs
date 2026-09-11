@@ -22,6 +22,7 @@ use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPri
 use clarity::vm::{eval_all, ClarityVersion, ContractContext, ContractName, Value};
 use clarity_types::types::TypeSignature;
 use regex::Regex;
+use stacks_common::bounded_format;
 
 use crate::compile;
 use crate::datastore::{BurnDatastore, Datastore, StacksConstants};
@@ -241,7 +242,7 @@ impl TestEnvironment {
                     !is_boot_contract && self.emit_cost_code,
                 )
                 .map_err(|e| {
-                    StaticCheckErrorKind::Unreachable(format!("Compilation failure {e:?}"))
+                    StaticCheckErrorKind::Unreachable(bounded_format!("Compilation failure {e:?}"))
                 })
             })
             .map_err(|e| VmExecutionError::Wasm(WasmError::WasmGeneratorError(format!("{e:?}"))))?;
@@ -346,7 +347,7 @@ impl TestEnvironment {
                     self.version,
                     self.epoch,
                 )
-                .map_err(|e| StaticCheckErrorKind::Unreachable(format!("{e:?}")))?;
+                .map_err(|e| StaticCheckErrorKind::Unreachable(bounded_format!("{e:?}")))?;
 
                 // Run the analysis passes
                 run_analysis(
@@ -360,7 +361,9 @@ impl TestEnvironment {
                     true,
                     ResourceLimiter::unlimited(),
                 )
-                .map_err(|boxed| StaticCheckErrorKind::Unreachable(format!("{:?}", boxed.0)))
+                .map_err(|boxed| {
+                    StaticCheckErrorKind::Unreachable(bounded_format!("{:?}", boxed.0))
+                })
             })
             .map_err(|e| VmExecutionError::Wasm(WasmError::WasmGeneratorError(format!("{e:?}"))))?;
 
@@ -1135,7 +1138,7 @@ fn inner_as_oom_check_snippet(
                     false,
                 )
                 .map_err(|e| {
-                    StaticCheckErrorKind::Unreachable(format!("Compilation failure {e:?}"))
+                    StaticCheckErrorKind::Unreachable(bounded_format!("Compilation failure {e:?}"))
                 })
             })
             .expect("Could not compile contract")
@@ -1162,7 +1165,9 @@ fn inner_as_oom_check_snippet(
                 analysis_db,
                 false,
             )
-            .map_err(|e| StaticCheckErrorKind::Unreachable(format!("Compilation failure {e:?}")))
+            .map_err(|e| {
+                StaticCheckErrorKind::Unreachable(bounded_format!("Compilation failure {e:?}"))
+            })
         })
         .expect("Could not compile snippet")
         .module;
