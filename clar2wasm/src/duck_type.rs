@@ -180,6 +180,14 @@ impl WasmGenerator {
                 builder.local_set(*length);
                 builder.local_set(*offset);
 
+                // A list which can never hold an element is already in the representation of the
+                // target list: its (offset, length) is on the stack, and there is no element to
+                // convert. The element types don't even have to be compatible, since the
+                // typechecker admits an empty list into any list type.
+                if og_ltd.get_max_len() == 0 {
+                    return Ok(());
+                }
+
                 // Create locals for the element target repr.
                 let target_locs = self.create_locals_for_ty(target_elem_ty);
 
@@ -306,7 +314,9 @@ pub fn need_ducktyping(og_ty: &TypeSignature, tg_ty: &TypeSignature) -> bool {
         }
         TypeSignature::SequenceType(SequenceSubtype::ListType(og_ltd)) => {
             if let TypeSignature::SequenceType(SequenceSubtype::ListType(tg_ltd)) = tg_ty {
-                need_ducktyping(og_ltd.get_list_item_type(), tg_ltd.get_list_item_type())
+                // a list which can never hold an element has nothing to convert
+                og_ltd.get_max_len() > 0
+                    && need_ducktyping(og_ltd.get_list_item_type(), tg_ltd.get_list_item_type())
             } else {
                 false
             }
