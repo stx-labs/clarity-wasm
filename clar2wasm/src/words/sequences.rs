@@ -112,46 +112,47 @@ impl ComplexWord for Fold {
         // (- 6 (- 4 (- 2 0)))
         // ```
 
-        // We allocate some space for the return value
         let expr_ty = generator.get_expr_type(expr).cloned().ok_or_else(|| {
             GeneratorError::TypeError("Fold expression should be typed".to_owned())
         })?;
-        // the `include_repr` argument should be false here, but with our current implementation, we need the full size of the
-        // type without (offset, len), which is a behavior we don't have for now. We are allocating 8 bytes too many.
-        let (return_offset, _) = generator.create_call_stack_local(builder, &expr_ty, true, true);
 
         // We need to find the correct types expected by the function `func` and the result type of the fold expression
         // to make sure everything will be coherent in the end.
-        // This is only needed if we are folding a list and the function is user-defined.
+        // This is only needed if the function is user-defined.
         struct FoldFuncTy {
             elem_ty: TypeSignature,
             acc_ty: TypeSignature,
             return_ty: TypeSignature,
         }
-        let fold_func_ty = {
-            match generator.get_expr_type(sequence).ok_or_else(|| {
-                GeneratorError::TypeError("Folded sequence should be typed".to_owned())
-            })? {
-                TypeSignature::SequenceType(SequenceSubtype::ListType(_)) => {
-                    match generator.get_function_type(func) {
-                        Some(FunctionType::Fixed(FixedFunction { args, returns }))
-                            if args.len() == 2 =>
-                        {
-                            let fold_func_ty = FoldFuncTy {
-                                elem_ty: args[0].signature.clone(),
-                                acc_ty: args[1].signature.clone(),
-                                return_ty: returns.clone(),
-                            };
-                            // set the accumulator type
-                            generator.set_expr_type(initial, fold_func_ty.acc_ty.clone())?;
-                            Some(fold_func_ty)
-                        }
-                        _ => None,
-                    }
-                }
-                _ => None,
+        let fold_func_ty = match generator.get_function_type(func) {
+            Some(FunctionType::Fixed(FixedFunction { args, returns })) if args.len() == 2 => {
+                let fold_func_ty = FoldFuncTy {
+                    elem_ty: args[0].signature.clone(),
+                    acc_ty: args[1].signature.clone(),
+                    return_ty: returns.clone(),
+                };
+                // The initial value can be narrower than the accumulator, like the `0x` of
+                // `(fold prepend-byte input 0x)` for an accumulator of type `(buff 32)`. Since the
+                // typechecker checks the function against both the initial value and the function's
+                // own result, its accumulator argument is the type of everything we hold in the
+                // accumulator during the fold, and the one we have to allocate for.
+                generator.set_expr_type(initial, fold_func_ty.acc_ty.clone())?;
+                Some(fold_func_ty)
             }
+            _ => None,
         };
+
+        // We allocate some space for the return value. When the sequence is empty, the fold returns
+        // the initial value untouched, which can be wider than the expression type: the typechecker
+        // only bounds the function's result with the accumulator type, not with the initial value.
+        // the `include_repr` argument should be false here, but with our current implementation, we need the full size of the
+        // type without (offset, len), which is a behavior we don't have for now. We are allocating 8 bytes too many.
+        let (return_offset, _) = generator.create_call_stack_local(
+            builder,
+            fold_func_ty.as_ref().map_or(&expr_ty, |fft| &fft.acc_ty),
+            true,
+            true,
+        );
 
         // The result type must match the type of the initial value
         let result_clar_ty = generator
@@ -241,9 +242,16 @@ impl ComplexWord for Fold {
             ..
         }) = &fold_func_ty
         {
-            let (l, _) = generator
-                .create_call_stack_bytes(&mut loop_, dt_needed_workspace(expected_elem_ty) as _);
-            generator.duck_type(&mut loop_, &(&elem_ty).into(), expected_elem_ty, Some(l))?;
+            // Only the elements of a list can be represented differently from the type the
+            // function expects. A byte or a unicode scalar is an in-memory sequence, represented
+            // like any wider sequence type the function could ask for.
+            if matches!(elem_ty, SequenceElementType::Other(_)) {
+                let (l, _) = generator.create_call_stack_bytes(
+                    &mut loop_,
+                    dt_needed_workspace(expected_elem_ty) as _,
+                );
+                generator.duck_type(&mut loop_, &(&elem_ty).into(), expected_elem_ty, Some(l))?;
+            }
         }
 
         // Copy the accumulator for the function call. We need a copy otherwise we would overwrite the value
@@ -1225,13 +1233,17 @@ impl ComplexWord for ElementAt {
 
                     Ok(SequenceElementType::Other(elem_ty.clone()))
                 }
-                TypeSignature::SequenceType(SequenceSubtype::BufferType(_))
-                | TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::ASCII(
+                TypeSignature::SequenceType(SequenceSubtype::BufferType(_)) => {
+                    // The index is the same as the byte-offset, so just leave
+                    // it as-is.
+                    Ok(SequenceElementType::Byte)
+                }
+                TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::ASCII(
                     _,
                 ))) => {
                     // The index is the same as the byte-offset, so just leave
                     // it as-is.
-                    Ok(SequenceElementType::Byte)
+                    Ok(SequenceElementType::AsciiChar)
                 }
                 TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::UTF8(
                     _,
@@ -1282,7 +1294,9 @@ impl ComplexWord for ElementAt {
 
         // Then push a placeholder for the element type.
         match &element_ty {
-            SequenceElementType::Byte | SequenceElementType::UnicodeScalar => {
+            SequenceElementType::Byte
+            | SequenceElementType::AsciiChar
+            | SequenceElementType::UnicodeScalar => {
                 // The element type is an in-memory type, so we need
                 // placeholders for offset and length
                 then.i32_const(0).i32_const(0);
@@ -1312,7 +1326,7 @@ impl ComplexWord for ElementAt {
 
         // Load the value at the specified offset.
         match &element_ty {
-            SequenceElementType::Byte => {
+            SequenceElementType::Byte | SequenceElementType::AsciiChar => {
                 // The element type is a byte (from a string or buffer), so
                 // we need to push the offset and length (1) to the
                 // stack.
@@ -1385,7 +1399,7 @@ impl ComplexWord for ReplaceAt {
         // At this point, we can compute the cost of the function call using the number of elements in the list
         builder.local_get(length);
         match &element_ty {
-            SequenceElementType::Byte => {
+            SequenceElementType::Byte | SequenceElementType::AsciiChar => {
                 // nothing to change here
             }
             SequenceElementType::UnicodeScalar => {
@@ -1449,7 +1463,7 @@ impl ComplexWord for ReplaceAt {
                 // byte-offset into the list.
                 builder.binop(BinaryOp::I64Mul);
             }
-            SequenceElementType::Byte => {
+            SequenceElementType::Byte | SequenceElementType::AsciiChar => {
                 // The index is the same as the byte-offset, so just leave
                 // it as-is.
             }
@@ -1483,7 +1497,9 @@ impl ComplexWord for ReplaceAt {
         // valid value with a max-len of 1. However, using one is a runtime error.
         if matches!(
             element_ty,
-            SequenceElementType::Byte | SequenceElementType::UnicodeScalar
+            SequenceElementType::Byte
+                | SequenceElementType::AsciiChar
+                | SequenceElementType::UnicodeScalar
         ) {
             let repl_len = generator.module.locals.add(ValType::I32);
             let error_id = {
@@ -1545,7 +1561,9 @@ impl ComplexWord for ReplaceAt {
                 // Read the element type from the list.
                 drop_value(&mut then, elem_ty);
             }
-            SequenceElementType::Byte | SequenceElementType::UnicodeScalar => {
+            SequenceElementType::Byte
+            | SequenceElementType::AsciiChar
+            | SequenceElementType::UnicodeScalar => {
                 // The value is a byte or 32-bit scalar, but it's represented by an offset
                 // and length, so drop those.
                 then.drop().drop();
@@ -1576,7 +1594,7 @@ impl ComplexWord for ReplaceAt {
 
         // Write the value to the specified offset.
         match &element_ty {
-            SequenceElementType::Byte => {
+            SequenceElementType::Byte | SequenceElementType::AsciiChar => {
                 // The element type is a byte (from a string or buffer), so
                 // we need to just copy that byte to the specified offset.
 
@@ -1898,6 +1916,8 @@ impl ComplexWord for Slice {
 #[cfg(test)]
 mod tests {
     use clarity::vm::Value;
+    use clarity_types::types::TupleData;
+    use clarity_types::ClarityName;
 
     use crate::tools::{crosscheck, crosscheck_compare_only, evaluate, interpret, TestConfig};
 
@@ -3267,6 +3287,36 @@ mod tests {
         }
 
         #[test]
+        fn map_string_to_int_over_string_ascii() {
+            crosscheck(
+                r#"(map string-to-int? "123")"#,
+                Ok(Some(
+                    Value::cons_list_unsanitized(vec![
+                        Value::some(Value::Int(1)).unwrap(),
+                        Value::some(Value::Int(2)).unwrap(),
+                        Value::some(Value::Int(3)).unwrap(),
+                    ])
+                    .unwrap(),
+                )),
+            );
+        }
+
+        #[test]
+        fn map_string_to_uint_over_string_ascii() {
+            crosscheck(
+                r#"(map string-to-uint? "409")"#,
+                Ok(Some(
+                    Value::cons_list_unsanitized(vec![
+                        Value::some(Value::UInt(4)).unwrap(),
+                        Value::some(Value::UInt(0)).unwrap(),
+                        Value::some(Value::UInt(9)).unwrap(),
+                    ])
+                    .unwrap(),
+                )),
+            );
+        }
+
+        #[test]
         fn map_int_to_ascii() {
             let a = "(map int-to-ascii (list u1 u2 u3))";
             crosscheck(a, evaluate("(list \"1\" \"2\" \"3\")"));
@@ -3368,5 +3418,128 @@ mod tests {
         );
 
         crosscheck(snippet, expected);
+    }
+
+    #[test]
+    fn test_map_string_ascii_wide_param() {
+        crosscheck(
+            r#"
+                (define-private (widen (c (string-ascii 20)))
+                    (unwrap-panic (as-max-len? (concat c "!") u20))
+                )
+                (map widen "abc")
+            "#,
+            Ok(Some(
+                Value::cons_list_unsanitized(
+                    ["a!", "b!", "c!"]
+                        .into_iter()
+                        .map(|s| Value::string_ascii_from_bytes(s.as_bytes().to_vec()).unwrap())
+                        .collect(),
+                )
+                .unwrap(),
+            )),
+        );
+    }
+
+    #[test]
+    fn test_map_string_ascii_and_buffer_wide_params() {
+        // Both byte-sized element kinds at once: the string must be duck-typed to a
+        // string, the buffer to a buffer.
+        crosscheck(
+            r#"
+                (define-private (pair (c (string-ascii 8)) (b (buff 8)))
+                    { c: c, b: b }
+                )
+                (map pair "ab" 0x0102)
+            "#,
+            Ok(Some(
+                Value::cons_list_unsanitized(vec![
+                    Value::from(
+                        TupleData::from_data(vec![
+                            (
+                                ClarityName::from_literal("c"),
+                                Value::string_ascii_from_bytes(b"a".to_vec()).unwrap(),
+                            ),
+                            (
+                                ClarityName::from_literal("b"),
+                                Value::buff_from(vec![1]).unwrap(),
+                            ),
+                        ])
+                        .unwrap(),
+                    ),
+                    Value::from(
+                        TupleData::from_data(vec![
+                            (
+                                ClarityName::from_literal("c"),
+                                Value::string_ascii_from_bytes(b"b".to_vec()).unwrap(),
+                            ),
+                            (
+                                ClarityName::from_literal("b"),
+                                Value::buff_from(vec![2]).unwrap(),
+                            ),
+                        ])
+                        .unwrap(),
+                    ),
+                ])
+                .unwrap(),
+            )),
+        );
+    }
+
+    #[test]
+    fn test_fold_buffer_reverse_32() {
+        let input: Vec<u8> = (0u8..32).collect();
+        let reversed = input.iter().rev().copied().collect();
+        crosscheck(
+            &format!(
+                "
+                    (define-private (prepend-byte (byte (buff 1)) (acc (buff 32)))
+                        (unwrap-panic (as-max-len? (concat byte acc) u32))
+                    )
+                    (define-private (reverse-32 (input (buff 32)))
+                        (fold prepend-byte input 0x)
+                    )
+                    (reverse-32 0x{})
+                ",
+                input.iter().map(|b| format!("{b:02x}")).collect::<String>()
+            ),
+            Ok(Some(Value::buff_from(reversed).unwrap())),
+        );
+    }
+
+    #[test]
+    fn test_fold_buffer_wide_accumulator_from_narrow_initial() {
+        // Same shape with the initial value passed through a function argument, so the
+        // narrow type comes from a parameter rather than a literal.
+        crosscheck(
+            "
+                (define-private (prepend-byte (byte (buff 1)) (acc (buff 40)))
+                    (unwrap-panic (as-max-len? (concat byte acc) u40))
+                )
+                (define-private (reverse-with (input (buff 32)) (init (buff 8)))
+                    (fold prepend-byte input init)
+                )
+                (reverse-with 0x0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20 0xaabb)
+            ",
+            Ok(Some(
+                Value::buff_from((1u8..=32).rev().chain([0xaa, 0xbb]).collect()).unwrap(),
+            )),
+        );
+    }
+
+    #[test]
+    fn test_fold_string_ascii_reverse() {
+        crosscheck(
+            r#"
+                (define-private (prepend-char (c (string-ascii 1)) (acc (string-ascii 32)))
+                    (unwrap-panic (as-max-len? (concat c acc) u32))
+                )
+                (fold prepend-char "abcdefghijklmnopqrstuvwxyz012345" "")
+            "#,
+            Ok(Some(
+                Value::string_ascii_from_bytes(b"543210zyxwvutsrqponmlkjihgfedcba".to_vec())
+                    .unwrap(),
+            )),
+        );
     }
 }

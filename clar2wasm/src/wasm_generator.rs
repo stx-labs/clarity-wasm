@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use clarity::vm::analysis::ContractAnalysis;
 use clarity::vm::diagnostic::DiagnosableError;
-use clarity::vm::types::signatures::{CallableSubtype, StringUTF8Length};
+use clarity::vm::types::signatures::CallableSubtype;
 use clarity::vm::types::{
     ASCIIData, CharType, FixedFunction, FunctionType, ListTypeData, PrincipalData,
     QualifiedContractIdentifier, SequenceData, SequenceSubtype, StringSubtype, TraitIdentifier,
@@ -249,8 +249,11 @@ pub(crate) fn clar2wasm_ty(ty: &TypeSignature) -> Vec<ValType> {
 
 #[derive(Debug)]
 pub enum SequenceElementType {
-    /// A byte, from a string-ascii or buffer.
+    /// A byte, from a buffer.
     Byte,
+    /// A character, from a string-ascii. It is represented like a [`Self::Byte`], but its Clarity
+    /// type is a `(string-ascii 1)`.
+    AsciiChar,
     /// A 32-bit unicode scalar value, from a string-utf8.
     UnicodeScalar,
     /// Any other type.
@@ -260,7 +263,7 @@ pub enum SequenceElementType {
 impl SequenceElementType {
     pub fn type_size(&self) -> i32 {
         match self {
-            SequenceElementType::Byte => 1,
+            SequenceElementType::Byte | SequenceElementType::AsciiChar => 1,
             SequenceElementType::UnicodeScalar => 4,
             SequenceElementType::Other(ty) => get_type_size(ty),
         }
@@ -273,7 +276,7 @@ impl SequenceElementType {
         offset: LocalId,
     ) -> Result<(), GeneratorError> {
         match self {
-            SequenceElementType::Byte => {
+            SequenceElementType::Byte | SequenceElementType::AsciiChar => {
                 builder.local_get(offset).i32_const(1);
             }
             SequenceElementType::UnicodeScalar => {
@@ -295,9 +298,11 @@ impl TryFrom<&TypeSignature> for SequenceElementType {
             TypeSignature::SequenceType(SequenceSubtype::ListType(lt)) => {
                 Ok(SequenceElementType::Other(lt.get_list_item_type().clone()))
             }
-            TypeSignature::SequenceType(SequenceSubtype::BufferType(_))
-            | TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::ASCII(_))) => {
+            TypeSignature::SequenceType(SequenceSubtype::BufferType(_)) => {
                 Ok(SequenceElementType::Byte)
+            }
+            TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::ASCII(_))) => {
+                Ok(SequenceElementType::AsciiChar)
             }
             TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::UTF8(_))) => {
                 Ok(SequenceElementType::UnicodeScalar)
@@ -313,15 +318,9 @@ impl From<&SequenceElementType> for TypeSignature {
     fn from(se: &SequenceElementType) -> Self {
         match se {
             SequenceElementType::Other(o) => o.clone(),
-            // Techically, a Byte could also be a (string-ascii 1), but not having this distinction makes
-            // the code cleaner where this function is used.
-            SequenceElementType::Byte => TypeSignature::BUFFER_1.clone(),
-            SequenceElementType::UnicodeScalar => {
-                TypeSignature::SequenceType(SequenceSubtype::StringType(StringSubtype::UTF8(
-                    #[allow(clippy::unwrap_used)]
-                    StringUTF8Length::try_from(1u32).unwrap(),
-                )))
-            }
+            SequenceElementType::Byte => TypeSignature::BUFFER_1,
+            SequenceElementType::AsciiChar => TypeSignature::STRING_ASCII_MIN,
+            SequenceElementType::UnicodeScalar => TypeSignature::STRING_UTF8_MIN,
         }
     }
 }
@@ -2114,27 +2113,11 @@ impl WasmGenerator {
         &self,
         sequence: &SymbolicExpression,
     ) -> Result<SequenceElementType, GeneratorError> {
-        match self.get_expr_type(sequence).ok_or_else(|| {
-            GeneratorError::TypeError("sequence expression must be typed".to_owned())
-        })? {
-            TypeSignature::SequenceType(seq_ty) => match &seq_ty {
-                SequenceSubtype::ListType(list_type) => Ok(SequenceElementType::Other(
-                    list_type.get_list_item_type().clone(),
-                )),
-                SequenceSubtype::BufferType(_)
-                | SequenceSubtype::StringType(StringSubtype::ASCII(_)) => {
-                    // For buffer and string-ascii return none, which indicates
-                    // that elements should be read byte-by-byte.
-                    Ok(SequenceElementType::Byte)
-                }
-                SequenceSubtype::StringType(StringSubtype::UTF8(_)) => {
-                    Ok(SequenceElementType::UnicodeScalar)
-                }
-            },
-            _ => Err(GeneratorError::TypeError(
-                "expected sequence type".to_string(),
-            )),
-        }
+        self.get_expr_type(sequence)
+            .ok_or_else(|| {
+                GeneratorError::TypeError("sequence expression must be typed".to_owned())
+            })?
+            .try_into()
     }
 
     /// Ensure enough work space is going to be available in memory

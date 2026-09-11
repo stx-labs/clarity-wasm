@@ -180,6 +180,14 @@ impl WasmGenerator {
                 builder.local_set(*length);
                 builder.local_set(*offset);
 
+                // A list which can never hold an element is already in the representation of the
+                // target list: its (offset, length) is on the stack, and there is no element to
+                // convert. The element types don't even have to be compatible, since the
+                // typechecker admits an empty list into any list type.
+                if og_ltd.get_max_len() == 0 {
+                    return Ok(());
+                }
+
                 // Create locals for the element target repr.
                 let target_locs = self.create_locals_for_ty(target_elem_ty);
 
@@ -288,14 +296,6 @@ pub fn need_ducktyping(og_ty: &TypeSignature, tg_ty: &TypeSignature) -> bool {
                 | TypeSignature::CallableType(_)
                 | TypeSignature::TraitReferenceType(_),
         ),
-        // This is a workaround for SequenceElementType. If I have a string-ascii, its element becomes a Byte,
-        // and getting the TypeSignature from a byte gives us a (buff 1). We loose an information here, but it
-        // makes the code cleaner everywhere else, so this workaround exist.
-        &TypeSignature::BUFFER_1 => !matches!(
-            tg_ty,
-            TypeSignature::SequenceType(SequenceSubtype::BufferType(_))
-                | &TypeSignature::STRING_ASCII_MIN
-        ),
         TypeSignature::SequenceType(SequenceSubtype::BufferType(_)) => !matches!(
             tg_ty,
             TypeSignature::SequenceType(SequenceSubtype::BufferType(_))
@@ -314,7 +314,9 @@ pub fn need_ducktyping(og_ty: &TypeSignature, tg_ty: &TypeSignature) -> bool {
         }
         TypeSignature::SequenceType(SequenceSubtype::ListType(og_ltd)) => {
             if let TypeSignature::SequenceType(SequenceSubtype::ListType(tg_ltd)) = tg_ty {
-                need_ducktyping(og_ltd.get_list_item_type(), tg_ltd.get_list_item_type())
+                // a list which can never hold an element has nothing to convert
+                og_ltd.get_max_len() > 0
+                    && need_ducktyping(og_ltd.get_list_item_type(), tg_ltd.get_list_item_type())
             } else {
                 false
             }
@@ -376,6 +378,7 @@ mod tests {
     #[allow(unused_imports)]
     use clarity_types::ContractName;
 
+    use super::need_ducktyping;
     #[allow(unused_imports)]
     use crate::tools::crosscheck_multi_contract;
     use crate::wasm_generator::WasmGenerator;
@@ -622,6 +625,60 @@ mod tests {
             )
             .unwrap(),
         ));
+
+        duck_type_test(&value, &og_ty, &target_ty);
+    }
+
+    #[test]
+    fn empty_list_needs_no_ducktyping() {
+        let target_ty = TypeSignature::list_of(TypeSignature::BUFFER_1, 8).unwrap();
+
+        assert!(!need_ducktyping(
+            &TypeSignature::list_of(TypeSignature::IntType, 0).unwrap(),
+            &target_ty
+        ));
+
+        // the very same element types have to be converted as soon as the list can hold an element
+        assert!(need_ducktyping(
+            &TypeSignature::list_of(TypeSignature::IntType, 1).unwrap(),
+            &target_ty
+        ));
+    }
+
+    // The typechecker admits an empty list into any list type without ever looking at its element
+    // type, so both of these duck-type a list whose elements could not be converted at all.
+    #[test]
+    fn duck_type_empty_list_with_incompatible_elements() {
+        let value = Value::cons_list_unsanitized(vec![]).unwrap();
+        let og_ty = TypeSignature::SequenceType(SequenceSubtype::ListType(
+            ListTypeData::new_list(TypeSignature::IntType, 0).unwrap(),
+        ));
+
+        let target_ty = TypeSignature::SequenceType(SequenceSubtype::ListType(
+            ListTypeData::new_list(TypeSignature::BUFFER_1, 8).unwrap(),
+        ));
+
+        duck_type_test(&value, &og_ty, &target_ty);
+    }
+
+    #[test]
+    fn duck_type_response_with_empty_list_from_ok() {
+        // the err type is what makes the response need duck-typing, so the empty list is reached
+        // from the recursion, which doesn't check whether a conversion is needed.
+        let value = Value::okay(Value::cons_list_unsanitized(vec![]).unwrap()).unwrap();
+        let og_ty = TypeSignature::ResponseType(Box::new((
+            TypeSignature::SequenceType(SequenceSubtype::ListType(
+                ListTypeData::new_list(TypeSignature::IntType, 0).unwrap(),
+            )),
+            TypeSignature::NoType,
+        )));
+
+        let target_ty = TypeSignature::ResponseType(Box::new((
+            TypeSignature::SequenceType(SequenceSubtype::ListType(
+                ListTypeData::new_list(TypeSignature::BUFFER_1, 8).unwrap(),
+            )),
+            TypeSignature::PrincipalType,
+        )));
 
         duck_type_test(&value, &og_ty, &target_ty);
     }
