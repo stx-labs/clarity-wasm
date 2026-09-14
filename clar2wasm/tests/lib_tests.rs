@@ -74,7 +74,9 @@ macro_rules! test_multi_contract_init {
                             false,
                         )
                         .map_err(|e| {
-                            StaticCheckErrorKind::Unreachable(format!("Compilation failure {e:?}"))
+                            StaticCheckErrorKind::Unreachable(stacks_common::bounded_format!(
+                                "Compilation failure {e:?}"
+                            ))
                         })
                     })
                     .map_err(|e| {
@@ -4412,7 +4414,11 @@ fn test_runtime_error_during_init_unwinds_contexts() {
                 analysis_db,
                 false,
             )
-            .map_err(|e| StaticCheckErrorKind::Unreachable(format!("Compilation failure {e:?}")))
+            .map_err(|e| {
+                StaticCheckErrorKind::Unreachable(stacks_common::bounded_format!(
+                    "Compilation failure {e:?}"
+                ))
+            })
         })
         .expect("Failed to compile contract.");
 

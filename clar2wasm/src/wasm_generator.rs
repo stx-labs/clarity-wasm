@@ -142,12 +142,12 @@ pub enum FunctionKind {
 }
 
 impl DiagnosableError for GeneratorError {
-    fn message(&self) -> String {
+    fn write_message(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            GeneratorError::NotImplemented => "Not implemented".to_string(),
-            GeneratorError::InternalError(msg) => format!("Internal error: {msg}"),
-            GeneratorError::TypeError(msg) => format!("Type error: {msg}"),
-            GeneratorError::ArgumentCountMismatch => "Argument count mismatch".to_string(),
+            GeneratorError::NotImplemented => write!(f, "Not implemented"),
+            GeneratorError::InternalError(msg) => write!(f, "Internal error: {msg}"),
+            GeneratorError::TypeError(msg) => write!(f, "Type error: {msg}"),
+            GeneratorError::ArgumentCountMismatch => write!(f, "Argument count mismatch"),
         }
     }
 

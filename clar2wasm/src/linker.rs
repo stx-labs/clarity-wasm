@@ -5221,13 +5221,11 @@ fn link_contract_call_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
                     ))),
                 )?;
                 let mut args = Vec::new();
-                let mut args_sizes = Vec::new();
                 let mut arg_offset = args_offset;
                 // Read the arguments from the Wasm memory
                 for arg_ty in function.get_arg_types() {
                     let arg =
                         read_from_wasm_indirect(memory, &mut caller, arg_ty, arg_offset, epoch)?;
-                    args_sizes.push(arg.size()? as u64);
                     args.push(arg);
 
                     arg_offset += get_type_size(arg_ty);
@@ -5244,16 +5242,6 @@ fn link_contract_call_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
                 let mut call_stack = caller.data().call_stack.clone();
                 let sender = caller.data().sender.clone();
                 let sponsor = caller.data().sponsor.clone();
-
-                let short_circuit_cost = caller
-                    .data_mut()
-                    .global_context
-                    .cost_track
-                    .short_circuit_contract_call(
-                        contract_id,
-                        &ClarityName::try_from(function_name.clone())?,
-                        &args_sizes,
-                    )?;
 
                 // We get the current cost values from the caller's globals.
                 let mut cost_globals = caller
@@ -5275,23 +5263,12 @@ fn link_contract_call_fn(linker: &mut Linker<ClarityWasmContext>) -> Result<(), 
                     caller: Some(caller_contract),
                     sponsor,
                 };
-                let result = if short_circuit_cost {
-                    exec_state.run_free(&invoke_ctx, |exec_state, free_invoke_ctx| {
-                        exec_state.execute_contract_from_wasm(
-                            free_invoke_ctx,
-                            contract_id,
-                            &function_name,
-                            &args,
-                        )
-                    })
-                } else {
-                    exec_state.execute_contract_from_wasm(
-                        &invoke_ctx,
-                        contract_id,
-                        &function_name,
-                        &args,
-                    )
-                }?;
+                let result = exec_state.execute_contract_from_wasm(
+                    &invoke_ctx,
+                    contract_id,
+                    &function_name,
+                    &args,
+                )?;
 
                 // The cost meter in we get back from the global context is updated in stacks-core/clarity/src/vm/clarity_wasm.rs::call_function().
                 // We then simply retrieve it to update the current WASM's cost global with the updated costs.

@@ -91,6 +91,7 @@ impl ValueEnum for WrappedClarityVersion {
             ClarityVersion::Clarity4 => Some(PossibleValue::new("4")),
             ClarityVersion::Clarity5 => Some(PossibleValue::new("5")),
             ClarityVersion::Clarity6 => Some(PossibleValue::new("6")),
+            ClarityVersion::Clarity7 => Some(PossibleValue::new("7")),
         }
     }
 }
