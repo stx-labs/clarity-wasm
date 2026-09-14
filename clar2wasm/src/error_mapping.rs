@@ -176,10 +176,10 @@ fn referror_to_error<T>(referror: &T, placeholder_error: T) -> T {
     // held in the referror.
     unsafe { core::ptr::replace((referror as *const T) as *mut T, placeholder_error) }
 }
-pub(crate) fn resolve_error<'a, 'b: 'a, 'hooks: 'a>(
+pub(crate) fn resolve_error<'a, 'b: 'a>(
     e: wasmtime::Error,
     instance: Instance,
-    mut store: impl AsContextMut<Data = ClarityWasmContext<'a, 'b, 'hooks>>,
+    mut store: impl AsContextMut<Data = ClarityWasmContext<'a, 'b>>,
     epoch_id: &StacksEpochId,
 ) -> VmExecutionError {
     if let Some(vm_error) = e.root_cause().downcast_ref::<VmExecutionError>() {
@@ -223,9 +223,9 @@ pub(crate) fn resolve_error<'a, 'b: 'a, 'hooks: 'a>(
 /// Returns a Clarity `Error` that corresponds to the runtime error encountered during
 /// WebAssembly execution.
 ///
-fn from_runtime_error_code<'a, 'b: 'a, 'hooks: 'a>(
+fn from_runtime_error_code<'a, 'b: 'a>(
     instance: Instance,
-    mut store: impl AsContextMut<Data = ClarityWasmContext<'a, 'b, 'hooks>>,
+    mut store: impl AsContextMut<Data = ClarityWasmContext<'a, 'b>>,
     e: wasmtime::Error,
     epoch_id: &StacksEpochId,
 ) -> VmExecutionError {
@@ -440,9 +440,9 @@ fn extract_expected_and_got(bytes: &[u8]) -> (usize, usize) {
 ///
 /// Returns a deserialized Clarity `Value` representing the short return value.
 ///
-fn short_return_value<'a, 'b: 'a, 'hooks: 'a>(
+fn short_return_value<'a, 'b: 'a>(
     instance: &Instance,
-    store: &mut impl AsContextMut<Data = ClarityWasmContext<'a, 'b, 'hooks>>,
+    store: &mut impl AsContextMut<Data = ClarityWasmContext<'a, 'b>>,
     epoch_id: &StacksEpochId,
 ) -> Value {
     let val_offset = get_global_i32(instance, store, "runtime-error-value-offset");
