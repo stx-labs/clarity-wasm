@@ -21,23 +21,24 @@ impl ComplexWord for Print {
         &self,
         generator: &mut WasmGenerator,
         builder: &mut walrus::InstrSeqBuilder,
-        _expr: &SymbolicExpression,
+        expr: &SymbolicExpression,
         args: &[SymbolicExpression],
     ) -> Result<(), GeneratorError> {
         check_args!(generator, builder, 1, args.len(), ArgumentCountCheck::Exact);
 
         let value = args.get_expr(0)?;
 
+        // WORKAROUND: set full type on print's argument
+        let ty = generator
+            .get_expr_type(expr)
+            .ok_or_else(|| GeneratorError::TypeError("print expression must be typed".to_owned()))?
+            .clone();
+        generator.set_expr_type(value, ty.clone())?;
+
         // Traverse the value, leaving it on the data stack
         generator.traverse_expr(builder, value)?;
 
         // Save the value to locals
-        let ty = generator
-            .get_expr_type(value)
-            .ok_or_else(|| {
-                GeneratorError::TypeError("print value expression must be typed".to_owned())
-            })?
-            .clone();
         let val_locals = generator.save_to_locals(builder, &ty, true);
 
         let ty_for_serde = generator.type_for_serialization(&ty);
@@ -274,6 +275,64 @@ mod tests {
                     data: "abc".bytes().map(|b| vec![b]).collect(),
                 },
             ))))),
+        );
+    }
+
+    const PRINT_ERR_IN_MATCH: &str = r#"
+(define-private (inner (x bool))
+  (if x (ok {a: u1, b: u2}) (err 7)))
+(define-private (outer (x bool))
+  (match (inner x)
+    s (ok s)
+    e (print (err (to-uint e)))))
+(define-read-only (run (x bool)) (outer x))
+"#;
+
+    #[test]
+    fn print_err_inside_match_ok_branch() {
+        let expected = Value::okay(Value::Tuple(
+            TupleData::from_data(vec![
+                (ClarityName::from_literal("a"), Value::UInt(1)),
+                (ClarityName::from_literal("b"), Value::UInt(2)),
+            ])
+            .unwrap(),
+        ))
+        .unwrap();
+        crosscheck(
+            &format!("{PRINT_ERR_IN_MATCH} (run true)"),
+            Ok(Some(expected)),
+        );
+    }
+
+    #[test]
+    fn print_err_inside_match_err_branch() {
+        crosscheck(
+            &format!("{PRINT_ERR_IN_MATCH} (run false)"),
+            Ok(Some(Value::err_uint(7))),
+        );
+    }
+
+    #[test]
+    fn print_ok_inside_if_widened() {
+        // `if` pushes the unified type down onto both branches; `print` must
+        // forward it to its argument.
+        crosscheck(
+            "(if true (print (ok u1)) (err {a: 1}))",
+            Ok(Some(Value::okay(Value::UInt(1)).unwrap())),
+        );
+    }
+
+    #[test]
+    fn print_none_inside_match_widened() {
+        crosscheck(
+            r#"
+(define-private (f (x (optional int)))
+  (match x
+    v (some (+ v 1))
+    (print none)))
+(f (some 41))
+"#,
+            Ok(Some(Value::some(Value::Int(42)).unwrap())),
         );
     }
 }
