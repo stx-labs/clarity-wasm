@@ -14,7 +14,7 @@ use walrus::{FunctionBuilder, InstrSeqBuilder, MemoryId};
 use wasmtime::{Engine, Module, Store};
 
 use crate::datastore::{BurnDatastore, Datastore, StacksConstants};
-use crate::initialize::ClarityWasmContext;
+use crate::initialize::{ClarityWasmContext, ClarityWasmStore};
 use crate::linker::{dummy_linker, link_cost_globals};
 use crate::tools::TestConfig;
 use crate::wasm_generator::{
@@ -230,7 +230,7 @@ fn with_test_store<R>(
     engine: &Engine,
     epoch: StacksEpochId,
     version: ClarityVersion,
-    f: impl FnOnce(&mut Store<ClarityWasmContext>) -> R,
+    f: impl FnOnce(&mut Store<ClarityWasmContext<'static, 'static>>) -> R,
 ) -> R {
     let burn_datastore = BurnDatastore::new(StacksConstants::default());
     let mut datastore = Datastore::new();
@@ -253,6 +253,6 @@ fn with_test_store<R>(
         None,
         None,
     );
-    let mut store = Store::new(engine, context);
+    let mut store = ClarityWasmStore::new(engine, context);
     f(&mut store)
 }
