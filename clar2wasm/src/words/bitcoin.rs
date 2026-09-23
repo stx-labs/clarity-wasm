@@ -1,9 +1,13 @@
+use clarity::vm::types::{SequenceSubtype, TypeSignature};
 use clarity::vm::{ClarityName, SymbolicExpression};
+use walrus::ir::BinaryOp;
+use walrus::ValType;
 
 use super::{ComplexWord, Word};
 use crate::check_args;
+use crate::cost::WordCharge;
 use crate::wasm_generator::{ArgumentsExt, GeneratorError, WasmGenerator};
-use crate::wasm_utils::ArgumentCountCheck;
+use crate::wasm_utils::{get_type_size, ArgumentCountCheck};
 
 #[derive(Debug)]
 pub struct VerifyMerkleProof;
@@ -28,7 +32,29 @@ impl ComplexWord for VerifyMerkleProof {
         generator.traverse_expr(builder, args.get_expr(1)?)?;
         generator.traverse_expr(builder, args.get_expr(2)?)?;
         generator.traverse_expr(builder, args.get_expr(3)?)?;
-        generator.traverse_expr(builder, args.get_expr(4)?)?;
+
+        let siblings = args.get_expr(4)?;
+        let element_size = match generator.get_expr_type(siblings) {
+            Some(TypeSignature::SequenceType(SequenceSubtype::ListType(list))) => {
+                get_type_size(list.get_list_item_type())
+            }
+            _ => {
+                return Err(GeneratorError::TypeError(
+                    "sibling-hashes of verify-merkle-proof should be a list".to_owned(),
+                ))
+            }
+        };
+        generator.traverse_expr(builder, siblings)?;
+
+        let siblings_length = generator.module.locals.add(ValType::I32);
+        let number_of_siblings = generator.module.locals.add(ValType::I32);
+        builder
+            .local_tee(siblings_length)
+            .local_get(siblings_length)
+            .i32_const(element_size)
+            .binop(BinaryOp::I32DivU)
+            .local_set(number_of_siblings);
+        self.charge(generator, builder, number_of_siblings)?;
 
         // Call the host interface function, `verify_merkle_proof`
         builder.call(generator.func_by_name("stdlib.verify_merkle_proof"));
@@ -57,6 +83,11 @@ impl ComplexWord for GetTxOutput {
         check_args!(generator, builder, 2, args.len(), ArgumentCountCheck::Exact);
 
         generator.traverse_expr(builder, args.get_expr(0)?)?;
+
+        let tx_length = generator.module.locals.add(ValType::I32);
+        builder.local_tee(tx_length);
+        self.charge(generator, builder, tx_length)?;
+
         generator.traverse_expr(builder, args.get_expr(1)?)?;
 
         // Reserve stack space for the host-function to write the result

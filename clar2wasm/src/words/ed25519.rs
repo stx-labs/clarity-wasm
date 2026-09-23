@@ -1,7 +1,9 @@
 use clarity::vm::{ClarityName, SymbolicExpression};
+use walrus::ValType;
 
 use super::{ComplexWord, Word};
 use crate::check_args;
+use crate::cost::WordCharge;
 use crate::wasm_generator::{ArgumentsExt, GeneratorError, WasmGenerator};
 use crate::wasm_utils::ArgumentCountCheck;
 
@@ -25,6 +27,10 @@ impl ComplexWord for Verify {
         check_args!(generator, builder, 3, args.len(), ArgumentCountCheck::Exact);
 
         generator.traverse_expr(builder, args.get_expr(0)?)?;
+
+        let message_length = generator.module.locals.add(ValType::I32);
+        builder.local_tee(message_length);
+        self.charge(generator, builder, message_length)?;
 
         // The signature and the public key are fixed-size buffers: the host
         // function checks their length and throws a runtime error if needed.

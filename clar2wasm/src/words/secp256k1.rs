@@ -118,6 +118,8 @@ impl ComplexWord for Decompress {
     ) -> Result<(), GeneratorError> {
         check_args!(generator, builder, 1, args.len(), ArgumentCountCheck::Exact);
 
+        self.charge(generator, builder, 0)?;
+
         generator.traverse_expr(builder, args.get_expr(0)?)?;
 
         // Reserve stack space for the host-function to write the result
