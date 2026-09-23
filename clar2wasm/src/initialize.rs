@@ -1,3 +1,6 @@
+use std::marker::PhantomData;
+use std::ops::{Deref, DerefMut};
+
 use clarity::vm::analysis::ContractAnalysis;
 use clarity::vm::clarity_wasm::{AccessCostMeter, CostGlobals, CostMeter};
 use clarity::vm::contexts::GlobalContext;
@@ -6,7 +9,9 @@ use clarity::vm::events::*;
 use clarity::vm::types::{AssetIdentifier, BuffData, PrincipalData, QualifiedContractIdentifier};
 use clarity::vm::{CallStack, ContractContext, Value};
 use stacks_common::types::chainstate::StacksBlockId;
-use wasmtime::{AsContextMut, Linker, Module, Store};
+use wasmtime::{
+    AsContext, AsContextMut, Engine, Linker, Module, Store, StoreContext, StoreContextMut,
+};
 
 use crate::error_mapping;
 use crate::linker::{link_cost_globals, link_host_functions};
@@ -32,6 +37,67 @@ pub struct ClarityWasmContext<'a, 'b> {
     /// a contract, and `None` otherwise.
     pub contract_analysis: Option<&'a ContractAnalysis>,
     pub cost_globals: Option<CostGlobals>,
+}
+
+/// A wasmtime [`Store`] holding a [`ClarityWasmContext`] with erased lifetimes.
+///
+/// Wasmtime requires the data of a [`Store`] to be `'static`, while a
+/// [`ClarityWasmContext`] borrows the contexts it operates on.
+///
+/// The erased `'a` and `'b` lifetimes are kept in the type of this wrapper, so
+/// the contexts borrowed by the [`ClarityWasmContext`] stay borrowed for as
+/// long as the store is alive.
+pub struct ClarityWasmStore<'a, 'b> {
+    store: Store<ClarityWasmContext<'static, 'static>>,
+    _borrows: PhantomData<ClarityWasmContext<'a, 'b>>,
+}
+
+impl<'a, 'b> ClarityWasmStore<'a, 'b> {
+    pub fn new(engine: &Engine, context: ClarityWasmContext<'a, 'b>) -> Self {
+        // SAFETY: the two types only differ by their lifetimes, so they have the
+        // same layout. The resulting store is owned by `Self`, which carries `'a`
+        // and `'b`, so the borrow checker prevents the borrowed contexts from
+        // being used or dropped while the store can still access them. Host
+        // functions are `'static` closures, so they cannot keep a reference to
+        // the store data beyond a call.
+        let context = unsafe {
+            std::mem::transmute::<ClarityWasmContext<'a, 'b>, ClarityWasmContext<'static, 'static>>(
+                context,
+            )
+        };
+        Self {
+            store: Store::new(engine, context),
+            _borrows: PhantomData,
+        }
+    }
+}
+
+impl Deref for ClarityWasmStore<'_, '_> {
+    type Target = Store<ClarityWasmContext<'static, 'static>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.store
+    }
+}
+
+impl DerefMut for ClarityWasmStore<'_, '_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.store
+    }
+}
+
+impl AsContext for ClarityWasmStore<'_, '_> {
+    type Data = ClarityWasmContext<'static, 'static>;
+
+    fn as_context(&self) -> StoreContext<'_, ClarityWasmContext<'static, 'static>> {
+        self.store.as_context()
+    }
+}
+
+impl AsContextMut for ClarityWasmStore<'_, '_> {
+    fn as_context_mut(&mut self) -> StoreContextMut<'_, ClarityWasmContext<'static, 'static>> {
+        self.store.as_context_mut()
+    }
 }
 
 impl<'a, 'b> ClarityWasmContext<'a, 'b> {
@@ -359,7 +425,7 @@ pub fn initialize_contract(
             Module::from_binary(&engine, wasm_module)
                 .map_err(|e| VmExecutionError::Wasm(WasmError::UnableToLoadModule(e)))
         })?;
-    let mut store = Store::new(&engine, init_context);
+    let mut store = ClarityWasmStore::new(&engine, init_context);
     let mut linker = Linker::new(&engine);
     // Link in the host interface functions and globals.
     link_host_functions(&mut linker)?;

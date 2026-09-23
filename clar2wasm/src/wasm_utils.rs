@@ -84,12 +84,12 @@ pub const PRINCIPAL_BYTES_MAX: usize = STANDARD_PRINCIPAL_BYTES + CONTRACT_NAME_
 /// - `store` is the Wasm store.
 ///
 /// Returns the Clarity `Value` and the number of Wasm `Val`s that were used.
-pub fn wasm_to_clarity_value<'a, 'b: 'a>(
+pub fn wasm_to_clarity_value(
     type_sig: &TypeSignature,
     value_index: usize,
     buffer: &[Val],
     memory: Memory,
-    store: &mut impl AsContextMut<Data = ClarityWasmContext<'a, 'b>>,
+    store: &mut impl AsContextMut<Data = ClarityWasmContext<'static, 'static>>,
     epoch: StacksEpochId,
 ) -> Result<(Option<Value>, usize), VmExecutionError> {
     match type_sig {
@@ -342,9 +342,9 @@ pub fn wasm_to_clarity_value<'a, 'b: 'a>(
 /// In-memory values require one extra level
 /// of indirection, so this function will read the offset and length from the
 /// memory, then read the actual value.
-pub fn read_from_wasm_indirect<'a, 'b: 'a>(
+pub fn read_from_wasm_indirect(
     memory: Memory,
-    store: &mut impl AsContextMut<Data = ClarityWasmContext<'a, 'b>>,
+    store: &mut impl AsContextMut<Data = ClarityWasmContext<'static, 'static>>,
     ty: &TypeSignature,
     mut offset: i32,
     epoch: StacksEpochId,
@@ -362,9 +362,9 @@ pub fn read_from_wasm_indirect<'a, 'b: 'a>(
 
 /// Read a value from the Wasm memory at `offset` with `length`, given the
 /// provided Clarity `TypeSignature`.
-pub fn read_from_wasm<'a, 'b: 'a>(
+pub fn read_from_wasm(
     memory: Memory,
-    store: &mut impl AsContextMut<Data = ClarityWasmContext<'a, 'b>>,
+    store: &mut impl AsContextMut<Data = ClarityWasmContext<'static, 'static>>,
     ty: &TypeSignature,
     offset: i32,
     length: i32,
@@ -733,8 +733,7 @@ pub fn placeholder_for_type(ty: ValType) -> Val {
         ValType::F32 => Val::F32(0),
         ValType::F64 => Val::F64(0),
         ValType::V128 => Val::V128(0.into()),
-        ValType::ExternRef => Val::ExternRef(None),
-        ValType::FuncRef => Val::FuncRef(None),
+        ValType::Ref(ref_ty) => Val::null_ref(ref_ty.heap_type()),
     }
 }
 
@@ -745,8 +744,8 @@ pub fn placeholder_for_type(ty: ValType) -> Val {
 /// to the memory at `in_mem_offset`, and if `include_repr` is true, the offset
 /// and length of the value will be written to the memory at `offset`.
 /// Returns the number of bytes written at `offset` and at `in_mem_offset`.
-pub fn write_to_wasm<'a, 'b: 'a>(
-    mut store: impl AsContextMut<Data = ClarityWasmContext<'a, 'b>>,
+pub fn write_to_wasm(
+    mut store: impl AsContextMut<Data = ClarityWasmContext<'static, 'static>>,
     memory: Memory,
     ty: &TypeSignature,
     offset: i32,
