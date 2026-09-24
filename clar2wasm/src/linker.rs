@@ -1374,7 +1374,7 @@ fn link_enter_as_contract_safe_fn(
         .func_wrap(
             "clarity",
             "enter_as_contract_safe",
-            |mut caller: Caller<'_, ClarityWasmContext>| -> Nullable<ExternRef> {
+            |mut caller: Caller<'_, ClarityWasmContext<'static, 'static>>| -> Nullable<ExternRef> {
                 let contract_principal: PrincipalData = caller
                     .data()
                     .contract_context()
@@ -1407,7 +1407,7 @@ fn link_exit_as_contract_safe_fn(
         .func_wrap(
             "clarity",
             "exit_as_contract_safe",
-            |mut caller: Caller<'_, ClarityWasmContext>, allowance_ref: Nullable<ExternRef>| {
+            |mut caller: Caller<'_, ClarityWasmContext<'static, 'static>>, allowance_ref: Nullable<ExternRef>| {
                 let epoch = caller.data().global_context.epoch_id;
 
                 // we need to restore the current caller and sender. We pop both and check if we did set
@@ -1485,7 +1485,7 @@ fn link_enter_restrict_assets_fn(
         .func_wrap(
             "clarity",
             "enter_restrict_assets",
-            |mut caller: Caller<'_, ClarityWasmContext<'static, 'static>>| -> wasmtime::Result<Option<Rooted<ExternRef>>> {
+            |mut caller: Caller<'_, ClarityWasmContext<'static, 'static>>| {
                 caller.data_mut().global_context.begin();
 
                 Nullable::Val(ExternRef::new(&mut caller, AllowanceContext::new()))
@@ -1582,15 +1582,9 @@ fn link_cleanup_restrict_assets_fn(
 struct AllowanceContext(std::sync::Mutex<Vec<Allowance>>);
 
 impl AllowanceContext {
-    /// Create a new, empty allowance context, and wrap it in an `ExternRef`.
-    fn new_externref(
-        store: impl AsContextMut<Data = ClarityWasmContext<'static, 'static>>,
-    ) -> Result<Rooted<ExternRef>, VmExecutionError> {
-        ExternRef::new(store, Self(Vec::new())).map_err(|e| {
-            VmExecutionError::Wasm(WasmError::WasmGeneratorError(format!(
-                "unable to create allowance context: {e}"
-            )))
-        })
+    /// Create a new, empty allowance context.
+    fn new() -> Self {
+        Self(std::sync::Mutex::new(Vec::new()))
     }
 
     fn from_externref<'s, T: 's>(
@@ -1646,7 +1640,7 @@ fn link_with_all_assets_unsafe_fn(
         .func_wrap(
             "clarity",
             "with_all_assets_unsafe",
-            |caller: Caller<'_, ClarityWasmContext>, allowance_ref: Nullable<ExternRef>| {
+            |caller: Caller<'_, ClarityWasmContext<'static, 'static>>, allowance_ref: Nullable<ExternRef>| {
                 AllowanceContext::push(&caller, &allowance_ref, Allowance::All)?;
 
                 Ok(())
@@ -1668,7 +1662,7 @@ fn link_with_pox_fn(
         .func_wrap(
             "clarity",
             "with_pox",
-            |caller: Caller<'_, ClarityWasmContext>, allowance_ref: Nullable<ExternRef>| {
+            |caller: Caller<'_, ClarityWasmContext<'static, 'static>>, allowance_ref: Nullable<ExternRef>| {
                 AllowanceContext::push(&caller, &allowance_ref, Allowance::Pox)?;
 
                 Ok(())
@@ -1693,7 +1687,7 @@ fn link_with_ft_fn(
         .func_wrap(
             "clarity",
             "with_ft",
-            |mut caller: Caller<'_, ClarityWasmContext>,
+            |mut caller: Caller<'_, ClarityWasmContext<'static, 'static>>,
              allowance_ref: Nullable<ExternRef>,
              contract_id_offset: i32,
              contract_id_length: i32,
@@ -1786,7 +1780,7 @@ fn link_with_nft_fn(
         .func_wrap(
             "clarity",
             "with_nft",
-            |mut caller: Caller<'_, ClarityWasmContext>,
+            |mut caller: Caller<'_, ClarityWasmContext<'static, 'static>>,
              allowance_ref: Nullable<ExternRef>,
              contract_id_offset: i32,
              contract_id_length: i32,
@@ -1939,7 +1933,7 @@ fn link_with_stacking_fn(
         .func_wrap(
             "clarity",
             "with_stacking",
-            |caller: Caller<'_, ClarityWasmContext>,
+            |caller: Caller<'_, ClarityWasmContext<'static, 'static>>,
              allowance_ref: Nullable<ExternRef>,
              allowance_lo: i64,
              allowance_hi: i64| {
@@ -1973,7 +1967,7 @@ fn link_with_stx_fn(
         .func_wrap(
             "clarity",
             "with_stx",
-            |caller: Caller<'_, ClarityWasmContext>,
+            |caller: Caller<'_, ClarityWasmContext<'static, 'static>>,
              allowance_ref: Nullable<ExternRef>,
              amount_lo: i64,
              amount_hi: i64| {
@@ -6775,7 +6769,7 @@ fn link_debug_msg<T: 'static>(linker: &mut Linker<T>) -> Result<(), VmExecutionE
         })
 }
 
-pub fn dummy_linker<T>(engine: &Engine) -> Result<Linker<T>, wasmi::Error> {
+pub fn dummy_linker<T: 'static>(engine: &Engine) -> Result<Linker<T>, wasmi::Error> {
     let mut linker = Linker::new(engine);
 
     link_skip_list(&mut linker)?;
