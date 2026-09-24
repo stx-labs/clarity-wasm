@@ -5,7 +5,7 @@ use clar2wasm::linker::load_stdlib;
 use clar2wasm::wasm_generator::END_OF_STANDARD_DATA;
 use hex::ToHex;
 use proptest::prelude::*;
-use wasmtime::Val;
+use wasmi::Val;
 
 /// The Property Int type.
 /// Used for convenience when pasing 128 bits type to Wasm
@@ -398,8 +398,8 @@ impl PropBuffer {
     /// Read a buffer from memory at a specified `offset` and `length`
     /// , and create a PropBuffer if the operation is a success.
     pub(crate) fn read_from_memory(
-        memory: wasmtime::Memory,
-        store: impl wasmtime::AsContext,
+        memory: wasmi::Memory,
+        store: impl wasmi::AsContext,
         offset: usize,
         length: usize,
     ) -> Option<Self> {
@@ -412,8 +412,8 @@ impl PropBuffer {
     /// operation is a success.
     pub(crate) fn write_to_memory(
         &self,
-        memory: wasmtime::Memory,
-        store: impl wasmtime::AsContextMut,
+        memory: wasmi::Memory,
+        store: impl wasmi::AsContextMut,
     ) -> Option<(i32, i32)> {
         memory.write(store, self.offset, &self.buffer).ok()?;
         Some((self.offset as i32, self.buffer.len() as i32))
@@ -496,8 +496,8 @@ pub(crate) fn test_on_buffer_hash(
             &mut res
         ).unwrap_or_else(|_| panic!("call to {func_name} failed"));
 
-        assert_eq!(res[0].unwrap_i32(), result_offset);
-        assert_eq!(res[1].unwrap_i32(), result_length);
+        assert_eq!(res[0].i32().unwrap(), result_offset);
+        assert_eq!(res[1].i32().unwrap(), result_length);
 
         let wasm_result = PropBuffer::read_from_memory(memory, store.borrow_mut().deref_mut(), result_offset as usize, result_length as usize).expect("could not read result buffer from memory");
 
@@ -548,8 +548,8 @@ fn test_on_integer_hash(
                 &[n.low().into(), n.high().into(), result_offset.into()],
                 &mut res
             ).unwrap_or_else(|_| panic!("call to {func_name} failed"));
-            assert_eq!(res[0].unwrap_i32(), result_offset);
-            assert_eq!(res[1].unwrap_i32(), result_length);
+            assert_eq!(res[0].i32().unwrap(), result_offset);
+            assert_eq!(res[1].i32().unwrap(), result_length);
 
             let wasm_result = PropBuffer::read_from_memory(memory, store.borrow_mut().deref_mut(), result_offset as usize, result_length as usize).expect("could not read result buffer from memory");
 
@@ -631,8 +631,8 @@ pub(crate) fn test_buff_to_uint(
                 &mut result,
             )
             .unwrap_or_else(|_| panic!("call to {func_name} failed"));
-        prop_assert_eq!(result[0].unwrap_i64(), expected_result.low());
-        prop_assert_eq!(result[1].unwrap_i64(), expected_result.high());
+        prop_assert_eq!(result[0].i64().unwrap(), expected_result.low());
+        prop_assert_eq!(result[1].i64().unwrap(), expected_result.high());
     });
 }
 
@@ -668,7 +668,7 @@ pub(crate) fn test_buff_comparison(
                 &mut result,
             )
             .unwrap_or_else(|_| panic!("call to {func_name} failed"));
-        prop_assert_eq!(result[0].unwrap_i32(), expected_result);
+        prop_assert_eq!(result[0].i32().unwrap(), expected_result);
     });
 
     proptest!(ProptestConfig::with_cases(500), |(buff in buffer(1500, 100))| {
@@ -688,6 +688,6 @@ pub(crate) fn test_buff_comparison(
                 &mut result,
             )
             .unwrap_or_else(|_| panic!("call to {func_name} failed"));
-        prop_assert_eq!(result[0].unwrap_i32(), expected_result);
+        prop_assert_eq!(result[0].i32().unwrap(), expected_result);
     });
 }

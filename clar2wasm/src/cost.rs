@@ -643,11 +643,11 @@ mod caf {
         initial: i64,
         caf: impl FnOnce(LocalId) -> (Caf, S),
     ) -> Result<i64, i64> {
-        use wasmtime::{Engine, Linker, Module, Store};
+        use wasmi::{Engine, Linker, Module, Store};
 
         let engine = Engine::default();
         let binary = module_with_caf(caf);
-        let module = Module::from_binary(&engine, &binary).unwrap();
+        let module = Module::new(&engine, &binary).unwrap();
 
         let mut linker = Linker::<()>::new(&engine);
         let mut store = Store::new(&engine, ());
@@ -666,7 +666,7 @@ mod caf {
             )
             .unwrap();
 
-        let instance = linker.instantiate(&mut store, &module).unwrap();
+        let instance = linker.instantiate_and_start(&mut store, &module).unwrap();
 
         let func = instance
             .get_typed_func::<i32, i32>(&mut store, "identity")
@@ -675,7 +675,7 @@ mod caf {
 
         match func.call(&mut store, arg) {
             Ok(_) => Ok(linker.get_cost_meter(&mut store).unwrap().runtime),
-            Err(_) => Err(err_code.get(&mut store).unwrap_i64()),
+            Err(_) => Err(err_code.get(&mut store).i64().unwrap()),
         }
     }
 

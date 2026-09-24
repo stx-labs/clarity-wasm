@@ -7,7 +7,7 @@ use clarity::util::hash::{Hash160, Sha256Sum, Sha512Sum};
 use clarity::vm::ClarityName;
 use proptest::prelude::any;
 use proptest::{prop_assert_eq, proptest};
-use wasmtime::Val;
+use wasmi::Val;
 
 use crate::utils::{
     self, medium_int128, medium_uint128, small_int128, small_uint128, test_buff_comparison,
@@ -686,7 +686,7 @@ fn prop_check_clarity_name() {
         chk.call(store.borrow_mut().deref_mut(), &[Val::I32(3000), Val::I32(name.len() as i32)], &mut result).unwrap();
 
         let expected = ClarityName::try_from(name).is_ok() as i32;
-        prop_assert_eq!(result[0].unwrap_i32(), expected);
+        prop_assert_eq!(result[0].i32().unwrap(), expected);
     });
 
     proptest!(|(name in proptest::collection::vec(any::<u8>(), 0..200)) | {
@@ -699,6 +699,6 @@ fn prop_check_clarity_name() {
             Ok(s) => ClarityName::try_from(s).is_ok() as i32,
             Err(_) => 0,
         };
-        prop_assert_eq!(result[0].unwrap_i32(), expected);
+        prop_assert_eq!(result[0].i32().unwrap(), expected);
     })
 }
