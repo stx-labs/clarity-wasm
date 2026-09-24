@@ -9,7 +9,7 @@ use clarity::vm::events::*;
 use clarity::vm::types::{AssetIdentifier, BuffData, PrincipalData, QualifiedContractIdentifier};
 use clarity::vm::{CallStack, ContractContext, Value};
 use stacks_common::types::chainstate::StacksBlockId;
-use wasmi::{AsContextMut, Linker, Module, Store};
+use wasmi::{AsContext, AsContextMut, Engine, Linker, Module, Store, StoreContext, StoreContextMut};
 
 use crate::error_mapping;
 use crate::linker::{link_cost_globals, link_host_functions};
@@ -37,7 +37,7 @@ pub struct ClarityWasmContext<'a, 'b> {
     pub cost_globals: Option<CostGlobals>,
 }
 
-/// A wasmtime [`Store`] holding a [`ClarityWasmContext`] with erased lifetimes.
+/// A wasmi [`Store`] holding a [`ClarityWasmContext`] with erased lifetimes.
 ///
 /// Wasmtime requires the data of a [`Store`] to be `'static`, while a
 /// [`ClarityWasmContext`] borrows the contexts it operates on.
