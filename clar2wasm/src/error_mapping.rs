@@ -225,7 +225,7 @@ pub(crate) fn resolve_error<'a, 'b: 'a>(
 ///
 fn from_runtime_error_code(
     instance: Instance,
-    mut store: impl AsContextMut<Data = ClarityWasmContext<'a, 'b>>,
+    mut store: impl AsContextMut<Data = ClarityWasmContext<'static, 'static>>,
     e: wasmi::Error,
     epoch_id: &StacksEpochId,
 ) -> VmExecutionError {
