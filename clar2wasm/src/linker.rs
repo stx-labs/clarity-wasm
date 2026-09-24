@@ -1407,7 +1407,8 @@ fn link_exit_as_contract_safe_fn(
         .func_wrap(
             "clarity",
             "exit_as_contract_safe",
-            |mut caller: Caller<'_, ClarityWasmContext<'static, 'static>>, allowance_ref: Nullable<ExternRef>| {
+            |mut caller: Caller<'_, ClarityWasmContext<'static, 'static>>,
+             allowance_ref: Nullable<ExternRef>| {
                 let epoch = caller.data().global_context.epoch_id;
 
                 // we need to restore the current caller and sender. We pop both and check if we did set
@@ -1640,7 +1641,8 @@ fn link_with_all_assets_unsafe_fn(
         .func_wrap(
             "clarity",
             "with_all_assets_unsafe",
-            |caller: Caller<'_, ClarityWasmContext<'static, 'static>>, allowance_ref: Nullable<ExternRef>| {
+            |caller: Caller<'_, ClarityWasmContext<'static, 'static>>,
+             allowance_ref: Nullable<ExternRef>| {
                 AllowanceContext::push(&caller, &allowance_ref, Allowance::All)?;
 
                 Ok(())
@@ -1662,7 +1664,8 @@ fn link_with_pox_fn(
         .func_wrap(
             "clarity",
             "with_pox",
-            |caller: Caller<'_, ClarityWasmContext<'static, 'static>>, allowance_ref: Nullable<ExternRef>| {
+            |caller: Caller<'_, ClarityWasmContext<'static, 'static>>,
+             allowance_ref: Nullable<ExternRef>| {
                 AllowanceContext::push(&caller, &allowance_ref, Allowance::Pox)?;
 
                 Ok(())

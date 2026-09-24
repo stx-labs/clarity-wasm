@@ -9,7 +9,9 @@ use clarity::vm::events::*;
 use clarity::vm::types::{AssetIdentifier, BuffData, PrincipalData, QualifiedContractIdentifier};
 use clarity::vm::{CallStack, ContractContext, Value};
 use stacks_common::types::chainstate::StacksBlockId;
-use wasmi::{AsContext, AsContextMut, Engine, Linker, Module, Store, StoreContext, StoreContextMut};
+use wasmi::{
+    AsContext, AsContextMut, Engine, Linker, Module, Store, StoreContext, StoreContextMut,
+};
 
 use crate::error_mapping;
 use crate::linker::{link_cost_globals, link_host_functions};
