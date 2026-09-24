@@ -258,7 +258,7 @@ fn to_ascii_int(
     Ok(())
 }
 
-fn to_ascii_u128(
+pub(super) fn to_ascii_u128(
     generator: &mut crate::wasm_generator::WasmGenerator,
     builder: &mut walrus::InstrSeqBuilder,
     lo: LocalId,
