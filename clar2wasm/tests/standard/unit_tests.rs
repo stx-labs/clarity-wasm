@@ -6,7 +6,7 @@ use clarity::vm::types::{
 };
 use clarity::vm::{ClarityName, ContractName, Value};
 use hex::FromHex;
-use wasmtime::Val;
+use wasmi::Val;
 
 #[test]
 fn test_add_uint() {
@@ -1728,7 +1728,7 @@ fn test_cmp_buff(func_name: &str, reference_func: impl Fn(&[u8], &[u8]) -> bool)
         .expect("call to lt-buff failed");
 
         assert_eq!(
-            result[0].unwrap_i32(),
+            result[0].i32().unwrap(),
             reference_func(buff_a, buff_b) as i32
         )
     };
@@ -1931,8 +1931,8 @@ fn pow_uint() {
         &mut result,
     )
     .expect("call to pow-uint failed");
-    assert_eq!(result[0].unwrap_i64(), 1);
-    assert_eq!(result[1].unwrap_i64(), 0);
+    assert_eq!(result[0].i64().unwrap(), 1);
+    assert_eq!(result[1].i64().unwrap(), 0);
 
     // pow(1, 0) == 1
     pow.call(
@@ -1941,8 +1941,8 @@ fn pow_uint() {
         &mut result,
     )
     .expect("call to pow-uint failed");
-    assert_eq!(result[0].unwrap_i64(), 1);
-    assert_eq!(result[1].unwrap_i64(), 0);
+    assert_eq!(result[0].i64().unwrap(), 1);
+    assert_eq!(result[1].i64().unwrap(), 0);
 
     // pow(2, 0) == 1
     pow.call(
@@ -1951,8 +1951,8 @@ fn pow_uint() {
         &mut result,
     )
     .expect("call to pow-uint failed");
-    assert_eq!(result[0].unwrap_i64(), 1);
-    assert_eq!(result[1].unwrap_i64(), 0);
+    assert_eq!(result[0].i64().unwrap(), 1);
+    assert_eq!(result[1].i64().unwrap(), 0);
 
     // pow(0, 1) == 0
     pow.call(
@@ -1961,8 +1961,8 @@ fn pow_uint() {
         &mut result,
     )
     .expect("call to pow-uint failed");
-    assert_eq!(result[0].unwrap_i64(), 0);
-    assert_eq!(result[1].unwrap_i64(), 0);
+    assert_eq!(result[0].i64().unwrap(), 0);
+    assert_eq!(result[1].i64().unwrap(), 0);
 
     // pow(123, 1) == 123
     pow.call(
@@ -1971,8 +1971,8 @@ fn pow_uint() {
         &mut result,
     )
     .expect("call to pow-uint failed");
-    assert_eq!(result[0].unwrap_i64(), 123);
-    assert_eq!(result[1].unwrap_i64(), 0);
+    assert_eq!(result[0].i64().unwrap(), 123);
+    assert_eq!(result[1].i64().unwrap(), 0);
 
     // pow(3, 2) == 9
     pow.call(
@@ -1981,8 +1981,8 @@ fn pow_uint() {
         &mut result,
     )
     .expect("call to pow-uint failed");
-    assert_eq!(result[0].unwrap_i64(), 9);
-    assert_eq!(result[1].unwrap_i64(), 0);
+    assert_eq!(result[0].i64().unwrap(), 9);
+    assert_eq!(result[1].i64().unwrap(), 0);
 
     // pow(3, 3) == 27
     pow.call(
@@ -1991,8 +1991,8 @@ fn pow_uint() {
         &mut result,
     )
     .expect("call to pow-uint failed");
-    assert_eq!(result[0].unwrap_i64(), 27);
-    assert_eq!(result[1].unwrap_i64(), 0);
+    assert_eq!(result[0].i64().unwrap(), 27);
+    assert_eq!(result[1].i64().unwrap(), 0);
 
     // pow(3, 80) = large number
     pow.call(
@@ -2001,8 +2001,8 @@ fn pow_uint() {
         &mut result,
     )
     .expect("call to pow-uint failed");
-    assert_eq!(result[0].unwrap_i64(), 4389419161382147137);
-    assert_eq!(result[1].unwrap_i64(), 8012732698178659004);
+    assert_eq!(result[0].i64().unwrap(), 4389419161382147137);
+    assert_eq!(result[1].i64().unwrap(), 8012732698178659004);
 
     // pow(3, 81) overflows
     pow.call(
@@ -2019,8 +2019,8 @@ fn pow_uint() {
         &mut result,
     )
     .expect("call to pow-uint failed");
-    assert_eq!(result[0].unwrap_i64(), 0);
-    assert_eq!(result[1].unwrap_i64(), 0x8000000000000000u64 as i64);
+    assert_eq!(result[0].i64().unwrap(), 0);
+    assert_eq!(result[1].i64().unwrap(), 0x8000000000000000u64 as i64);
 
     // pow(2, 128) overflows
     pow.call(
@@ -2044,8 +2044,8 @@ fn pow_int() {
         &mut result,
     )
     .expect("call to pow-int failed");
-    assert_eq!(result[0].unwrap_i64(), 1);
-    assert_eq!(result[1].unwrap_i64(), 0);
+    assert_eq!(result[0].i64().unwrap(), 1);
+    assert_eq!(result[1].i64().unwrap(), 0);
 
     // pow(1, 0) == 1
     pow.call(
@@ -2054,8 +2054,8 @@ fn pow_int() {
         &mut result,
     )
     .expect("call to pow-int failed");
-    assert_eq!(result[0].unwrap_i64(), 1);
-    assert_eq!(result[1].unwrap_i64(), 0);
+    assert_eq!(result[0].i64().unwrap(), 1);
+    assert_eq!(result[1].i64().unwrap(), 0);
 
     // pow(2, 0) == 1
     pow.call(
@@ -2064,8 +2064,8 @@ fn pow_int() {
         &mut result,
     )
     .expect("call to pow-int failed");
-    assert_eq!(result[0].unwrap_i64(), 1);
-    assert_eq!(result[1].unwrap_i64(), 0);
+    assert_eq!(result[0].i64().unwrap(), 1);
+    assert_eq!(result[1].i64().unwrap(), 0);
 
     // pow(0, 1) == 0
     pow.call(
@@ -2074,8 +2074,8 @@ fn pow_int() {
         &mut result,
     )
     .expect("call to pow-int failed");
-    assert_eq!(result[0].unwrap_i64(), 0);
-    assert_eq!(result[1].unwrap_i64(), 0);
+    assert_eq!(result[0].i64().unwrap(), 0);
+    assert_eq!(result[1].i64().unwrap(), 0);
 
     // pow(123, 1) == 123
     pow.call(
@@ -2084,8 +2084,8 @@ fn pow_int() {
         &mut result,
     )
     .expect("call to pow-int failed");
-    assert_eq!(result[0].unwrap_i64(), 123);
-    assert_eq!(result[1].unwrap_i64(), 0);
+    assert_eq!(result[0].i64().unwrap(), 123);
+    assert_eq!(result[1].i64().unwrap(), 0);
 
     // pow(3, 2) == 9
     pow.call(
@@ -2094,8 +2094,8 @@ fn pow_int() {
         &mut result,
     )
     .expect("call to pow-int failed");
-    assert_eq!(result[0].unwrap_i64(), 9);
-    assert_eq!(result[1].unwrap_i64(), 0);
+    assert_eq!(result[0].i64().unwrap(), 9);
+    assert_eq!(result[1].i64().unwrap(), 0);
 
     // pow(3, 3) == 27
     pow.call(
@@ -2104,8 +2104,8 @@ fn pow_int() {
         &mut result,
     )
     .expect("call to pow-int failed");
-    assert_eq!(result[0].unwrap_i64(), 27);
-    assert_eq!(result[1].unwrap_i64(), 0);
+    assert_eq!(result[0].i64().unwrap(), 27);
+    assert_eq!(result[1].i64().unwrap(), 0);
 
     // pow(3, 80) = large number
     pow.call(
@@ -2114,8 +2114,8 @@ fn pow_int() {
         &mut result,
     )
     .expect("call to pow-int failed");
-    assert_eq!(result[0].unwrap_i64(), 4389419161382147137);
-    assert_eq!(result[1].unwrap_i64(), 8012732698178659004);
+    assert_eq!(result[0].i64().unwrap(), 4389419161382147137);
+    assert_eq!(result[1].i64().unwrap(), 8012732698178659004);
 
     // pow(3, 81) overflows
     pow.call(
@@ -2132,8 +2132,8 @@ fn pow_int() {
         &mut result,
     )
     .expect("call to pow-uint failed");
-    assert_eq!(result[0].unwrap_i64(), 0);
-    assert_eq!(result[1].unwrap_i64(), 0x4000000000000000u64 as i64);
+    assert_eq!(result[0].i64().unwrap(), 0);
+    assert_eq!(result[1].i64().unwrap(), 0x4000000000000000u64 as i64);
 
     // pow(2, 127) overflows
     pow.call(
@@ -2150,8 +2150,8 @@ fn pow_int() {
         &mut result,
     )
     .expect("call to pow-uint failed");
-    assert_eq!(result[0].unwrap_i64(), -2);
-    assert_eq!(result[1].unwrap_i64(), -1);
+    assert_eq!(result[0].i64().unwrap(), -2);
+    assert_eq!(result[1].i64().unwrap(), -1);
 
     // pow(-2, 2) == 4
     pow.call(
@@ -2160,8 +2160,8 @@ fn pow_int() {
         &mut result,
     )
     .expect("call to pow-uint failed");
-    assert_eq!(result[0].unwrap_i64(), 4);
-    assert_eq!(result[1].unwrap_i64(), 0);
+    assert_eq!(result[0].i64().unwrap(), 4);
+    assert_eq!(result[1].i64().unwrap(), 0);
 
     // pow(-2, 126) == 0x40000000000000000000000000000000
     pow.call(
@@ -2170,8 +2170,8 @@ fn pow_int() {
         &mut result,
     )
     .expect("call to pow-uint failed");
-    assert_eq!(result[0].unwrap_i64(), 0);
-    assert_eq!(result[1].unwrap_i64(), 0x4000000000000000u64 as i64);
+    assert_eq!(result[0].i64().unwrap(), 0);
+    assert_eq!(result[1].i64().unwrap(), 0x4000000000000000u64 as i64);
 
     // pow(-2, 127) == i128::MIN
     pow.call(
@@ -2180,8 +2180,8 @@ fn pow_int() {
         &mut result,
     )
     .expect("call to pow-uint failed");
-    assert_eq!(result[0].unwrap_i64(), 0);
-    assert_eq!(result[1].unwrap_i64(), 0x8000000000000000u64 as i64);
+    assert_eq!(result[0].i64().unwrap(), 0);
+    assert_eq!(result[1].i64().unwrap(), 0x8000000000000000u64 as i64);
 
     // pow(-3, 2) = 9
     pow.call(
@@ -2190,8 +2190,8 @@ fn pow_int() {
         &mut result,
     )
     .expect("call to pow-int failed");
-    assert_eq!(result[0].unwrap_i64(), 9);
-    assert_eq!(result[1].unwrap_i64(), 0);
+    assert_eq!(result[0].i64().unwrap(), 9);
+    assert_eq!(result[1].i64().unwrap(), 0);
 
     // pow(-3, 3) = -27
     pow.call(
@@ -2200,8 +2200,8 @@ fn pow_int() {
         &mut result,
     )
     .expect("call to pow-int failed");
-    assert_eq!(result[0].unwrap_i64(), -27);
-    assert_eq!(result[1].unwrap_i64(), -1);
+    assert_eq!(result[0].i64().unwrap(), -27);
+    assert_eq!(result[1].i64().unwrap(), -1);
 
     // edge case i128::MIN^1 is ok
     pow.call(
@@ -2215,8 +2215,8 @@ fn pow_int() {
         &mut result,
     )
     .expect("call to pow-int failed");
-    assert_eq!(result[0].unwrap_i64(), 0);
-    assert_eq!(result[1].unwrap_i64(), 0x8000000000000000u64 as i64);
+    assert_eq!(result[0].i64().unwrap(), 0);
+    assert_eq!(result[1].i64().unwrap(), 0x8000000000000000u64 as i64);
 
     // edge case i128::MIN^2 overflows
     pow.call(
@@ -2387,12 +2387,12 @@ fn sha256_buf() {
             &mut result,
         )
         .expect("call to sha256-buf failed");
-    assert_eq!(result[0].unwrap_i32(), res_offset);
-    assert_eq!(result[1].unwrap_i32(), 32);
+    assert_eq!(result[0].i32().unwrap(), res_offset);
+    assert_eq!(result[1].i32().unwrap(), 32);
 
-    let mut buffer = vec![0u8; result[1].unwrap_i32() as usize];
+    let mut buffer = vec![0u8; result[1].i32().unwrap() as usize];
     memory
-        .read(&mut store, result[0].unwrap_i32() as usize, &mut buffer)
+        .read(&mut store, result[0].i32().unwrap() as usize, &mut buffer)
         .expect("could not read resulting hash from memory");
     let expected_result =
         Vec::from_hex("dffd6021bb2bd5b0af676290809ec3a53191dd81c7f70a4b28688a362182986f").unwrap();
@@ -2415,12 +2415,12 @@ fn sha256_buf() {
             &mut result,
         )
         .expect("call to sha256-buf failed");
-    assert_eq!(result[0].unwrap_i32(), res_offset);
-    assert_eq!(result[1].unwrap_i32(), 32);
+    assert_eq!(result[0].i32().unwrap(), res_offset);
+    assert_eq!(result[1].i32().unwrap(), 32);
 
-    let mut buffer = vec![0u8; result[1].unwrap_i32() as usize];
+    let mut buffer = vec![0u8; result[1].i32().unwrap() as usize];
     memory
-        .read(&mut store, result[0].unwrap_i32() as usize, &mut buffer)
+        .read(&mut store, result[0].i32().unwrap() as usize, &mut buffer)
         .expect("could not read resulting hash from memory");
     let expected_result =
         Vec::from_hex("973153f86ec2da1748e63f0cf85b89835b42f8ee8018c549868a1308a19f6ca3").unwrap();
@@ -2443,12 +2443,12 @@ fn sha256_buf() {
             &mut result,
         )
         .expect("call to sha256-buf failed");
-    assert_eq!(result[0].unwrap_i32(), res_offset);
-    assert_eq!(result[1].unwrap_i32(), 32);
+    assert_eq!(result[0].i32().unwrap(), res_offset);
+    assert_eq!(result[1].i32().unwrap(), 32);
 
-    let mut buffer = vec![0u8; result[1].unwrap_i32() as usize];
+    let mut buffer = vec![0u8; result[1].i32().unwrap() as usize];
     memory
-        .read(&mut store, result[0].unwrap_i32() as usize, &mut buffer)
+        .read(&mut store, result[0].i32().unwrap() as usize, &mut buffer)
         .expect("could not read resulting hash from memory");
     let expected_result =
         Vec::from_hex("02779466cdec163811d078815c633f21901413081449002f24aa3e80f0b88ef7").unwrap();
@@ -2486,12 +2486,12 @@ fn sha256_int() {
             &mut result,
         )
         .expect("call to sha256-int failed");
-    assert_eq!(result[0].unwrap_i32(), res_offset);
-    assert_eq!(result[1].unwrap_i32(), 32);
+    assert_eq!(result[0].i32().unwrap(), res_offset);
+    assert_eq!(result[1].i32().unwrap(), 32);
 
-    let mut buffer = vec![0u8; result[1].unwrap_i32() as usize];
+    let mut buffer = vec![0u8; result[1].i32().unwrap() as usize];
     memory
-        .read(&mut store, result[0].unwrap_i32() as usize, &mut buffer)
+        .read(&mut store, result[0].i32().unwrap() as usize, &mut buffer)
         .expect("could not read resulting hash from memory");
     let expected_result =
         Vec::from_hex("2099af4a709288ebee47cad01952a37d2d04b8003b3f4f2d520a94f3fdfe4210").unwrap();
@@ -2631,12 +2631,12 @@ fn hash160_buf() {
             &mut result,
         )
         .expect("call to hash160-buf failed");
-    assert_eq!(result[0].unwrap_i32(), res_offset);
-    assert_eq!(result[1].unwrap_i32(), 20);
+    assert_eq!(result[0].i32().unwrap(), res_offset);
+    assert_eq!(result[1].i32().unwrap(), 20);
 
-    let mut buffer = vec![0u8; result[1].unwrap_i32() as usize];
+    let mut buffer = vec![0u8; result[1].i32().unwrap() as usize];
     memory
-        .read(&mut store, result[0].unwrap_i32() as usize, &mut buffer)
+        .read(&mut store, result[0].i32().unwrap() as usize, &mut buffer)
         .expect("could not read resulting hash from memory");
     let expected_result = Vec::from_hex("e3c83f9d9adb8fcbccc4399da8ebe609ba4352e4").unwrap();
     assert_eq!(&buffer, &expected_result);
@@ -2658,12 +2658,12 @@ fn hash160_buf() {
             &mut result,
         )
         .expect("call to hash160-buf failed");
-    assert_eq!(result[0].unwrap_i32(), res_offset);
-    assert_eq!(result[1].unwrap_i32(), 20);
+    assert_eq!(result[0].i32().unwrap(), res_offset);
+    assert_eq!(result[1].i32().unwrap(), 20);
 
-    let mut buffer = vec![0u8; result[1].unwrap_i32() as usize];
+    let mut buffer = vec![0u8; result[1].i32().unwrap() as usize];
     memory
-        .read(&mut store, result[0].unwrap_i32() as usize, &mut buffer)
+        .read(&mut store, result[0].i32().unwrap() as usize, &mut buffer)
         .expect("could not read resulting hash from memory");
     let expected_result = Vec::from_hex("d6f2b43388048a339abd861be2babd817e3717cd").unwrap();
     assert_eq!(&buffer, &expected_result);
@@ -2700,12 +2700,12 @@ fn hash160_int() {
             &mut result,
         )
         .expect("call to hash160-int failed");
-    assert_eq!(result[0].unwrap_i32(), res_offset);
-    assert_eq!(result[1].unwrap_i32(), 20);
+    assert_eq!(result[0].i32().unwrap(), res_offset);
+    assert_eq!(result[1].i32().unwrap(), 20);
 
-    let mut buffer = vec![0u8; result[1].unwrap_i32() as usize];
+    let mut buffer = vec![0u8; result[1].i32().unwrap() as usize];
     memory
-        .read(&mut store, result[0].unwrap_i32() as usize, &mut buffer)
+        .read(&mut store, result[0].i32().unwrap() as usize, &mut buffer)
         .expect("could not read resulting hash from memory");
     let expected_result = Vec::from_hex("aeae89e821d429940dff0d3412377815dae9ab07").unwrap();
     assert_eq!(&buffer, &expected_result);
@@ -2793,8 +2793,8 @@ fn buff_to_uint_be() {
                 &mut result,
             )
             .expect("call to buff-to-uint-be failed");
-        assert_eq!(result[0].unwrap_i64(), expected_lo as i64);
-        assert_eq!(result[1].unwrap_i64(), expected_hi as i64);
+        assert_eq!(result[0].i64().unwrap(), expected_lo as i64);
+        assert_eq!(result[1].i64().unwrap(), expected_hi as i64);
     };
 
     // Empty buffer == 0
@@ -2857,8 +2857,8 @@ fn buff_to_uint_le() {
                 &mut result,
             )
             .expect("call to buff-to-uint-be failed");
-        assert_eq!(result[0].unwrap_i64(), expected_lo as i64);
-        assert_eq!(result[1].unwrap_i64(), expected_hi as i64);
+        assert_eq!(result[0].i64().unwrap(), expected_lo as i64);
+        assert_eq!(result[1].i64().unwrap(), expected_hi as i64);
     };
 
     // Empty buffer == 0
@@ -2920,9 +2920,9 @@ fn string_to_uint() {
             &mut result,
         )
         .expect("call to string-to-uint failed");
-        assert_eq!(result[0].unwrap_i32(), expected_opt);
-        assert_eq!(result[1].unwrap_i64(), expected_lo);
-        assert_eq!(result[2].unwrap_i64(), expected_hi);
+        assert_eq!(result[0].i32().unwrap(), expected_opt);
+        assert_eq!(result[1].i64().unwrap(), expected_lo);
+        assert_eq!(result[2].i64().unwrap(), expected_hi);
     };
 
     // Fails with empty string
@@ -2994,9 +2994,9 @@ fn string_to_int() {
             &mut result,
         )
         .expect("call to buff-to-uint-be failed");
-        assert_eq!(result[0].unwrap_i32(), expected_opt);
-        assert_eq!(result[1].unwrap_i64(), expected_lo);
-        assert_eq!(result[2].unwrap_i64(), expected_hi);
+        assert_eq!(result[0].i32().unwrap(), expected_opt);
+        assert_eq!(result[1].i64().unwrap(), expected_lo);
+        assert_eq!(result[2].i64().unwrap(), expected_hi);
     };
 
     // Fails with empty string
@@ -3077,9 +3077,9 @@ fn utf8_to_uint() {
             &mut result,
         )
         .expect("call to string-to-uint failed");
-        assert_eq!(result[0].unwrap_i32(), expected_opt);
-        assert_eq!(result[1].unwrap_i64(), expected_lo);
-        assert_eq!(result[2].unwrap_i64(), expected_hi);
+        assert_eq!(result[0].i32().unwrap(), expected_opt);
+        assert_eq!(result[1].i64().unwrap(), expected_lo);
+        assert_eq!(result[2].i64().unwrap(), expected_hi);
     };
 
     // Fails with empty string
@@ -3138,9 +3138,9 @@ fn utf8_to_uint() {
         &mut result,
     )
     .expect("call to string-to-uint failed");
-    assert_eq!(result[0].unwrap_i32(), 0);
-    assert_eq!(result[1].unwrap_i64(), 0);
-    assert_eq!(result[2].unwrap_i64(), 0);
+    assert_eq!(result[0].i32().unwrap(), 0);
+    assert_eq!(result[1].i64().unwrap(), 0);
+    assert_eq!(result[2].i64().unwrap(), 0);
 }
 
 #[test]
@@ -3168,9 +3168,9 @@ fn utf8_to_int() {
             &mut result,
         )
         .expect("call to buff-to-uint-be failed");
-        assert_eq!(result[0].unwrap_i32(), expected_opt);
-        assert_eq!(result[1].unwrap_i64(), expected_lo);
-        assert_eq!(result[2].unwrap_i64(), expected_hi);
+        assert_eq!(result[0].i32().unwrap(), expected_opt);
+        assert_eq!(result[1].i64().unwrap(), expected_lo);
+        assert_eq!(result[2].i64().unwrap(), expected_hi);
     };
 
     // Fails with empty string
@@ -3236,9 +3236,9 @@ fn utf8_to_int() {
         &mut result,
     )
     .expect("call to string-to-uint failed");
-    assert_eq!(result[0].unwrap_i32(), 0);
-    assert_eq!(result[1].unwrap_i64(), 0);
-    assert_eq!(result[2].unwrap_i64(), 0);
+    assert_eq!(result[0].i32().unwrap(), 0);
+    assert_eq!(result[1].i64().unwrap(), 0);
+    assert_eq!(result[2].i64().unwrap(), 0);
 }
 
 #[test]
@@ -3266,7 +3266,7 @@ fn is_transient() {
                 &mut result,
             )
             .expect("call to is_transient failed");
-        assert_eq!(result[0].unwrap_i32(), expected as i32);
+        assert_eq!(result[0].i32().unwrap(), expected as i32);
     };
 
     // Empty string
@@ -3296,7 +3296,7 @@ fn is_alpha() {
         is_alpha
             .call(&mut store, &[Val::I32(c as i32)], &mut result)
             .expect("call to is-alpha failed");
-        assert_eq!(result[0].unwrap_i32(), expected as i32);
+        assert_eq!(result[0].i32().unwrap(), expected as i32);
     };
 
     test_char('a', true);
@@ -3322,7 +3322,7 @@ fn is_valid_char() {
         is_valid
             .call(&mut store, &[Val::I32(c as i32)], &mut result)
             .expect("call to is-valid-char failed");
-        assert_eq!(result[0].unwrap_i32(), expected as i32);
+        assert_eq!(result[0].i32().unwrap(), expected as i32);
     };
 
     test_char('a', true);
@@ -3364,7 +3364,7 @@ fn is_valid_contract_name() {
                 &mut result,
             )
             .expect("call to is_transient failed");
-        assert_eq!(result[0].unwrap_i32(), expected as i32);
+        assert_eq!(result[0].i32().unwrap(), expected as i32);
     };
 
     // Empty string
@@ -3453,13 +3453,13 @@ fn principal_construct() {
                 &mut result,
             )
             .expect("call to is_transient failed");
-        assert_eq!(result[0].unwrap_i32(), expected_ok as i32);
+        assert_eq!(result[0].i32().unwrap(), expected_ok as i32);
         if let Some(expected_principal) = expected_principal {
             let (offset, length) = if expected_ok {
-                (result[1].unwrap_i32(), result[2].unwrap_i32())
+                (result[1].i32().unwrap(), result[2].i32().unwrap())
             } else {
-                assert_eq!(result[5].unwrap_i32(), 1);
-                (result[6].unwrap_i32(), result[7].unwrap_i32())
+                assert_eq!(result[5].i32().unwrap(), 1);
+                (result[6].i32().unwrap(), result[7].i32().unwrap())
             };
             assert_eq!(length, expected_principal.len() as i32);
             let mut buffer = vec![0u8; expected_principal.len()];
@@ -3469,7 +3469,7 @@ fn principal_construct() {
             assert_eq!(&buffer, expected_principal);
         }
 
-        let err = ((result[4].unwrap_i64() as u128) << 64) | result[3].unwrap_i64() as u128;
+        let err = ((result[4].i64().unwrap() as u128) << 64) | result[3].i64().unwrap() as u128;
         assert_eq!(err, expected_err);
     };
 
@@ -3604,7 +3604,7 @@ fn is_version_valid() {
         is_valid
             .call(&mut store, &[Val::I32(version as i32)], &mut result)
             .expect("call to is-version-valid failed");
-        assert_eq!(result[0].unwrap_i32(), expected as i32);
+        assert_eq!(result[0].i32().unwrap(), expected as i32);
     };
 
     test_version(21, true);
@@ -3647,8 +3647,8 @@ fn uint_to_string() {
             &mut result,
         )
         .expect("call to uint-to-string failed");
-        assert_eq!(result[0].unwrap_i32(), res_offset);
-        assert_eq!(result[1].unwrap_i32(), expected.len() as i32);
+        assert_eq!(result[0].i32().unwrap(), res_offset);
+        assert_eq!(result[1].i32().unwrap(), expected.len() as i32);
 
         let mut buffer = vec![0u8; expected.len()];
         memory
@@ -3711,8 +3711,8 @@ fn int_to_string() {
         )
         .expect("call to int-to-string failed");
 
-        assert_eq!(result[0].unwrap_i32(), res_offset); // Should return the same offset
-        assert_eq!(result[1].unwrap_i32(), expected.len() as i32);
+        assert_eq!(result[0].i32().unwrap(), res_offset); // Should return the same offset
+        assert_eq!(result[1].i32().unwrap(), expected.len() as i32);
 
         let mut buffer = vec![0u8; expected.len()];
         memory
@@ -3776,8 +3776,8 @@ fn uint_to_utf8() {
             &mut result,
         )
         .expect("call to uint-to-string failed");
-        assert_eq!(result[0].unwrap_i32(), res_offset);
-        assert_eq!(result[1].unwrap_i32(), expected_len as i32);
+        assert_eq!(result[0].i32().unwrap(), res_offset);
+        assert_eq!(result[1].i32().unwrap(), expected_len as i32);
 
         let mut buffer = vec![0u8; expected_len];
         memory
@@ -3846,8 +3846,8 @@ fn int_to_utf8() {
             &mut result,
         )
         .expect("call to uint-to-string failed");
-        assert_eq!(result[0].unwrap_i32(), res_offset);
-        assert_eq!(result[1].unwrap_i32(), expected_len as i32);
+        assert_eq!(result[0].i32().unwrap(), res_offset);
+        assert_eq!(result[1].i32().unwrap(), expected_len as i32);
 
         let mut buffer = vec![0u8; expected_len];
         memory
@@ -3923,12 +3923,12 @@ fn sha512_buf() {
             &mut result,
         )
         .expect("call to sha512-buf failed");
-    assert_eq!(result[0].unwrap_i32(), res_offset);
-    assert_eq!(result[1].unwrap_i32(), 64);
+    assert_eq!(result[0].i32().unwrap(), res_offset);
+    assert_eq!(result[1].i32().unwrap(), 64);
 
-    let mut buffer = vec![0u8; result[1].unwrap_i32() as usize];
+    let mut buffer = vec![0u8; result[1].i32().unwrap() as usize];
     memory
-        .read(&mut store, result[0].unwrap_i32() as usize, &mut buffer)
+        .read(&mut store, result[0].i32().unwrap() as usize, &mut buffer)
         .expect("could not read resulting hash from memory");
     let expected_result =
         Vec::from_hex("374d794a95cdcfd8b35993185fef9ba368f160d8daf432d08ba9f1ed1e5abe6cc69291e0fa2fe0006a52570ef18c19def4e617c33ce52ef0a6e5fbe318cb0387").unwrap();
@@ -3951,12 +3951,12 @@ fn sha512_buf() {
             &mut result,
         )
         .expect("call to sha512-buf failed");
-    assert_eq!(result[0].unwrap_i32(), res_offset);
-    assert_eq!(result[1].unwrap_i32(), 64);
+    assert_eq!(result[0].i32().unwrap(), res_offset);
+    assert_eq!(result[1].i32().unwrap(), 64);
 
-    let mut buffer = vec![0u8; result[1].unwrap_i32() as usize];
+    let mut buffer = vec![0u8; result[1].i32().unwrap() as usize];
     memory
-        .read(&mut store, result[0].unwrap_i32() as usize, &mut buffer)
+        .read(&mut store, result[0].i32().unwrap() as usize, &mut buffer)
         .expect("could not read resulting hash from memory");
     let expected_result =
         Vec::from_hex("83cd8866be238eda447cb0ee94a6bfa6248109346b1ce3c75f8a67d35f3d8ab1697b46703065c094fcc7d3a61acc1e8ee85a4f306f13cc1a7aea7651781199b3").unwrap();
@@ -3980,12 +3980,12 @@ fn sha512_buf() {
             &mut result,
         )
         .expect("call to sha512-buf failed");
-    assert_eq!(result[0].unwrap_i32(), res_offset);
-    assert_eq!(result[1].unwrap_i32(), 64);
+    assert_eq!(result[0].i32().unwrap(), res_offset);
+    assert_eq!(result[1].i32().unwrap(), 64);
 
-    let mut buffer = vec![0u8; result[1].unwrap_i32() as usize];
+    let mut buffer = vec![0u8; result[1].i32().unwrap() as usize];
     memory
-        .read(&mut store, result[0].unwrap_i32() as usize, &mut buffer)
+        .read(&mut store, result[0].i32().unwrap() as usize, &mut buffer)
         .expect("could not read resulting hash from memory");
     let expected_result =
         Vec::from_hex("c2e210f2674a648d9b58683e651f8fca5ce4270c0489773d8e4ffaecd46b22b1d5273697f45275a7c441c9e4ca91a39bdb3e3b7eb74cbdb85266eef8f30ac860").unwrap();
@@ -4023,12 +4023,12 @@ fn sha512_int() {
             &mut result,
         )
         .expect("call to sha512-int failed");
-    assert_eq!(result[0].unwrap_i32(), res_offset);
-    assert_eq!(result[1].unwrap_i32(), 64);
+    assert_eq!(result[0].i32().unwrap(), res_offset);
+    assert_eq!(result[1].i32().unwrap(), 64);
 
-    let mut buffer = vec![0u8; result[1].unwrap_i32() as usize];
+    let mut buffer = vec![0u8; result[1].i32().unwrap() as usize];
     memory
-        .read(&mut store, result[0].unwrap_i32() as usize, &mut buffer)
+        .read(&mut store, result[0].i32().unwrap() as usize, &mut buffer)
         .expect("could not read resulting hash from memory");
     let expected_result =
         Vec::from_hex("83b7d9d929320aa6a6898e4ce1dc11db78a8e4f01e47c379b49b18e3c0c8bfb98af99a758f44d4f4ee845205a4c90d6016e01d470ff95a19f1f1b37284c5afa6").unwrap();
@@ -4068,9 +4068,9 @@ fn utf8_to_string_utf8_valid() {
             )
             .expect("call to utf8-to-string-utf8 failed");
 
-        assert_eq!(result[0].unwrap_i32(), 1);
-        assert_eq!(result[1].unwrap_i32(), 3000);
-        assert_eq!(result[2].unwrap_i32(), 4 * result_size as i32);
+        assert_eq!(result[0].i32().unwrap(), 1);
+        assert_eq!(result[1].i32().unwrap(), 3000);
+        assert_eq!(result[2].i32().unwrap(), 4 * result_size as i32);
 
         let mut buffer = vec![0u8; 4 * result_size];
         memory
@@ -4148,7 +4148,7 @@ fn utf8_to_string_utf8_invalid() {
             )
             .expect("call to utf8-to-string-utf8 failed");
 
-        assert_eq!(result[0].unwrap_i32(), 0);
+        assert_eq!(result[0].i32().unwrap(), 0);
     };
 
     // one byte invalid
@@ -4272,7 +4272,7 @@ fn bsearch_clarity_name() {
         .unwrap();
 
         assert_eq!(
-            result[0].unwrap_i32(),
+            result[0].i32().unwrap(),
             a.binary_search(&b).map(|i| i as i32).unwrap_or(-1)
         );
     };
@@ -4330,7 +4330,7 @@ fn skip_functions() {
         )
         .expect("could not call skipping function");
 
-        assert_eq!(result[0].unwrap_i32(), offset_end);
+        assert_eq!(result[0].i32().unwrap(), offset_end);
     };
 
     check(Value::Int(14568789521235));

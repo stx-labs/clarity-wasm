@@ -11,7 +11,7 @@ use clarity::vm::types::{
 };
 use clarity::vm::{CallStack, ClarityVersion, ContractContext, Value};
 use walrus::{FunctionBuilder, InstrSeqBuilder, MemoryId};
-use wasmtime::{Engine, Module, Store};
+use wasmi::{Engine, Module, Store};
 
 use crate::datastore::{BurnDatastore, Datastore, StacksConstants};
 use crate::initialize::{ClarityWasmContext, ClarityWasmStore};
@@ -197,7 +197,7 @@ impl WasmGenerator {
             let module =
                 Module::new(&engine, self.module.emit_wasm()).expect("failed to create module");
             let instance = linker
-                .instantiate(&mut *store, &module)
+                .instantiate_and_start(&mut *store, &module)
                 .expect("failed to instanciate module");
 
             let top_level = instance
@@ -207,6 +207,8 @@ impl WasmGenerator {
             let mut result: Vec<_> = top_level
                 .ty(&mut *store)
                 .results()
+                .iter()
+                .copied()
                 .map(placeholder_for_type)
                 .collect();
 
