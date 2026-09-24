@@ -407,6 +407,7 @@ checksum = "b94f61472cee1439c0b966b47e3aca9ae07e45d070759512cd390ea2bebc6675"
 
 [[package]]
 name = "clar2wasm"
+source = "git+https://github.com/melcar-stacks/stacks-core?branch=wasmi#a665b98c0465e596bba5ec9ff9b36f8534d7d41b"
 version = "0.1.0"
 dependencies = [
  "assert_cmd",
@@ -437,6 +438,7 @@ dependencies = [
 [[package]]
 name = "clarity"
 version = "2.3.0"
+source = "git+https://github.com/melcar-stacks/stacks-core?branch=wasmi#a665b98c0465e596bba5ec9ff9b36f8534d7d41b"
 dependencies = [
  "clarity-types",
  "hashbrown 0.15.5",
@@ -457,6 +459,7 @@ dependencies = [
 
 [[package]]
 name = "clarity-types"
+source = "git+https://github.com/melcar-stacks/stacks-core?branch=wasmi#a665b98c0465e596bba5ec9ff9b36f8534d7d41b"
 version = "0.0.1"
 dependencies = [
  "lazy_static",
