@@ -3,7 +3,7 @@ use std::io::{Cursor, Write as _};
 use clarity::util::secp256k1::secp256k1_decompress;
 use clarity::util::secp256r1::{secp256r1_verify, secp256r1_verify_digest};
 use clarity::vm::callables::{DefineType, DefinedFunction};
-use clarity::vm::clarity_wasm::{Cost, CostGlobals};
+use clarity::vm::clarity_wasm::{Cost, CostGlobals, HostResultExt};
 use clarity::vm::contexts::{ExecutionState, InvocationContext};
 use clarity::vm::costs::{constants as cost_constants, CostTracker};
 use clarity::vm::database::{ClarityDatabase, STXBalance, StoreType};
@@ -29,9 +29,9 @@ use stacks_common::types::chainstate::StacksBlockId;
 use stacks_common::util::ed25519::ed25519_verify;
 use stacks_common::util::hash::{Keccak256Hash, Sha512Sum, Sha512Trunc256Sum};
 use stacks_common::util::secp256k1::{secp256k1_recover, secp256k1_verify, Secp256k1PublicKey};
-use wasmtime::{
-    AsContextMut, Caller, Engine, ExternRef, Global, GlobalType, Instance, Linker, Memory, Module,
-    Rooted, Store, StoreContextMut, Val,
+use wasmi::{
+    AsContext, AsContextMut, Caller, Engine, ExternRef, Global, Instance, Linker, Memory, Module,
+    Nullable, Store, StoreContext, Val,
 };
 
 use crate::initialize::ClarityWasmContext;
@@ -66,16 +66,11 @@ fn link_global<T: 'static>(
     name: &str,
     value: Val,
 ) -> Result<Global, VmExecutionError> {
-    let the_global = Global::new(
-        store.as_context_mut(),
-        GlobalType::new(wasmtime::ValType::I64, wasmtime::Mutability::Var),
-        value,
-    )
-    .map_err(|e| VmExecutionError::Wasm(WasmError::UnableToLoadModule(e)))?;
+    let the_global = Global::new(store.as_context_mut(), value, wasmi::Mutability::Var);
 
     linker
-        .define(&mut store.as_context_mut(), "clarity", name, the_global)
-        .map_err(|e| VmExecutionError::Wasm(WasmError::UnableToLoadModule(e)))?;
+        .define("clarity", name, the_global)
+        .map_err(|e| VmExecutionError::Wasm(WasmError::UnableToLoadModule(e.into())))?;
     Ok(the_global)
 }
 
@@ -247,18 +242,18 @@ fn link_define_variable_fn(
                     .data_mut()
                     .contract_context_mut()?
                     .persisted_names
-                    .insert(ClarityName::try_from(name.clone())?);
+                    .insert(ClarityName::try_from(name.clone()).host_err()?);
 
                 caller
                     .data_mut()
                     .global_context
-                    .add_memory(value_type.type_size()? as u64)
+                    .add_memory(value_type.type_size().host_err()? as u64)
                     .map_err(VmExecutionError::from)?;
 
                 caller
                     .data_mut()
                     .global_context
-                    .add_memory(value.size()? as u64)
+                    .add_memory(value.size().host_err()? as u64)
                     .map_err(VmExecutionError::from)?;
 
                 // Create the variable in the global context
@@ -282,7 +277,7 @@ fn link_define_variable_fn(
                     .data_mut()
                     .contract_context_mut()?
                     .meta_data_var
-                    .insert(ClarityName::try_from(name)?, data_types);
+                    .insert(ClarityName::try_from(name).host_err()?, data_types);
 
                 Ok(())
             },
@@ -291,7 +286,7 @@ fn link_define_variable_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "define_variable".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -323,7 +318,7 @@ fn link_define_ft_fn(
 
                 let name =
                     read_identifier_from_wasm(memory, &mut caller, name_offset, name_length)?;
-                let cname = ClarityName::try_from(name.clone())?;
+                let cname = ClarityName::try_from(name.clone()).host_err()?;
 
                 let total_supply = if supply_indicator == 1 {
                     Some(((supply_hi as u128) << 64) | supply_lo as u128)
@@ -340,7 +335,7 @@ fn link_define_ft_fn(
                 caller
                     .data_mut()
                     .global_context
-                    .add_memory(TypeSignature::UIntType.type_size()? as u64)
+                    .add_memory(TypeSignature::UIntType.type_size().host_err()? as u64)
                     .map_err(VmExecutionError::from)?;
                 let data_type = caller
                     .data_mut()
@@ -361,7 +356,7 @@ fn link_define_ft_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "define_ft".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -390,7 +385,7 @@ fn link_define_nft_fn(
 
                 let name =
                     read_identifier_from_wasm(memory, &mut caller, name_offset, name_length)?;
-                let cname = ClarityName::try_from(name.clone())?;
+                let cname = ClarityName::try_from(name.clone()).host_err()?;
 
                 // Get the type of this NFT from the contract analysis
                 let asset_type = caller
@@ -413,7 +408,7 @@ fn link_define_nft_fn(
                 caller
                     .data_mut()
                     .global_context
-                    .add_memory(asset_type.type_size()? as u64)
+                    .add_memory(asset_type.type_size().host_err()? as u64)
                     .map_err(VmExecutionError::from)?;
 
                 let data_type = caller
@@ -435,7 +430,7 @@ fn link_define_nft_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "define_nft".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -464,7 +459,7 @@ fn link_define_map_fn(
 
                 let name =
                     read_identifier_from_wasm(memory, &mut caller, name_offset, name_length)?;
-                let cname = ClarityName::try_from(name.clone())?;
+                let cname = ClarityName::try_from(name.clone()).host_err()?;
 
                 let (key_type, value_type) = caller
                     .data()
@@ -486,12 +481,12 @@ fn link_define_map_fn(
                 caller
                     .data_mut()
                     .global_context
-                    .add_memory(key_type.type_size()? as u64)
+                    .add_memory(key_type.type_size().host_err()? as u64)
                     .map_err(VmExecutionError::from)?;
                 caller
                     .data_mut()
                     .global_context
-                    .add_memory(value_type.type_size()? as u64)
+                    .add_memory(value_type.type_size().host_err()? as u64)
                     .map_err(VmExecutionError::from)?;
 
                 let data_type = caller.data_mut().global_context.database.create_map(
@@ -514,7 +509,7 @@ fn link_define_map_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "define_map".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -541,7 +536,7 @@ fn link_define_function_fn(
                 // Read the variable name string from the memory
                 let function_name =
                     read_identifier_from_wasm(memory, &mut caller, name_offset, name_length)?;
-                let function_cname = ClarityName::try_from(function_name.clone())?;
+                let function_cname = ClarityName::try_from(function_name.clone()).host_err()?;
 
                 // Retrieve the kind of function
                 let (define_type, function_type) =
@@ -631,7 +626,7 @@ fn link_define_function_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "define_function".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -654,7 +649,7 @@ fn link_define_trait_fn(
 
                 let name =
                     read_identifier_from_wasm(memory, &mut caller, name_offset, name_length)?;
-                let cname = ClarityName::try_from(name.clone())?;
+                let cname = ClarityName::try_from(name.clone()).host_err()?;
 
                 let trait_def = caller
                     .data()
@@ -680,7 +675,7 @@ fn link_define_trait_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "define_map".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -703,7 +698,8 @@ fn link_impl_trait_fn(
 
                 let trait_id_string =
                     read_identifier_from_wasm(memory, &mut caller, name_offset, name_length)?;
-                let trait_id = TraitIdentifier::parse_fully_qualified(trait_id_string.as_str())?;
+                let trait_id =
+                    TraitIdentifier::parse_fully_qualified(trait_id_string.as_str()).host_err()?;
 
                 caller
                     .data_mut()
@@ -718,7 +714,7 @@ fn link_impl_trait_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "define_map".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -805,7 +801,7 @@ fn link_get_variable_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "get_variable".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -882,7 +878,7 @@ fn link_set_variable_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "set_variable".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -930,7 +926,7 @@ fn link_tx_sender_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "tx_sender".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -979,7 +975,7 @@ fn link_contract_caller_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "contract_caller".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -1020,7 +1016,7 @@ fn link_current_contract_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "current_contract".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -1064,7 +1060,7 @@ fn link_tx_sponsor_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "tx_sponsor".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -1091,7 +1087,7 @@ fn link_block_height_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "block_height".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -1118,7 +1114,7 @@ fn link_stacks_block_height_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "stacks_block_height".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -1145,7 +1141,7 @@ fn link_stacks_block_time_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "stacks_block_time".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -1172,7 +1168,7 @@ fn link_tenure_height_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "tenure_height".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -1200,7 +1196,7 @@ fn link_burn_block_height_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "burn_block_height".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -1230,7 +1226,7 @@ fn link_stx_liquid_supply_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "stx_liquid_supply".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -1257,7 +1253,7 @@ fn link_is_in_regtest_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "is_in_regtest".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -1284,7 +1280,7 @@ fn link_is_in_mainnet_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "is_in_mainnet".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -1308,7 +1304,7 @@ fn link_chain_id_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "chain_id".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -1338,7 +1334,7 @@ fn link_enter_as_contract_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "enter_as_contract".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -1363,7 +1359,7 @@ fn link_exit_as_contract_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "exit_as_contract".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -1378,7 +1374,7 @@ fn link_enter_as_contract_safe_fn(
         .func_wrap(
             "clarity",
             "enter_as_contract_safe",
-            |mut caller: Caller<'_, ClarityWasmContext<'static, 'static>>| -> wasmtime::Result<Option<Rooted<ExternRef>>> {
+            |mut caller: Caller<'_, ClarityWasmContext>| -> Nullable<ExternRef> {
                 let contract_principal: PrincipalData = caller
                     .data()
                     .contract_context()
@@ -1389,14 +1385,14 @@ fn link_enter_as_contract_safe_fn(
                 caller.data_mut().push_sender(contract_principal.clone());
                 caller.data_mut().push_caller(contract_principal);
 
-                Ok(Some(AllowanceContext::new_externref(&mut caller)?))
+                Nullable::Val(ExternRef::new(&mut caller, AllowanceContext::new()))
             },
         )
         .map(|_| ())
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "enter_as_contract_safe".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -1411,8 +1407,7 @@ fn link_exit_as_contract_safe_fn(
         .func_wrap(
             "clarity",
             "exit_as_contract_safe",
-            |mut caller: Caller<'_, ClarityWasmContext<'static, 'static>>,
-             allowance_ref: Option<Rooted<ExternRef>>| {
+            |mut caller: Caller<'_, ClarityWasmContext>, allowance_ref: Nullable<ExternRef>| {
                 let epoch = caller.data().global_context.epoch_id;
 
                 // we need to restore the current caller and sender. We pop both and check if we did set
@@ -1424,7 +1419,7 @@ fn link_exit_as_contract_safe_fn(
                     owner?
                 };
 
-                let allowances = AllowanceContext::extract(&mut caller, &allowance_ref)?;
+                let allowances = AllowanceContext::extract(&caller, &allowance_ref)?;
 
                 let asset_map = caller.data_mut().global_context.get_readonly_asset_map()?;
 
@@ -1446,7 +1441,7 @@ fn link_exit_as_contract_safe_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "exit_as_contract_safe".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -1478,7 +1473,7 @@ fn link_cleanup_as_contract_safe_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "cleanup_as_contract_safe".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -1493,14 +1488,14 @@ fn link_enter_restrict_assets_fn(
             |mut caller: Caller<'_, ClarityWasmContext<'static, 'static>>| -> wasmtime::Result<Option<Rooted<ExternRef>>> {
                 caller.data_mut().global_context.begin();
 
-                Ok(Some(AllowanceContext::new_externref(&mut caller)?))
+                Nullable::Val(ExternRef::new(&mut caller, AllowanceContext::new()))
             },
         )
         .map(|_| ())
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "enter_restrict_assets".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -1515,7 +1510,7 @@ fn link_exit_restrict_assets_fn(
             |mut caller: Caller<'_, ClarityWasmContext<'static, 'static>>,
              asset_owner_offset: i32,
              asset_owner_length: i32,
-             allowance_ref: Option<Rooted<ExternRef>>| {
+             allowance_ref: Nullable<ExternRef>| {
                 let memory = caller
                     .get_export("memory")
                     .and_then(|export| export.into_memory())
@@ -1529,8 +1524,9 @@ fn link_exit_restrict_assets_fn(
                     asset_owner_length,
                     epoch,
                 )?
-                .expect_principal()?;
-                let allowances = AllowanceContext::extract(&mut caller, &allowance_ref)?;
+                .expect_principal()
+                .host_err()?;
+                let allowances = AllowanceContext::extract(&caller, &allowance_ref)?;
 
                 let asset_map = caller.data_mut().global_context.get_readonly_asset_map()?;
 
@@ -1552,7 +1548,7 @@ fn link_exit_restrict_assets_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "exit_restrict_assets".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -1574,14 +1570,16 @@ fn link_cleanup_restrict_assets_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "cleanup_restrict_assets".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
 
 /// Holds the list of allowances for an `as-contract?` block.
 /// Passed through WASM as an `ExternRef` handle.
-struct AllowanceContext(Vec<Allowance>);
+// Needs a `Mutex` because Wasmi only hands out shared references to the data
+// of an `ExternRef`.
+struct AllowanceContext(std::sync::Mutex<Vec<Allowance>>);
 
 impl AllowanceContext {
     /// Create a new, empty allowance context, and wrap it in an `ExternRef`.
@@ -1595,20 +1593,18 @@ impl AllowanceContext {
         })
     }
 
-    fn from_externref<'s>(
-        store: StoreContextMut<'s, ClarityWasmContext<'static, 'static>>,
-        externref: &Option<Rooted<ExternRef>>,
-    ) -> Result<&'s mut Self, VmExecutionError> {
-        let externref = externref.as_ref().ok_or_else(|| {
+    fn from_externref<'s, T: 's>(
+        store: impl Into<StoreContext<'s, T>>,
+        externref: &Nullable<ExternRef>,
+    ) -> Result<&'s Self, VmExecutionError> {
+        let externref = externref.val().ok_or_else(|| {
             VmExecutionError::Wasm(WasmError::WasmGeneratorError(
                 "allowance context is missing".to_string(),
             ))
         })?;
         externref
-            .data_mut(store)
-            .ok()
-            .flatten()
-            .and_then(|data| data.downcast_mut::<AllowanceContext>())
+            .data(store)
+            .downcast_ref::<AllowanceContext>()
             .ok_or_else(|| {
                 VmExecutionError::Wasm(WasmError::WasmGeneratorError(
                     "allowance context has wrong type".to_string(),
@@ -1617,22 +1613,26 @@ impl AllowanceContext {
     }
 
     fn push(
-        mut store: impl AsContextMut<Data = ClarityWasmContext<'static, 'static>>,
-        externref: &Option<Rooted<ExternRef>>,
+        store: impl AsContext,
+        externref: &Nullable<ExternRef>,
         allowance: Allowance,
     ) -> Result<(), VmExecutionError> {
-        Self::from_externref(store.as_context_mut(), externref)?
-            .0
+        let ctx = Self::from_externref(store.as_context(), externref)?;
+        ctx.0
+            .lock()
+            .map_err(|e| VmExecutionError::Wasm(WasmError::Expect(e.to_string())))?
             .push(allowance);
         Ok(())
     }
 
     fn extract(
-        mut store: impl AsContextMut<Data = ClarityWasmContext<'static, 'static>>,
-        externref: &Option<Rooted<ExternRef>>,
+        store: impl AsContext,
+        externref: &Nullable<ExternRef>,
     ) -> Result<Vec<Allowance>, VmExecutionError> {
-        let ctx = Self::from_externref(store.as_context_mut(), externref)?;
-        Ok(std::mem::take(&mut ctx.0))
+        let ctx = Self::from_externref(store.as_context(), externref)?;
+        Ok(std::mem::take(&mut *ctx.0.lock().map_err(|e| {
+            VmExecutionError::Wasm(WasmError::Expect(e.to_string()))
+        })?))
     }
 }
 
@@ -1646,9 +1646,8 @@ fn link_with_all_assets_unsafe_fn(
         .func_wrap(
             "clarity",
             "with_all_assets_unsafe",
-            |mut caller: Caller<'_, ClarityWasmContext<'static, 'static>>,
-             allowance_ref: Option<Rooted<ExternRef>>| {
-                AllowanceContext::push(&mut caller, &allowance_ref, Allowance::All)?;
+            |caller: Caller<'_, ClarityWasmContext>, allowance_ref: Nullable<ExternRef>| {
+                AllowanceContext::push(&caller, &allowance_ref, Allowance::All)?;
 
                 Ok(())
             },
@@ -1657,7 +1656,7 @@ fn link_with_all_assets_unsafe_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "with_all_assets_unsafe".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -1669,9 +1668,8 @@ fn link_with_pox_fn(
         .func_wrap(
             "clarity",
             "with_pox",
-            |mut caller: Caller<'_, ClarityWasmContext<'static, 'static>>,
-             allowance_ref: Option<Rooted<ExternRef>>| {
-                AllowanceContext::push(&mut caller, &allowance_ref, Allowance::Pox)?;
+            |caller: Caller<'_, ClarityWasmContext>, allowance_ref: Nullable<ExternRef>| {
+                AllowanceContext::push(&caller, &allowance_ref, Allowance::Pox)?;
 
                 Ok(())
             },
@@ -1680,7 +1678,7 @@ fn link_with_pox_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "with_pox".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -1695,8 +1693,8 @@ fn link_with_ft_fn(
         .func_wrap(
             "clarity",
             "with_ft",
-            |mut caller: Caller<'_, ClarityWasmContext<'static, 'static>>,
-             allowance_ref: Option<Rooted<ExternRef>>,
+            |mut caller: Caller<'_, ClarityWasmContext>,
+             allowance_ref: Nullable<ExternRef>,
              contract_id_offset: i32,
              contract_id_length: i32,
              token_name_offset: i32,
@@ -1717,7 +1715,7 @@ fn link_with_ft_fn(
                     token_name_length,
                     epoch,
                 )?;
-                let token_name = token_name_value.expect_ascii()?;
+                let token_name = token_name_value.expect_ascii().host_err()?;
 
                 let allowed_amount = ((amount_hi as u128) << 64) | ((amount_lo as u64) as u128);
 
@@ -1737,7 +1735,7 @@ fn link_with_ft_fn(
                 };
 
                 if token_name != "*" {
-                    let asset_name = ClarityName::try_from(token_name.clone())?;
+                    let asset_name = ClarityName::try_from(token_name.clone()).host_err()?;
                     let contract = caller
                         .data_mut()
                         .global_context
@@ -1755,12 +1753,12 @@ fn link_with_ft_fn(
                 }
 
                 AllowanceContext::push(
-                    &mut caller,
+                    &caller,
                     &allowance_ref,
                     Allowance::Ft(FtAllowance {
                         asset: AssetIdentifier {
                             contract_identifier: contract_id.clone(),
-                            asset_name: ClarityName::try_from(token_name)?,
+                            asset_name: ClarityName::try_from(token_name).host_err()?,
                         },
                         amount: allowed_amount,
                     }),
@@ -1773,7 +1771,7 @@ fn link_with_ft_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "with_ft".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -1788,8 +1786,8 @@ fn link_with_nft_fn(
         .func_wrap(
             "clarity",
             "with_nft",
-            |mut caller: Caller<'_, ClarityWasmContext<'static, 'static>>,
-             allowance_ref: Option<Rooted<ExternRef>>,
+            |mut caller: Caller<'_, ClarityWasmContext>,
+             allowance_ref: Nullable<ExternRef>,
              contract_id_offset: i32,
              contract_id_length: i32,
              token_name_offset: i32,
@@ -1811,8 +1809,9 @@ fn link_with_nft_fn(
                     token_name_length,
                     epoch,
                 )?
-                .expect_ascii()?;
-                let asset_name = ClarityName::try_from(token_name.clone())?;
+                .expect_ascii()
+                .host_err()?;
+                let asset_name = ClarityName::try_from(token_name.clone()).host_err()?;
                 // Read the contract principal first — needed for both wildcard
                 // and non-wildcard paths.
                 let contract_principal = read_from_wasm(
@@ -1885,7 +1884,7 @@ fn link_with_nft_fn(
 
                 // Figure out the max number of identifiers that fit within
                 // MAX_VALUE_SIZE so we don't hit a ValueTooLarge error.
-                let entry_size = key_type.size()?;
+                let entry_size = key_type.size().host_err()?;
                 let max_list_len = (MAX_VALUE_SIZE.saturating_sub(entry_size + 5)) / entry_size;
 
                 // We use read_from_wasm (not read_identifier_from_wasm) because
@@ -1896,13 +1895,13 @@ fn link_with_nft_fn(
                     memory,
                     &mut caller,
                     &TypeSignature::SequenceType(SequenceSubtype::ListType(
-                        ListTypeData::new_list(key_type, max_list_len)?,
+                        ListTypeData::new_list(key_type, max_list_len).host_err()?,
                     )),
                     identifiers_offset,
                     identifiers_length,
                     epoch,
                 )?;
-                let allowed_identifiers = identifiers_value.expect_list()?;
+                let allowed_identifiers = identifiers_value.expect_list().host_err()?;
 
                 let asset_identifier = AssetIdentifier {
                     contract_identifier: contract_id.clone(),
@@ -1910,7 +1909,7 @@ fn link_with_nft_fn(
                 };
 
                 AllowanceContext::push(
-                    &mut caller,
+                    &caller,
                     &allowance_ref,
                     Allowance::Nft(NftAllowance {
                         asset: asset_identifier,
@@ -1925,7 +1924,7 @@ fn link_with_nft_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "with_nft".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -1940,14 +1939,14 @@ fn link_with_stacking_fn(
         .func_wrap(
             "clarity",
             "with_stacking",
-            |mut caller: Caller<'_, ClarityWasmContext<'static, 'static>>,
-             allowance_ref: Option<Rooted<ExternRef>>,
+            |caller: Caller<'_, ClarityWasmContext>,
+             allowance_ref: Nullable<ExternRef>,
              allowance_lo: i64,
              allowance_hi: i64| {
                 let allowance = ((allowance_hi as u128) << 64) | ((allowance_lo as u64) as u128);
 
                 AllowanceContext::push(
-                    &mut caller,
+                    &caller,
                     &allowance_ref,
                     Allowance::Stacking(StackingAllowance { amount: allowance }),
                 )?;
@@ -1959,7 +1958,7 @@ fn link_with_stacking_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "with_stacking".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -1974,14 +1973,14 @@ fn link_with_stx_fn(
         .func_wrap(
             "clarity",
             "with_stx",
-            |mut caller: Caller<'_, ClarityWasmContext<'static, 'static>>,
-             allowance_ref: Option<Rooted<ExternRef>>,
+            |caller: Caller<'_, ClarityWasmContext>,
+             allowance_ref: Nullable<ExternRef>,
              amount_lo: i64,
              amount_hi: i64| {
                 let allowed_amount = ((amount_hi as u128) << 64) | ((amount_lo as u64) as u128);
 
                 AllowanceContext::push(
-                    &mut caller,
+                    &caller,
                     &allowance_ref,
                     Allowance::Stx(StxAllowance {
                         amount: allowed_amount,
@@ -1995,7 +1994,7 @@ fn link_with_stx_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "with_stx".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -2047,7 +2046,7 @@ fn link_stx_get_balance_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "stx_get_balance".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -2139,7 +2138,7 @@ fn link_stx_account_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "stx_account".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -2192,7 +2191,7 @@ fn link_stx_burn_fn(
                 caller
                     .data_mut()
                     .global_context
-                    .add_memory(TypeSignature::PrincipalType.size()? as u64)
+                    .add_memory(TypeSignature::PrincipalType.size().host_err()? as u64)
                     .map_err(VmExecutionError::from)?;
                 caller
                     .data_mut()
@@ -2234,7 +2233,7 @@ fn link_stx_burn_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "stx_burn".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -2291,7 +2290,7 @@ fn link_stx_transfer_fn(
                         memory,
                         &mut caller,
                         &TypeSignature::SequenceType(SequenceSubtype::BufferType(
-                            BufferLength::try_from(memo_length as u32)?,
+                            BufferLength::try_from(memo_length as u32).host_err()?,
                         )),
                         memo_offset,
                         memo_length,
@@ -2323,12 +2322,12 @@ fn link_stx_transfer_fn(
                 caller
                     .data_mut()
                     .global_context
-                    .add_memory(TypeSignature::PrincipalType.size()? as u64)
+                    .add_memory(TypeSignature::PrincipalType.size().host_err()? as u64)
                     .map_err(VmExecutionError::from)?;
                 caller
                     .data_mut()
                     .global_context
-                    .add_memory(TypeSignature::PrincipalType.size()? as u64)
+                    .add_memory(TypeSignature::PrincipalType.size().host_err()? as u64)
                     .map_err(VmExecutionError::from)?;
                 // loading sender's locked amount and height
                 // TODO: this does not count the inner stacks block header load, but arguably,
@@ -2374,7 +2373,7 @@ fn link_stx_transfer_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "stx_transfer".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -2417,7 +2416,7 @@ fn link_ft_get_supply_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "ft_get_supply".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -2443,7 +2442,7 @@ fn link_ft_get_balance_fn(
                 // Retrieve the token name
                 let name =
                     read_identifier_from_wasm(memory, &mut caller, name_offset, name_length)?;
-                let token_name = ClarityName::try_from(name.clone())?;
+                let token_name = ClarityName::try_from(name.clone()).host_err()?;
 
                 let contract_identifier =
                     caller.data().contract_context().contract_identifier.clone();
@@ -2486,7 +2485,7 @@ fn link_ft_get_balance_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "ft_get_balance".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -2518,7 +2517,7 @@ fn link_ft_burn_fn(
                 // Retrieve the token name
                 let name =
                     read_identifier_from_wasm(memory, &mut caller, name_offset, name_length)?;
-                let token_name = ClarityName::try_from(name.clone())?;
+                let token_name = ClarityName::try_from(name.clone()).host_err()?;
 
                 // Compute the amount
                 let amount = ((amount_hi as u128) << 64) | ((amount_lo as u64) as u128);
@@ -2590,12 +2589,12 @@ fn link_ft_burn_fn(
                 caller
                     .data_mut()
                     .global_context
-                    .add_memory(TypeSignature::PrincipalType.size()? as u64)
+                    .add_memory(TypeSignature::PrincipalType.size().host_err()? as u64)
                     .map_err(VmExecutionError::from)?;
                 caller
                     .data_mut()
                     .global_context
-                    .add_memory(TypeSignature::UIntType.size()? as u64)
+                    .add_memory(TypeSignature::UIntType.size().host_err()? as u64)
                     .map_err(VmExecutionError::from)?;
 
                 caller.data_mut().global_context.log_token_transfer(
@@ -2613,7 +2612,7 @@ fn link_ft_burn_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "ft_burn".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -2645,7 +2644,7 @@ fn link_ft_mint_fn(
                 // Retrieve the token name
                 let name =
                     read_identifier_from_wasm(memory, &mut caller, name_offset, name_length)?;
-                let token_name = ClarityName::try_from(name.clone())?;
+                let token_name = ClarityName::try_from(name.clone()).host_err()?;
 
                 // Compute the amount
                 let amount = ((amount_hi as u128) << 64) | ((amount_lo as u64) as u128);
@@ -2706,12 +2705,12 @@ fn link_ft_mint_fn(
                 caller
                     .data_mut()
                     .global_context
-                    .add_memory(TypeSignature::PrincipalType.size()? as u64)
+                    .add_memory(TypeSignature::PrincipalType.size().host_err()? as u64)
                     .map_err(VmExecutionError::from)?;
                 caller
                     .data_mut()
                     .global_context
-                    .add_memory(TypeSignature::UIntType.size()? as u64)
+                    .add_memory(TypeSignature::UIntType.size().host_err()? as u64)
                     .map_err(VmExecutionError::from)?;
 
                 caller.data_mut().global_context.database.set_ft_balance(
@@ -2739,7 +2738,7 @@ fn link_ft_mint_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "ft_mint".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -2774,7 +2773,7 @@ fn link_ft_transfer_fn(
                 // Retrieve the token name
                 let name =
                     read_identifier_from_wasm(memory, &mut caller, name_offset, name_length)?;
-                let token_name = ClarityName::try_from(name.clone())?;
+                let token_name = ClarityName::try_from(name.clone()).host_err()?;
 
                 // Compute the amount
                 let amount = ((amount_hi as u128) << 64) | ((amount_lo as u64) as u128);
@@ -2861,22 +2860,22 @@ fn link_ft_transfer_fn(
                 caller
                     .data_mut()
                     .global_context
-                    .add_memory(TypeSignature::PrincipalType.size()? as u64)
+                    .add_memory(TypeSignature::PrincipalType.size().host_err()? as u64)
                     .map_err(VmExecutionError::from)?;
                 caller
                     .data_mut()
                     .global_context
-                    .add_memory(TypeSignature::PrincipalType.size()? as u64)
+                    .add_memory(TypeSignature::PrincipalType.size().host_err()? as u64)
                     .map_err(VmExecutionError::from)?;
                 caller
                     .data_mut()
                     .global_context
-                    .add_memory(TypeSignature::UIntType.size()? as u64)
+                    .add_memory(TypeSignature::UIntType.size().host_err()? as u64)
                     .map_err(VmExecutionError::from)?;
                 caller
                     .data_mut()
                     .global_context
-                    .add_memory(TypeSignature::UIntType.size()? as u64)
+                    .add_memory(TypeSignature::UIntType.size().host_err()? as u64)
                     .map_err(VmExecutionError::from)?;
 
                 caller.data_mut().global_context.database.set_ft_balance(
@@ -2918,7 +2917,7 @@ fn link_ft_transfer_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "ft_transfer".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -2950,7 +2949,7 @@ fn link_nft_get_owner_fn(
                 // Retrieve the token name
                 let name =
                     read_identifier_from_wasm(memory, &mut caller, name_offset, name_length)?;
-                let asset_name = ClarityName::try_from(name.clone())?;
+                let asset_name = ClarityName::try_from(name.clone()).host_err()?;
 
                 let nft_metadata = caller
                     .data()
@@ -2979,9 +2978,12 @@ fn link_nft_get_owner_fn(
                     epoch,
                 )?;
 
-                let _asset_size = asset.serialized_size()? as u64;
+                let _asset_size = asset.serialized_size().host_err()? as u64;
 
-                if !expected_asset_type.admits(&caller.data().global_context.epoch_id, &asset)? {
+                if !expected_asset_type
+                    .admits(&caller.data().global_context.epoch_id, &asset)
+                    .host_err()?
+                {
                     return Err(RuntimeCheckErrorKind::TypeValueError(
                         Box::new(expected_asset_type.clone()),
                         asset.to_error_string(),
@@ -3025,7 +3027,7 @@ fn link_nft_get_owner_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "nft_get_owner".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -3058,7 +3060,7 @@ fn link_nft_burn_fn(
                 // Retrieve the token name
                 let name =
                     read_identifier_from_wasm(memory, &mut caller, name_offset, name_length)?;
-                let asset_name = ClarityName::try_from(name.clone())?;
+                let asset_name = ClarityName::try_from(name.clone()).host_err()?;
 
                 let nft_metadata = caller
                     .data()
@@ -3097,9 +3099,12 @@ fn link_nft_burn_fn(
                 )?;
                 let sender_principal = value_as_principal(&value)?;
 
-                let asset_size = asset.serialized_size()? as u64;
+                let asset_size = asset.serialized_size().host_err()? as u64;
 
-                if !expected_asset_type.admits(&caller.data().global_context.epoch_id, &asset)? {
+                if !expected_asset_type
+                    .admits(&caller.data().global_context.epoch_id, &asset)
+                    .host_err()?
+                {
                     return Err(RuntimeCheckErrorKind::TypeValueError(
                         Box::new(expected_asset_type.clone()),
                         asset.to_error_string(),
@@ -3127,7 +3132,7 @@ fn link_nft_burn_fn(
                 caller
                     .data_mut()
                     .global_context
-                    .add_memory(TypeSignature::PrincipalType.size()? as u64)
+                    .add_memory(TypeSignature::PrincipalType.size().host_err()? as u64)
                     .map_err(VmExecutionError::from)?;
                 caller
                     .data_mut()
@@ -3168,7 +3173,7 @@ fn link_nft_burn_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "nft_burn".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -3201,7 +3206,7 @@ fn link_nft_mint_fn(
                 // Retrieve the token name
                 let name =
                     read_identifier_from_wasm(memory, &mut caller, name_offset, name_length)?;
-                let asset_name = ClarityName::try_from(name.clone())?;
+                let asset_name = ClarityName::try_from(name.clone()).host_err()?;
 
                 let nft_metadata = caller
                     .data()
@@ -3240,9 +3245,12 @@ fn link_nft_mint_fn(
                 )?;
                 let to_principal = value_as_principal(&value)?;
 
-                let asset_size = asset.serialized_size()? as u64;
+                let asset_size = asset.serialized_size().host_err()? as u64;
 
-                if !expected_asset_type.admits(&caller.data().global_context.epoch_id, &asset)? {
+                if !expected_asset_type
+                    .admits(&caller.data().global_context.epoch_id, &asset)
+                    .host_err()?
+                {
                     return Err(RuntimeCheckErrorKind::TypeValueError(
                         Box::new(expected_asset_type.clone()),
                         asset.to_error_string(),
@@ -3266,7 +3274,7 @@ fn link_nft_mint_fn(
                 caller
                     .data_mut()
                     .global_context
-                    .add_memory(TypeSignature::PrincipalType.size()? as u64)
+                    .add_memory(TypeSignature::PrincipalType.size().host_err()? as u64)
                     .map_err(VmExecutionError::from)?;
                 caller
                     .data_mut()
@@ -3301,7 +3309,7 @@ fn link_nft_mint_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "nft_mint".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -3336,7 +3344,7 @@ fn link_nft_transfer_fn(
                 // Retrieve the token name
                 let name =
                     read_identifier_from_wasm(memory, &mut caller, name_offset, name_length)?;
-                let asset_name = ClarityName::try_from(name.clone())?;
+                let asset_name = ClarityName::try_from(name.clone()).host_err()?;
 
                 let nft_metadata = caller
                     .data()
@@ -3386,9 +3394,12 @@ fn link_nft_transfer_fn(
                 )?;
                 let to_principal = value_as_principal(&value)?;
 
-                let asset_size = asset.serialized_size()? as u64;
+                let asset_size = asset.serialized_size().host_err()? as u64;
 
-                if !expected_asset_type.admits(&caller.data().global_context.epoch_id, &asset)? {
+                if !expected_asset_type
+                    .admits(&caller.data().global_context.epoch_id, &asset)
+                    .host_err()?
+                {
                     return Err(RuntimeCheckErrorKind::TypeValueError(
                         Box::new(expected_asset_type.clone()),
                         asset.to_error_string(),
@@ -3435,7 +3446,7 @@ fn link_nft_transfer_fn(
                 caller
                     .data_mut()
                     .global_context
-                    .add_memory(TypeSignature::PrincipalType.size()? as u64)
+                    .add_memory(TypeSignature::PrincipalType.size().host_err()? as u64)
                     .map_err(VmExecutionError::from)?;
                 caller
                     .data_mut()
@@ -3478,7 +3489,7 @@ fn link_nft_transfer_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "nft_transfer".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -3577,7 +3588,7 @@ fn link_map_get_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "map_get".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -3698,7 +3709,7 @@ fn link_map_set_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "map_set".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -3818,7 +3829,7 @@ fn link_map_insert_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "map_insert".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -3920,7 +3931,7 @@ fn link_map_delete_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "map_delete".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -3939,11 +3950,13 @@ fn handle_vm_execution_errors(
         .ok_or(VmExecutionError::Wasm(WasmError::GlobalNotFound(
             "runtime-error-linked".to_owned(),
         )))?;
-    let error_ref = ExternRef::new(caller.as_context_mut(), error)
-        .map_err(|e| VmExecutionError::Wasm(WasmError::UnableToWriteMemory(e)))?;
-    match linked_error.set(caller.as_context_mut(), Val::ExternRef(Some(error_ref))) {
+    let error_ref = ExternRef::new(caller.as_context_mut(), error);
+    match linked_error.set(
+        caller.as_context_mut(),
+        Val::ExternRef(Nullable::Val(error_ref)),
+    ) {
         Err(error) => Err(VmExecutionError::Wasm(WasmError::UnableToWriteMemory(
-            error,
+            error.into(),
         ))),
         Ok(_) => Ok(()),
     }
@@ -4032,7 +4045,7 @@ fn link_get_block_info_time_property_fn(
                         &ty,
                         return_offset,
                         return_offset + get_type_size(&ty),
-                        &Value::some(result)?,
+                        &Value::some(result).host_err()?,
                         true,
                     )?;
                 }
@@ -4043,7 +4056,7 @@ fn link_get_block_info_time_property_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "get_block_info_time_property".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -4080,7 +4093,7 @@ fn link_get_block_info_vrf_seed_property_fn(
                     let (result, result_ty) = (
                         Value::Sequence(SequenceData::Buffer(BuffData { data })),
                         TypeSignature::SequenceType(SequenceSubtype::BufferType(
-                            BufferLength::try_from(len)?,
+                            BufferLength::try_from(len).host_err()?,
                         )),
                     );
                     let ty = TypeSignature::OptionalType(Box::new(result_ty));
@@ -4091,7 +4104,7 @@ fn link_get_block_info_vrf_seed_property_fn(
                         &ty,
                         return_offset,
                         return_offset + get_type_size(&ty),
-                        &Value::some(result)?,
+                        &Value::some(result).host_err()?,
                         true,
                     )?;
                 }
@@ -4102,7 +4115,7 @@ fn link_get_block_info_vrf_seed_property_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "get_block_info_vrf_seed_property".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -4139,7 +4152,7 @@ fn link_get_block_info_header_hash_property_fn(
                     let (result, result_ty) = (
                         Value::Sequence(SequenceData::Buffer(BuffData { data })),
                         TypeSignature::SequenceType(SequenceSubtype::BufferType(
-                            BufferLength::try_from(len)?,
+                            BufferLength::try_from(len).host_err()?,
                         )),
                     );
                     let ty = TypeSignature::OptionalType(Box::new(result_ty));
@@ -4150,7 +4163,7 @@ fn link_get_block_info_header_hash_property_fn(
                         &ty,
                         return_offset,
                         return_offset + get_type_size(&ty),
-                        &Value::some(result)?,
+                        &Value::some(result).host_err()?,
                         true,
                     )?;
                 }
@@ -4161,7 +4174,7 @@ fn link_get_block_info_header_hash_property_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "get_block_info_header_hash_property".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -4198,7 +4211,7 @@ fn link_get_block_info_burnchain_header_hash_property_fn(
                     let (result, result_ty) = (
                         Value::Sequence(SequenceData::Buffer(BuffData { data })),
                         TypeSignature::SequenceType(SequenceSubtype::BufferType(
-                            BufferLength::try_from(len)?,
+                            BufferLength::try_from(len).host_err()?,
                         )),
                     );
                     let ty = TypeSignature::OptionalType(Box::new(result_ty));
@@ -4209,7 +4222,7 @@ fn link_get_block_info_burnchain_header_hash_property_fn(
                         &ty,
                         return_offset,
                         return_offset + get_type_size(&ty),
-                        &Value::some(result)?,
+                        &Value::some(result).host_err()?,
                         true,
                     )?;
                 }
@@ -4220,7 +4233,7 @@ fn link_get_block_info_burnchain_header_hash_property_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "get_block_info_burnchain_header_hash_property".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -4257,7 +4270,7 @@ fn link_get_block_info_identity_header_hash_property_fn(
                     let (result, result_ty) = (
                         Value::Sequence(SequenceData::Buffer(BuffData { data })),
                         TypeSignature::SequenceType(SequenceSubtype::BufferType(
-                            BufferLength::try_from(len)?,
+                            BufferLength::try_from(len).host_err()?,
                         )),
                     );
                     let ty = TypeSignature::OptionalType(Box::new(result_ty));
@@ -4268,7 +4281,7 @@ fn link_get_block_info_identity_header_hash_property_fn(
                         &ty,
                         return_offset,
                         return_offset + get_type_size(&ty),
-                        &Value::some(result)?,
+                        &Value::some(result).host_err()?,
                         true,
                     )?;
                 }
@@ -4279,7 +4292,7 @@ fn link_get_block_info_identity_header_hash_property_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "get_block_info_identity_header_hash_property".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -4321,7 +4334,7 @@ fn link_get_block_info_miner_address_property_fn(
                         &ty,
                         return_offset,
                         return_offset + get_type_size(&ty),
-                        &Value::some(result)?,
+                        &Value::some(result).host_err()?,
                         true,
                     )?;
                 }
@@ -4332,7 +4345,7 @@ fn link_get_block_info_miner_address_property_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "get_block_info_miner_address_property".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -4373,7 +4386,7 @@ fn link_get_block_info_miner_spend_winner_property_fn(
                         &ty,
                         return_offset,
                         return_offset + get_type_size(&ty),
-                        &Value::some(result)?,
+                        &Value::some(result).host_err()?,
                         true,
                     )?;
                 }
@@ -4384,7 +4397,7 @@ fn link_get_block_info_miner_spend_winner_property_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "get_block_info_miner_spend_winner_property".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -4425,7 +4438,7 @@ fn link_get_block_info_miner_spend_total_property_fn(
                         &ty,
                         return_offset,
                         return_offset + get_type_size(&ty),
-                        &Value::some(result)?,
+                        &Value::some(result).host_err()?,
                         true,
                     )?;
                 }
@@ -4436,7 +4449,7 @@ fn link_get_block_info_miner_spend_total_property_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "get_block_info_miner_spend_total_property".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -4495,7 +4508,7 @@ fn link_get_block_info_block_reward_property_fn(
                         &ty,
                         return_offset,
                         return_offset + get_type_size(&ty),
-                        &Value::some(result)?,
+                        &Value::some(result).host_err()?,
                         true,
                     )?;
                 }
@@ -4506,7 +4519,7 @@ fn link_get_block_info_block_reward_property_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "get_block_info_block_reward_property".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -4558,7 +4571,8 @@ fn link_get_burn_block_info_header_hash_property_fn(
                         Some(burnchain_header_hash) => {
                             Value::some(Value::Sequence(SequenceData::Buffer(BuffData {
                                 data: burnchain_header_hash.as_bytes().to_vec(),
-                            })))?
+                            })))
+                            .host_err()?
                         }
                         None => Value::none(),
                     },
@@ -4581,7 +4595,7 @@ fn link_get_burn_block_info_header_hash_property_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "get_burn_block_info_header_hash_property".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -4639,27 +4653,32 @@ fn link_get_burn_block_info_pox_addrs_property_fn(
                         ClarityName::from_literal("version"),
                         TypeSignature::BUFFER_1.clone(),
                     ),
-                ])?
+                ])
+                .host_err()?
                 .into();
-                let addrs_ty = TypeSignature::list_of(addr_ty.clone(), 2)?;
+                let addrs_ty = TypeSignature::list_of(addr_ty.clone(), 2).host_err()?;
                 let tuple_ty = TupleTypeSignature::try_from(vec![
                     (ClarityName::from_literal("addrs"), addrs_ty),
                     (ClarityName::from_literal("payout"), TypeSignature::UIntType),
-                ])?;
+                ])
+                .host_err()?;
                 let value = match pox_addrs_and_payout {
-                    Some((addrs, payout)) => {
-                        Value::some(Value::Tuple(TupleData::from_data(vec![
+                    Some((addrs, payout)) => Value::some(Value::Tuple(
+                        TupleData::from_data(vec![
                             (
                                 ClarityName::from_literal("addrs"),
                                 Value::list_with_type(
                                     &caller.data_mut().global_context.epoch_id,
                                     addrs.into_iter().map(Value::Tuple).collect(),
-                                    ListTypeData::new_list(addr_ty, 2)?,
-                                )?,
+                                    ListTypeData::new_list(addr_ty, 2).host_err()?,
+                                )
+                                .host_err()?,
                             ),
                             (ClarityName::from_literal("payout"), Value::UInt(payout)),
-                        ])?))?
-                    }
+                        ])
+                        .host_err()?,
+                    ))
+                    .host_err()?,
                     None => Value::none(),
                 };
                 let ty = TypeSignature::OptionalType(Box::new(tuple_ty.into()));
@@ -4680,7 +4699,7 @@ fn link_get_burn_block_info_pox_addrs_property_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "get_burn_block_info_pox_addrs_property".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -4721,7 +4740,7 @@ fn link_get_stacks_block_info_time_property_fn(
                         &ty,
                         return_offset,
                         return_offset + get_type_size(&ty),
-                        &Value::some(result)?,
+                        &Value::some(result).host_err()?,
                         true,
                     )?;
                 }
@@ -4732,7 +4751,7 @@ fn link_get_stacks_block_info_time_property_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "get_stacks_block_info_time_property".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -4770,7 +4789,7 @@ fn link_get_stacks_block_info_header_hash_property_fn(
                     let (result, result_ty) = (
                         Value::Sequence(SequenceData::Buffer(BuffData { data })),
                         TypeSignature::SequenceType(SequenceSubtype::BufferType(
-                            BufferLength::try_from(len)?,
+                            BufferLength::try_from(len).host_err()?,
                         )),
                     );
                     let ty = TypeSignature::OptionalType(Box::new(result_ty));
@@ -4780,7 +4799,7 @@ fn link_get_stacks_block_info_header_hash_property_fn(
                         &ty,
                         return_offset,
                         return_offset + get_type_size(&ty),
-                        &Value::some(result)?,
+                        &Value::some(result).host_err()?,
                         true,
                     )?;
                 }
@@ -4791,7 +4810,7 @@ fn link_get_stacks_block_info_header_hash_property_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "get_stacks_block_info_header_hash_property".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -4828,7 +4847,7 @@ fn link_get_stacks_block_info_identity_header_hash_property_fn(
                     let (result, result_ty) = (
                         Value::Sequence(SequenceData::Buffer(BuffData { data })),
                         TypeSignature::SequenceType(SequenceSubtype::BufferType(
-                            BufferLength::try_from(len)?,
+                            BufferLength::try_from(len).host_err()?,
                         )),
                     );
                     let ty = TypeSignature::OptionalType(Box::new(result_ty));
@@ -4839,7 +4858,7 @@ fn link_get_stacks_block_info_identity_header_hash_property_fn(
                         &ty,
                         return_offset,
                         return_offset + get_type_size(&ty),
-                        &Value::some(result)?,
+                        &Value::some(result).host_err()?,
                         true,
                     )?;
                 }
@@ -4850,7 +4869,7 @@ fn link_get_stacks_block_info_identity_header_hash_property_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "get_stacks_block_info_identity_header_hash_property".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -4887,7 +4906,7 @@ fn link_get_tenure_info_burnchain_header_hash_property_fn(
                     let (result, result_ty) = (
                         Value::Sequence(SequenceData::Buffer(BuffData { data })),
                         TypeSignature::SequenceType(SequenceSubtype::BufferType(
-                            BufferLength::try_from(len)?,
+                            BufferLength::try_from(len).host_err()?,
                         )),
                     );
                     let ty = TypeSignature::OptionalType(Box::new(result_ty));
@@ -4898,7 +4917,7 @@ fn link_get_tenure_info_burnchain_header_hash_property_fn(
                         &ty,
                         return_offset,
                         return_offset + get_type_size(&ty),
-                        &Value::some(result)?,
+                        &Value::some(result).host_err()?,
                         true,
                     )?;
                 }
@@ -4909,7 +4928,7 @@ fn link_get_tenure_info_burnchain_header_hash_property_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "get_tenure_info_burnchain_header_hash_property".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -4951,7 +4970,7 @@ fn link_get_tenure_info_miner_address_property_fn(
                         &ty,
                         return_offset,
                         return_offset + get_type_size(&ty),
-                        &Value::some(result)?,
+                        &Value::some(result).host_err()?,
                         true,
                     )?;
                 }
@@ -4962,7 +4981,7 @@ fn link_get_tenure_info_miner_address_property_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "get_tenure_info_miner_address_property".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -5003,7 +5022,7 @@ fn link_get_tenure_info_time_property_fn(
                         &ty,
                         return_offset,
                         return_offset + get_type_size(&ty),
-                        &Value::some(result)?,
+                        &Value::some(result).host_err()?,
                         true,
                     )?;
                 }
@@ -5014,7 +5033,7 @@ fn link_get_tenure_info_time_property_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "get_tenure_info_time_property".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -5051,7 +5070,7 @@ fn link_get_tenure_info_vrf_seed_property_fn(
                     let (result, result_ty) = (
                         Value::Sequence(SequenceData::Buffer(BuffData { data })),
                         TypeSignature::SequenceType(SequenceSubtype::BufferType(
-                            BufferLength::try_from(len)?,
+                            BufferLength::try_from(len).host_err()?,
                         )),
                     );
                     let ty = TypeSignature::OptionalType(Box::new(result_ty));
@@ -5062,7 +5081,7 @@ fn link_get_tenure_info_vrf_seed_property_fn(
                         &ty,
                         return_offset,
                         return_offset + get_type_size(&ty),
-                        &Value::some(result)?,
+                        &Value::some(result).host_err()?,
                         true,
                     )?;
                 }
@@ -5073,7 +5092,7 @@ fn link_get_tenure_info_vrf_seed_property_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "get_tenure_info_vrf_seed_property".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -5132,7 +5151,7 @@ fn link_get_tenure_info_block_reward_property_fn(
                         &ty,
                         return_offset,
                         return_offset + get_type_size(&ty),
-                        &Value::some(result)?,
+                        &Value::some(result).host_err()?,
                         true,
                     )?;
                 }
@@ -5143,7 +5162,7 @@ fn link_get_tenure_info_block_reward_property_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "get_tenure_info_block_reward_property".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -5184,7 +5203,7 @@ fn link_get_tenure_info_miner_spend_total_property_fn(
                         &ty,
                         return_offset,
                         return_offset + get_type_size(&ty),
-                        &Value::some(result)?,
+                        &Value::some(result).host_err()?,
                         true,
                     )?;
                 }
@@ -5195,7 +5214,7 @@ fn link_get_tenure_info_miner_spend_total_property_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "get_tenure_info_miner_spend_total_property".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -5236,7 +5255,7 @@ fn link_get_tenure_info_miner_spend_winner_property_fn(
                         &ty,
                         return_offset,
                         return_offset + get_type_size(&ty),
-                        &Value::some(result)?,
+                        &Value::some(result).host_err()?,
                         true,
                     )?;
                 }
@@ -5247,7 +5266,7 @@ fn link_get_tenure_info_miner_spend_winner_property_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "get_tenure_info_miner_spend_winner_property".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -5426,7 +5445,7 @@ fn link_contract_call_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "contract_call".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -5462,7 +5481,7 @@ fn link_contract_hash_fn(
                 // (response (buff 32) uint)
                 let return_ty = TypeSignature::ResponseType(Box::new((
                     TypeSignature::SequenceType(SequenceSubtype::BufferType(
-                        BufferLength::try_from(32u32)?,
+                        BufferLength::try_from(32u32).host_err()?,
                     )),
                     TypeSignature::UIntType,
                 )));
@@ -5531,7 +5550,7 @@ fn link_contract_hash_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "contract_hash".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -5554,7 +5573,7 @@ fn link_begin_public_call_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "begin_public_call".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -5577,7 +5596,7 @@ fn link_begin_read_only_call_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "begin_read_only_call".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -5601,7 +5620,7 @@ fn link_commit_call_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "commit_call".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -5626,7 +5645,7 @@ fn link_roll_back_call_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "roll_back_call".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -5672,7 +5691,10 @@ fn link_print_fn(
         )
         .map(|_| ())
         .map_err(|e| {
-            VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction("print".to_string(), e))
+            VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
+                "print".to_string(),
+                e.into(),
+            ))
         })
 }
 
@@ -5742,7 +5764,7 @@ fn link_enter_at_block_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "enter_at_block".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -5783,7 +5805,7 @@ fn link_exit_at_block_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "exit_at_block".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -5824,7 +5846,7 @@ fn link_keccak256_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "keccak256".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -5863,7 +5885,10 @@ fn link_sha512_fn(
         )
         .map(|_| ())
         .map_err(|e| {
-            VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction("sha512".to_string(), e))
+            VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
+                "sha512".to_string(),
+                e.into(),
+            ))
         })
 }
 
@@ -5903,7 +5928,7 @@ fn link_sha512_256_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "sha512_256".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -5933,7 +5958,8 @@ fn link_secp256k1_recover_fn(
                 let ret_ty = TypeSignature::new_response(
                     TypeSignature::BUFFER_33.clone(),
                     TypeSignature::UIntType,
-                )?;
+                )
+                .host_err()?;
                 let repr_size = get_type_size(&ret_ty);
 
                 // Read the message bytes from the memory
@@ -5943,7 +5969,7 @@ fn link_secp256k1_recover_fn(
                 if msg_bytes.len() != 32 {
                     return Err(RuntimeCheckErrorKind::TypeValueError(
                         Box::new(TypeSignature::BUFFER_32.clone()),
-                        Value::buff_from(msg_bytes)?.to_error_string(),
+                        Value::buff_from(msg_bytes).host_err()?.to_error_string(),
                     )
                     .into());
                 }
@@ -5967,7 +5993,9 @@ fn link_secp256k1_recover_fn(
                 }
 
                 let result = match secp256k1_recover(&msg_bytes, &sig_bytes) {
-                    Ok(pubkey) => Value::okay(Value::buff_from(pubkey.to_vec())?)?,
+                    Ok(pubkey) => {
+                        Value::okay(Value::buff_from(pubkey.to_vec()).host_err()?).host_err()?
+                    }
                     _ => Value::err_uint(1),
                 };
 
@@ -5989,7 +6017,7 @@ fn link_secp256k1_recover_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "secp256k1_recover".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -6023,7 +6051,7 @@ fn link_secp256k1_verify_fn(
                 if msg_bytes.len() != 32 {
                     return Err(RuntimeCheckErrorKind::TypeValueError(
                         Box::new(TypeSignature::BUFFER_32.clone()),
-                        Value::buff_from(msg_bytes)?.to_error_string(),
+                        Value::buff_from(msg_bytes).host_err()?.to_error_string(),
                     )
                     .into());
                 }
@@ -6046,7 +6074,7 @@ fn link_secp256k1_verify_fn(
                 if pk_bytes.len() != 33 {
                     return Err(RuntimeCheckErrorKind::TypeValueError(
                         Box::new(TypeSignature::BUFFER_33.clone()),
-                        Value::buff_from(pk_bytes)?.to_error_string(),
+                        Value::buff_from(pk_bytes).host_err()?.to_error_string(),
                     )
                     .into());
                 }
@@ -6058,7 +6086,7 @@ fn link_secp256k1_verify_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "secp256k1_verify".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -6086,7 +6114,8 @@ fn link_secp256k1_decompress_fn(
                 let ret_ty = TypeSignature::new_response(
                     TypeSignature::BUFFER_65.clone(),
                     TypeSignature::UIntType,
-                )?;
+                )
+                .host_err()?;
                 let repr_size = get_type_size(&ret_ty);
 
                 // Read the message bytes from the memory
@@ -6096,13 +6125,15 @@ fn link_secp256k1_decompress_fn(
                 if msg_bytes.len() != 33 {
                     return Err(RuntimeCheckErrorKind::TypeValueError(
                         Box::new(TypeSignature::BUFFER_33.clone()),
-                        Value::buff_from(msg_bytes)?.to_error_string(),
+                        Value::buff_from(msg_bytes).host_err()?.to_error_string(),
                     )
                     .into());
                 }
 
                 let result = match secp256k1_decompress(&msg_bytes) {
-                    Ok(pubkey) => Value::okay(Value::buff_from(pubkey.to_vec())?)?,
+                    Ok(pubkey) => {
+                        Value::okay(Value::buff_from(pubkey.to_vec()).host_err()?).host_err()?
+                    }
                     _ => Value::err_uint(1),
                 };
 
@@ -6124,7 +6155,7 @@ fn link_secp256k1_decompress_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "secp256k1_decompress".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -6165,7 +6196,7 @@ fn link_secp256r1_verify_double_hash_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "secp256r1_verify_double_hash".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -6206,7 +6237,7 @@ fn link_secp256r1_verify_simple_hash_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "secp256r1_verify_simple_hash".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -6244,10 +6275,9 @@ fn link_verify_merkle_proof_fn(
 
                 // The list is read back using the element type only; how many
                 // siblings there actually are comes from `siblings_length`.
-                let siblings_ty = TypeSignature::list_of(
-                    TypeSignature::BUFFER_32,
-                    VERIFY_MERKLE_PROOF_MAX_DEPTH,
-                )?;
+                let siblings_ty =
+                    TypeSignature::list_of(TypeSignature::BUFFER_32, VERIFY_MERKLE_PROOF_MAX_DEPTH)
+                        .host_err()?;
                 let siblings = read_from_wasm(
                     memory,
                     &mut caller,
@@ -6263,8 +6293,8 @@ fn link_verify_merkle_proof_fn(
                 let tx_count = ((tx_count_hi as u64 as u128) << 64) | (tx_count_lo as u64 as u128);
 
                 let result = native_verify_merkle_proof(vec![
-                    Value::buff_from(leaf)?,
-                    Value::buff_from(root)?,
+                    Value::buff_from(leaf).host_err()?,
+                    Value::buff_from(root).host_err()?,
                     Value::UInt(tx_index),
                     Value::UInt(tx_count),
                     siblings,
@@ -6280,7 +6310,7 @@ fn link_verify_merkle_proof_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "verify_merkle_proof".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -6317,9 +6347,11 @@ fn link_get_bitcoin_tx_output_fn(
                         ClarityName::from_literal("txid"),
                         TypeSignature::BUFFER_32.clone(),
                     ),
-                ])?
+                ])
+                .host_err()?
                 .into();
-                let ret_ty = TypeSignature::new_response(ok_ty, TypeSignature::UIntType)?;
+                let ret_ty =
+                    TypeSignature::new_response(ok_ty, TypeSignature::UIntType).host_err()?;
                 let repr_size = get_type_size(&ret_ty);
 
                 let tx_bytes = read_bytes_from_wasm(memory, &mut caller, tx_offset, tx_length)?;
@@ -6327,8 +6359,10 @@ fn link_get_bitcoin_tx_output_fn(
                 // `vout` is a Clarity `uint`, passed as a low/high `i64` pair
                 let vout = ((vout_hi as u64 as u128) << 64) | (vout_lo as u64 as u128);
 
-                let result =
-                    native_get_bitcoin_tx_output(Value::buff_from(tx_bytes)?, Value::UInt(vout))?;
+                let result = native_get_bitcoin_tx_output(
+                    Value::buff_from(tx_bytes).host_err()?,
+                    Value::UInt(vout),
+                )?;
 
                 // Write the result to the return buffer
                 write_to_wasm(
@@ -6348,7 +6382,7 @@ fn link_get_bitcoin_tx_output_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "get_bitcoin_tx_output".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -6382,7 +6416,7 @@ fn link_ed25519_verify_fn(
                 if sig_bytes.len() != 64 {
                     return Err(RuntimeCheckErrorKind::TypeValueError(
                         Box::new(TypeSignature::BUFFER_64.clone()),
-                        Value::buff_from(sig_bytes)?.to_error_string(),
+                        Value::buff_from(sig_bytes).host_err()?.to_error_string(),
                     )
                     .into());
                 }
@@ -6392,7 +6426,7 @@ fn link_ed25519_verify_fn(
                 if pk_bytes.len() != 32 {
                     return Err(RuntimeCheckErrorKind::TypeValueError(
                         Box::new(TypeSignature::BUFFER_32.clone()),
-                        Value::buff_from(pk_bytes)?.to_error_string(),
+                        Value::buff_from(pk_bytes).host_err()?.to_error_string(),
                     )
                     .into());
                 }
@@ -6404,7 +6438,7 @@ fn link_ed25519_verify_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "ed25519_verify".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -6498,7 +6532,7 @@ fn link_principal_of_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "principal-of".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -6525,7 +6559,7 @@ fn link_save_constant_fn(
                 // Get constant name from the memory.
                 let const_name =
                     read_identifier_from_wasm(memory, &mut caller, name_offset, name_length)?;
-                let cname = ClarityName::try_from(const_name.clone())?;
+                let cname = ClarityName::try_from(const_name.clone()).host_err()?;
 
                 // Get constant value type.
                 let value_ty = caller
@@ -6551,7 +6585,7 @@ fn link_save_constant_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "save_constant".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -6582,14 +6616,14 @@ fn link_load_constant_fn(
                     .data()
                     .contract_context()
                     .variables
-                    .get(&ClarityName::try_from(const_name.clone())?)
+                    .get(&ClarityName::try_from(const_name.clone()).host_err()?)
                     .ok_or(VmExecutionError::Wasm(WasmError::NotInDatabase(format!(
                         "Constant: {const_name}"
                     ))))?
                     .clone();
 
                 // Constant value type
-                let ty = TypeSignature::type_of(&value)?;
+                let ty = TypeSignature::type_of(&value).host_err()?;
 
                 write_to_wasm(
                     &mut caller,
@@ -6608,7 +6642,7 @@ fn link_load_constant_fn(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "load_constant".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -6647,12 +6681,14 @@ fn link_principal_to_string_ascii(
                         .data_mut(&mut caller)
                         .get_mut(result_beg..result_end)
                         .ok_or(VmExecutionError::Wasm(WasmError::UnableToWriteMemory(
-                            wasmtime::Error::msg("Non-existing addresses in memory"),
+                            wasmi::Error::new("Non-existing addresses in memory"),
                         )))?,
                 );
 
                 write!(result_buffer, "{principal}").map_err(|e| {
-                    VmExecutionError::Wasm(WasmError::UnableToWriteMemory(e.into()))
+                    VmExecutionError::Wasm(WasmError::UnableToWriteMemory(wasmi::Error::new(
+                        e.to_string(),
+                    )))
                 })?;
 
                 Ok(result_buffer.position() as i32)
@@ -6662,7 +6698,7 @@ fn link_principal_to_string_ascii(
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "principal_to_string_ascii".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -6700,7 +6736,7 @@ fn link_skip_list<T: 'static>(linker: &mut Linker<T>) -> Result<(), VmExecutionE
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "skip_list".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
@@ -6715,7 +6751,10 @@ fn link_log<T: 'static>(linker: &mut Linker<T>) -> Result<(), VmExecutionError> 
         })
         .map(|_| ())
         .map_err(|e| {
-            VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction("log".to_string(), e))
+            VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
+                "log".to_string(),
+                e.into(),
+            ))
         })
 }
 
@@ -6731,12 +6770,12 @@ fn link_debug_msg<T: 'static>(linker: &mut Linker<T>) -> Result<(), VmExecutionE
         .map_err(|e| {
             VmExecutionError::Wasm(WasmError::UnableToLinkHostFunction(
                 "debug_msg".to_string(),
-                e,
+                e.into(),
             ))
         })
 }
 
-pub fn dummy_linker<T: 'static>(engine: &Engine) -> Result<Linker<T>, wasmtime::Error> {
+pub fn dummy_linker<T>(engine: &Engine) -> Result<Linker<T>, wasmi::Error> {
     let mut linker = Linker::new(engine);
 
     link_skip_list(&mut linker)?;
@@ -6923,16 +6962,16 @@ pub fn dummy_linker<T: 'static>(engine: &Engine) -> Result<Linker<T>, wasmtime::
     linker.func_wrap(
         "clarity",
         "enter_as_contract_safe",
-        |_: Caller<'_, T>| -> Option<Rooted<ExternRef>> {
+        |_: Caller<'_, T>| -> Nullable<ExternRef> {
             println!("as-contract?: enter");
-            None
+            Nullable::Null
         },
     )?;
 
     linker.func_wrap(
         "clarity",
         "exit_as_contract_safe",
-        |_: Caller<'_, T>, _allowance_ref: Option<Rooted<ExternRef>>| {
+        |_: Caller<'_, T>, _allowance_ref: Nullable<ExternRef>| {
             println!("as-contract?: exit");
             Ok((0i64, 0i64, 0i32))
         },
@@ -6946,9 +6985,9 @@ pub fn dummy_linker<T: 'static>(engine: &Engine) -> Result<Linker<T>, wasmtime::
     linker.func_wrap(
         "clarity",
         "enter_restrict_assets",
-        |_: Caller<'_, T>| -> Option<Rooted<ExternRef>> {
+        |_: Caller<'_, T>| -> Nullable<ExternRef> {
             println!("restrict-assets?: enter");
-            None
+            Nullable::Null
         },
     )?;
 
@@ -6958,7 +6997,7 @@ pub fn dummy_linker<T: 'static>(engine: &Engine) -> Result<Linker<T>, wasmtime::
         |_: Caller<'_, T>,
          _asset_owner_offset: i32,
          _asset_owner_length: i32,
-         _allowance_ref: Option<Rooted<ExternRef>>| {
+         _allowance_ref: Nullable<ExternRef>| {
             println!("restrict-assets?: exit");
             Ok((0i64, 0i64, 0i32))
         },
@@ -6972,7 +7011,7 @@ pub fn dummy_linker<T: 'static>(engine: &Engine) -> Result<Linker<T>, wasmtime::
     linker.func_wrap(
         "clarity",
         "with_all_assets_unsafe",
-        |_: Caller<'_, T>, _allowance_ref: Option<Rooted<ExternRef>>| {
+        |_: Caller<'_, T>, _allowance_ref: Nullable<ExternRef>| {
             println!("with_all_assets_unsafe: enter");
             Ok(())
         },
@@ -6981,7 +7020,7 @@ pub fn dummy_linker<T: 'static>(engine: &Engine) -> Result<Linker<T>, wasmtime::
     linker.func_wrap(
         "clarity",
         "with_pox",
-        |_: Caller<'_, T>, _allowance_ref: Option<Rooted<ExternRef>>| {
+        |_: Caller<'_, T>, _allowance_ref: Nullable<ExternRef>| {
             println!("with_pox");
             Ok(())
         },
@@ -6999,7 +7038,7 @@ pub fn dummy_linker<T: 'static>(engine: &Engine) -> Result<Linker<T>, wasmtime::
     linker.func_wrap(
         "clarity",
         "with_ft",
-        |_allowance_ref: Option<Rooted<ExternRef>>,
+        |_allowance_ref: Nullable<ExternRef>,
          _contract_id_offset: i32,
          _contract_id_length: i32,
          _token_name_offset: i32,
@@ -7019,7 +7058,7 @@ pub fn dummy_linker<T: 'static>(engine: &Engine) -> Result<Linker<T>, wasmtime::
     linker.func_wrap(
         "clarity",
         "with_nft",
-        |_allowance_ref: Option<Rooted<ExternRef>>,
+        |_allowance_ref: Nullable<ExternRef>,
          _contract_id_offset: i32,
          _contract_id_length: i32,
          _token_name_offset: i32,
@@ -7039,7 +7078,7 @@ pub fn dummy_linker<T: 'static>(engine: &Engine) -> Result<Linker<T>, wasmtime::
     linker.func_wrap(
         "clarity",
         "with_stacking",
-        |_allowance_ref: Option<Rooted<ExternRef>>, _allowance_lo: i64, _allowance_hi: i64| {
+        |_allowance_ref: Nullable<ExternRef>, _allowance_lo: i64, _allowance_hi: i64| {
             println!("with_stacking: enter");
             Ok(())
         },
@@ -7053,7 +7092,7 @@ pub fn dummy_linker<T: 'static>(engine: &Engine) -> Result<Linker<T>, wasmtime::
     linker.func_wrap(
         "clarity",
         "with_stx",
-        |_allowance_ref: Option<Rooted<ExternRef>>, _amount_lo: i64, _amount_hi: i64| {
+        |_allowance_ref: Nullable<ExternRef>, _amount_lo: i64, _amount_hi: i64| {
             println!("with_stx: enter");
             Ok(())
         },
@@ -7667,7 +7706,7 @@ pub fn dummy_linker<T: 'static>(engine: &Engine) -> Result<Linker<T>, wasmtime::
 }
 
 /// the standard.wat file and link in all of the host interface functions.
-pub fn load_stdlib() -> Result<(Instance, Store<()>), wasmtime::Error> {
+pub fn load_stdlib() -> Result<(Instance, Store<()>), wasmi::Error> {
     let standard_lib = include_str!("standard/standard.wat");
     let engine = Engine::default();
     let mut store = Store::new(&engine, ());
@@ -7676,6 +7715,6 @@ pub fn load_stdlib() -> Result<(Instance, Store<()>), wasmtime::Error> {
     link_cost_globals(&mut linker, &mut store.as_context_mut())?;
 
     let module = Module::new(&engine, standard_lib)?;
-    let instance = linker.instantiate(&mut store, &module)?;
+    let instance = linker.instantiate_and_start(&mut store, &module)?;
     Ok((instance, store))
 }
