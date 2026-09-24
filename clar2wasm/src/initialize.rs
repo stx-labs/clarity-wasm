@@ -9,9 +9,7 @@ use clarity::vm::events::*;
 use clarity::vm::types::{AssetIdentifier, BuffData, PrincipalData, QualifiedContractIdentifier};
 use clarity::vm::{CallStack, ContractContext, Value};
 use stacks_common::types::chainstate::StacksBlockId;
-use wasmtime::{
-    AsContext, AsContextMut, Engine, Linker, Module, Store, StoreContext, StoreContextMut,
-};
+use wasmi::{AsContextMut, Linker, Module, Store};
 
 use crate::error_mapping;
 use crate::linker::{link_cost_globals, link_host_functions};
@@ -422,7 +420,7 @@ pub fn initialize_contract(
     let module = init_context
         .contract_context()
         .with_wasm_module(|wasm_module| {
-            Module::from_binary(&engine, wasm_module)
+            Module::new(&engine, wasm_module)
                 .map_err(|e| VmExecutionError::Wasm(WasmError::UnableToLoadModule(e)))
         })?;
     let mut store = ClarityWasmStore::new(&engine, init_context);
@@ -435,7 +433,7 @@ pub fn initialize_contract(
     );
 
     let instance = linker
-        .instantiate(&mut store, &module)
+        .instantiate_and_start(&mut store, &module)
         .map_err(|e| VmExecutionError::Wasm(WasmError::UnableToLoadModule(e)))?;
 
     // Call the `.top-level` function, which contains all top-level expressions
@@ -446,22 +444,19 @@ pub fn initialize_contract(
 
     // Get the return type of the top-level expressions function
     let ty = top_level.ty(&mut store);
-    let results_iter = ty.results();
-    let mut results = vec![];
-    for result_ty in results_iter {
-        results.push(placeholder_for_type(result_ty));
-    }
+    let mut results: Vec<_> = ty
+        .results()
+        .iter()
+        .copied()
+        .map(placeholder_for_type)
+        .collect();
 
     top_level
         .call(&mut store, &[], results.as_mut_slice())
         .map_err(|e| error_mapping::resolve_error(e, instance, &mut store, &epoch))?;
 
-    // Save the compiled Wasm module into the contract context
-    store.data_mut().contract_context_mut()?.set_wasm_module(
-        module
-            .serialize()
-            .map_err(|e| VmExecutionError::Wasm(WasmError::WasmCompileFailed(e)))?,
-    );
+    // Wasmi cannot serialize a compiled module: the contract context keeps
+    // the Wasm binary, which is parsed again when calling the contract.
 
     // Get the type of the last top-level expression with a return value
     // or default to `None`.

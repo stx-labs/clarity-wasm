@@ -9,7 +9,7 @@ use clarity::vm::Value;
 use clarity_types::types::{ASCIIData, CharType, TypeSignature};
 use clarity_types::{ClarityName, ClarityTypeError};
 use walrus::InstrSeqBuilder;
-use wasmtime::{AsContext, AsContextMut, Instance, Trap};
+use wasmi::{AsContext, AsContextMut, Instance, TrapCode};
 
 use crate::initialize::ClarityWasmContext;
 use crate::wasm_generator::{GeneratorError, WasmGenerator};
@@ -176,23 +176,23 @@ fn referror_to_error<T>(referror: &T, placeholder_error: T) -> T {
     // held in the referror.
     unsafe { core::ptr::replace((referror as *const T) as *mut T, placeholder_error) }
 }
-pub(crate) fn resolve_error(
-    e: wasmtime::Error,
+pub(crate) fn resolve_error<'a, 'b: 'a>(
+    e: wasmi::Error,
     instance: Instance,
     mut store: impl AsContextMut<Data = ClarityWasmContext<'static, 'static>>,
     epoch_id: &StacksEpochId,
 ) -> VmExecutionError {
-    if let Some(vm_error) = e.root_cause().downcast_ref::<VmExecutionError>() {
+    if let Some(vm_error) = e.downcast_ref::<VmExecutionError>() {
         return referror_to_error(vm_error, VmExecutionError::Wasm(WasmError::ModuleNotFound));
     };
 
-    if let Some(vm_error) = e.root_cause().downcast_ref::<RuntimeCheckErrorKind>() {
+    if let Some(vm_error) = e.downcast_ref::<RuntimeCheckErrorKind>() {
         return <RuntimeCheckErrorKind as std::convert::Into<VmExecutionError>>::into(
             referror_to_error(vm_error, RuntimeCheckErrorKind::AtBlockUnavailable),
         );
     };
 
-    if let Some(vm_error) = e.root_cause().downcast_ref::<RuntimeError>() {
+    if let Some(vm_error) = e.downcast_ref::<RuntimeError>() {
         return <RuntimeError as std::convert::Into<VmExecutionError>>::into(referror_to_error(
             vm_error,
             RuntimeError::ArithmeticOverflow,
@@ -204,7 +204,7 @@ pub(crate) fn resolve_error(
     //
     // In this case, runtime errors are handled
     // by being mapped to the corresponding ClarityWasm Errors.
-    if let Some(Trap::UnreachableCodeReached) = e.root_cause().downcast_ref::<Trap>() {
+    if let Some(TrapCode::UnreachableCodeReached) = e.as_trap_code() {
         return from_runtime_error_code(instance, &mut store, e, epoch_id);
     }
 
@@ -225,8 +225,8 @@ pub(crate) fn resolve_error(
 ///
 fn from_runtime_error_code(
     instance: Instance,
-    mut store: impl AsContextMut<Data = ClarityWasmContext<'static, 'static>>,
-    e: wasmtime::Error,
+    mut store: impl AsContextMut<Data = ClarityWasmContext<'a, 'b>>,
+    e: wasmi::Error,
     epoch_id: &StacksEpochId,
 ) -> VmExecutionError {
     let runtime_error_code = get_global_i32(&instance, &mut store, "runtime-error-code");
@@ -364,14 +364,16 @@ fn from_runtime_error_code(
                 None => VmExecutionError::Wasm(WasmError::GlobalNotFound(
                     "runtime-error-linked".to_owned(),
                 )),
-                Some(global) => match global.get(store.as_context_mut()).unwrap_externref() {
+                Some(global) => match global
+                    .get(store.as_context())
+                    .externref()
+                    .and_then(|externref| externref.val().copied())
+                {
                     None => VmExecutionError::Wasm(WasmError::Expect("".to_owned())),
                     Some(linked_error_extern) => {
                         match linked_error_extern
                             .data(store.as_context())
-                            .ok()
-                            .flatten()
-                            .and_then(|data| data.downcast_ref::<VmExecutionError>())
+                            .downcast_ref::<VmExecutionError>()
                         {
                             None => VmExecutionError::Wasm(WasmError::Expect(
                                 "runtime-error-linked should hold an error type".to_owned(),
