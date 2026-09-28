@@ -456,7 +456,7 @@ dependencies = [
 [[package]]
 name = "clarity"
 version = "2.3.0"
-source = "git+https://github.com/stacks-network/stacks-core?branch=feat%2Fclarity-wasm-develop#a665b98c0465e596bba5ec9ff9b36f8534d7d41b"
+source = "git+https://github.com/stacks-network/stacks-core?rev=adbc89f929bf94cea743ef3e79dae14c688c6261#adbc89f929bf94cea743ef3e79dae14c688c6261"
 dependencies = [
  "clarity-types",
  "hashbrown 0.15.5",
@@ -478,7 +478,7 @@ dependencies = [
 [[package]]
 name = "clarity-types"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core?branch=feat%2Fclarity-wasm-develop#a665b98c0465e596bba5ec9ff9b36f8534d7d41b"
+source = "git+https://github.com/stacks-network/stacks-core?rev=adbc89f929bf94cea743ef3e79dae14c688c6261#adbc89f929bf94cea743ef3e79dae14c688c6261"
 dependencies = [
  "lazy_static",
  "regex",
@@ -2748,7 +2748,7 @@ dependencies = [
 [[package]]
 name = "stacks-common"
 version = "4.0.3"
-source = "git+https://github.com/stacks-network/stacks-core?branch=feat%2Fclarity-wasm-develop#a665b98c0465e596bba5ec9ff9b36f8534d7d41b"
+source = "git+https://github.com/stacks-network/stacks-core?rev=adbc89f929bf94cea743ef3e79dae14c688c6261#adbc89f929bf94cea743ef3e79dae14c688c6261"
 dependencies = [
  "chrono",
  "curve25519-dalek",
