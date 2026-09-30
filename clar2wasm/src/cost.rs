@@ -645,12 +645,18 @@ mod caf {
     ) -> Result<i64, i64> {
         use wasmi::{Engine, Linker, Module, Store};
 
-        let engine = Engine::default();
+        let mut config = wasmi::Config::default();
+        config.consume_fuel(true);
+        let engine = Engine::new(&config);
+
         let binary = module_with_caf(caf);
         let module = Module::new(&engine, &binary).unwrap();
 
         let mut linker = Linker::<()>::new(&engine);
         let mut store = Store::new(&engine, ());
+        store
+            .set_fuel(crate::initialize::WASM_FUEL_LIMIT)
+            .expect("fuel could not be set");
 
         link_cost_globals(&mut linker, &mut store).expect("host globals should be linked");
         linker

@@ -187,7 +187,10 @@ impl WasmGenerator {
     /// Compiles and executes the current module and returns the value on top of the stack.
     /// If the value isn't of the type passed as a parameter, the function panics.
     pub fn execute_module(&mut self, return_ty: &TypeSignature) -> Value {
-        let engine = Engine::default();
+        let mut config = wasmi::Config::default();
+        config.consume_fuel(true);
+        let engine = Engine::new(&config);
+
         let version = TestConfig::clarity_version();
         let epoch = TestConfig::epoch_for_version(version);
 
@@ -256,5 +259,7 @@ fn with_test_store<R>(
         None,
     );
     let mut store = ClarityWasmStore::new(engine, context);
+    store.set_fuel(1_000_000).expect("fuel could not be set"); 
+
     f(&mut store)
 }
