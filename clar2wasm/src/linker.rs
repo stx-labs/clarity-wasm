@@ -7705,8 +7705,15 @@ pub fn dummy_linker<T: 'static>(engine: &Engine) -> Result<Linker<T>, wasmi::Err
 /// the standard.wat file and link in all of the host interface functions.
 pub fn load_stdlib() -> Result<(Instance, Store<()>), wasmi::Error> {
     let standard_lib = include_str!("standard/standard.wat");
-    let engine = Engine::default();
+
+    let mut config = wasmi::Config::default();
+    config.consume_fuel(true);
+    let engine = Engine::new(&config);
+
     let mut store = Store::new(&engine, ());
+    store
+        .set_fuel(crate::initialize::WASM_FUEL_LIMIT)
+        .expect("fuel could not be set");
 
     let mut linker = dummy_linker(&engine)?;
     link_cost_globals(&mut linker, &mut store.as_context_mut())?;
