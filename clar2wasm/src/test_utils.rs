@@ -259,7 +259,7 @@ fn with_test_store<R>(
         None,
     );
     let mut store = ClarityWasmStore::new(engine, context);
-    store.set_fuel(1_000_000).expect("fuel could not be set"); 
+    store.set_fuel(1_000_000).expect("fuel could not be set");
 
     f(&mut store)
 }

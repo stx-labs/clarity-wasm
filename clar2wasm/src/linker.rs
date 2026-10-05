@@ -7711,9 +7711,7 @@ pub fn load_stdlib() -> Result<(Instance, Store<()>), wasmi::Error> {
     let engine = Engine::new(&config);
 
     let mut store = Store::new(&engine, ());
-    store
-        .set_fuel(crate::initialize::WASM_FUEL_LIMIT)
-        .expect("fuel could not be set");
+    let _ = store.set_fuel(crate::initialize::WASM_FUEL_LIMIT);
 
     let mut linker = dummy_linker(&engine)?;
     link_cost_globals(&mut linker, &mut store.as_context_mut())?;
