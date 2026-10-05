@@ -363,6 +363,8 @@ impl ComplexWord for TupleMerge {
 mod tests {
     use clarity::vm::types::TupleData;
     use clarity::vm::{ClarityName, Value};
+    use clarity_types::types::ResponseData;
+    use clarity_types::Value::Response;
 
     use crate::tools::{crosscheck, evaluate};
 
@@ -669,5 +671,33 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("expecting 2 arguments, got 3"));
+    }
+
+    #[test]
+    fn if_branches_with_different_tuples() {
+        let snippet = r#"
+        (define-private (f (b bool))
+          (begin
+            (if b (print { a: u1 }) (print { a: u1, k: true }))
+            (ok true)))
+        (f false)
+        "#;
+        crosscheck(
+            snippet,
+            Ok(Some(Response(ResponseData {
+                committed: true,
+                data: Box::new(Value::Bool(true)),
+            }))),
+        );
+    }
+
+    #[test]
+    fn default_to_with_narrower_tuple() {
+        let snippet = r#"
+        (define-map blacklist principal { soft: bool, full: bool })
+        (define-read-only (get-soft (address principal))
+          (get soft (default-to { soft: false } (map-get? blacklist address))))
+          "#;
+        crosscheck(snippet, Ok(Some(Value::none())));
     }
 }
