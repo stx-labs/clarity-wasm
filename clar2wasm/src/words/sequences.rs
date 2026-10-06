@@ -61,9 +61,8 @@ impl ComplexWord for ListCons {
             // This means that the placeholder will be represented with a different number of `ValType`, and will
             // cause errors (example: function called with wrong number of arguments).
             // While we wait for a real fix in the typechecker, here is a workaround to set all the elements types.
-            generator.set_expr_type(expr, elem_ty.clone())?;
-
-            generator.traverse_expr(builder, expr)?;
+            // Elements can also have hidden tuple fields, which are dropped.
+            generator.traverse_expr_as(builder, expr, elem_ty)?;
             // Write this element to memory
             let elem_size = generator.write_to_memory(builder, offset, total_size, elem_ty)?;
             total_size += elem_size;
@@ -382,7 +381,6 @@ impl ComplexWord for Append {
                         .expect("Argument type should be correct as it is the same as the expression type with a smaller max_len")
                         .into(),
                 )?;
-                generator.set_expr_type(elem, elem_ty.clone())?;
                 elem_ty.clone()
             }
             _ => {
@@ -438,8 +436,8 @@ impl ComplexWord for Append {
         // We use the values on the stack to copy the list to its destination
         builder.memory_copy(memory, memory);
 
-        // Traverse the element that we're appending to the list.
-        generator.traverse_expr(builder, elem)?;
+        // Traverse the element that we're appending to the list, dropping its hidden tuple fields.
+        generator.traverse_expr_as(builder, elem, &elem_ty)?;
 
         // Store the element at the write pointer.
         generator.write_to_memory(builder, write_ptr, 0, &elem_ty)?;
@@ -600,30 +598,33 @@ impl ComplexWord for Concat {
             .clone();
         let (offset, _) = generator.create_call_stack_local(builder, &ty, false, true);
 
-        // set the correct type for all the arguments if we are dealing with lists
-        if let TypeSignature::SequenceType(SequenceSubtype::ListType(expr_ltd)) = &ty {
-            for arg in args {
-                let arg_type = generator.get_expr_type(arg).ok_or_else(|| {
-                    GeneratorError::TypeError("concat argument must be typed".to_owned())
-                })?;
-                let arg_len = match arg_type {
-                    TypeSignature::SequenceType(SequenceSubtype::ListType(arg_ltd)) => {
-                        arg_ltd.get_max_len()
-                    }
-                    t => {
-                        return Err(GeneratorError::TypeError(format!(
-                            "mismatched type for a concat argument: expected a list, got {t}"
-                        )))
-                    }
-                };
-                generator.set_expr_type(
-                    arg,
-                    // since we are building a type which will necessarily be shorter than the expression type,
-                    // and the expression type was validated by the type checker, this operation cannot fail.
-                    #[allow(clippy::unwrap_used)]
-                    TypeSignature::list_of(expr_ltd.get_list_item_type().clone(), arg_len).unwrap(),
-                )?;
-            }
+        // compute the correct type for all the arguments if we are dealing with lists,
+        // they will be traversed with it (dropping their hidden tuple fields)
+        let mut arg_tys = Vec::with_capacity(args.len());
+        for arg in args {
+            let TypeSignature::SequenceType(SequenceSubtype::ListType(expr_ltd)) = &ty else {
+                arg_tys.push(None);
+                continue;
+            };
+            let arg_type = generator.get_expr_type(arg).ok_or_else(|| {
+                GeneratorError::TypeError("concat argument must be typed".to_owned())
+            })?;
+            let arg_len = match arg_type {
+                TypeSignature::SequenceType(SequenceSubtype::ListType(arg_ltd)) => {
+                    arg_ltd.get_max_len()
+                }
+                t => {
+                    return Err(GeneratorError::TypeError(format!(
+                        "mismatched type for a concat argument: expected a list, got {t}"
+                    )))
+                }
+            };
+            arg_tys.push(Some(
+                // since we are building a type which will necessarily be shorter than the expression type,
+                // and the expression type was validated by the type checker, this operation cannot fail.
+                #[allow(clippy::unwrap_used)]
+                TypeSignature::list_of(expr_ltd.get_list_item_type().clone(), arg_len).unwrap(),
+            ));
         }
 
         let [fst_arg, rest_args @ ..] = args else {
@@ -639,9 +640,16 @@ impl ComplexWord for Concat {
         // copy destination
         builder.local_get(offset);
 
+        let mut arg_tys = arg_tys.iter();
+
         // traverse the first argument, leaves on the stack (offset, size) which are the
         // correct arguments for the memory copy operation right after.
-        generator.traverse_expr(builder, fst_arg)?;
+        traverse_concat_arg(
+            generator,
+            builder,
+            fst_arg,
+            arg_tys.next().and_then(Option::as_ref),
+        )?;
 
         // we save the size
         builder.local_tee(*size);
@@ -660,7 +668,12 @@ impl ComplexWord for Concat {
                 .binop(BinaryOp::I32Add);
 
             // traverse the argument, leaving on the stack (offset, size)
-            generator.traverse_expr(builder, arg)?;
+            traverse_concat_arg(
+                generator,
+                builder,
+                arg,
+                arg_tys.next().and_then(Option::as_ref),
+            )?;
 
             // we keep the argument size on the stack, but use it to update the result size
             builder
@@ -683,6 +696,19 @@ impl ComplexWord for Concat {
         builder.local_get(offset).local_get(*size);
 
         Ok(())
+    }
+}
+
+/// Traverses a `concat` argument, with its list type if it has one.
+fn traverse_concat_arg(
+    generator: &mut WasmGenerator,
+    builder: &mut walrus::InstrSeqBuilder,
+    arg: &SymbolicExpression,
+    arg_ty: Option<&TypeSignature>,
+) -> Result<(), GeneratorError> {
+    match arg_ty {
+        Some(ty) => generator.traverse_expr_as(builder, arg, ty),
+        None => generator.traverse_expr(builder, arg),
     }
 }
 
@@ -3541,5 +3567,71 @@ mod tests {
                     .unwrap(),
             )),
         );
+    }
+
+    #[test]
+    fn list_with_hidden_tuple_fields() {
+        let snippet = r#"
+            (let ((l (list { a: u1 } { a: u2, k: true } { a: u3, k: false })))
+                (+
+                    (get a (unwrap-panic (element-at? l u0)))
+                    (get a (unwrap-panic (element-at? l u1)))
+                    (get a (unwrap-panic (element-at? l u2)))
+                )
+            )
+        "#;
+
+        crosscheck(snippet, Ok(Some(Value::UInt(6))));
+    }
+
+    #[test]
+    fn append_with_hidden_tuple_field() {
+        let snippet = r#"
+            (let ((l (append (list { a: u1 }) { a: u2, k: true })))
+                (+
+                    (get a (unwrap-panic (element-at? l u0)))
+                    (get a (unwrap-panic (element-at? l u1)))
+                )
+            )
+        "#;
+
+        crosscheck(snippet, Ok(Some(Value::UInt(3))));
+    }
+
+    #[test]
+    fn concat_with_hidden_tuple_fields() {
+        let snippet = r#"
+            (let ((l (concat (list { a: u1 }) (list { a: u2, k: true } { a: u3, k: false }))))
+                (+
+                    (get a (unwrap-panic (element-at? l u0)))
+                    (get a (unwrap-panic (element-at? l u1)))
+                    (get a (unwrap-panic (element-at? l u2)))
+                )
+            )
+        "#;
+
+        crosscheck(snippet, Ok(Some(Value::UInt(6))));
+    }
+
+    #[cfg(not(any(
+        feature = "test-clarity-v1",
+        feature = "test-clarity-v2",
+        feature = "test-clarity-v3",
+        feature = "test-clarity-v4",
+        feature = "test-clarity-v5"
+    )))]
+    #[test]
+    fn concat_3args_with_hidden_tuple_fields() {
+        let snippet = r#"
+            (let ((l (concat (list { a: u1 }) (list { a: u2, k: true }) (list { a: u3, l: u9 }))))
+                (+
+                    (get a (unwrap-panic (element-at? l u0)))
+                    (get a (unwrap-panic (element-at? l u1)))
+                    (get a (unwrap-panic (element-at? l u2)))
+                )
+            )
+        "#;
+
+        crosscheck(snippet, Ok(Some(Value::UInt(6))));
     }
 }
