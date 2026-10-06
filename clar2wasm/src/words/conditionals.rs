@@ -139,9 +139,9 @@ impl<'a> ShortReturnable<'a> {
         builder: &mut InstrSeqBuilder,
         condition: impl FnMut(&mut InstrSeqBuilder),
     ) -> Result<(), GeneratorError> {
-        match generator.get_current_function_return_type() {
+        match generator.get_current_function_return_type().cloned() {
             Some(return_ty) => {
-                self.handle_short_return_function(generator, builder, return_ty, condition)
+                self.handle_short_return_function(generator, builder, &return_ty, condition)
             }
             None => self.handle_short_return_top_level(generator, builder, condition),
         }
@@ -213,33 +213,45 @@ impl<'a> ShortReturnable<'a> {
     /// This is part of [ShortReturnable::handle_short_return] and shouldn't be used directly.
     fn handle_short_return_function(
         &self,
-        generator: &WasmGenerator,
+        generator: &mut WasmGenerator,
         builder: &mut InstrSeqBuilder,
         expected_type: &TypeSignature,
         mut condition: impl FnMut(&mut InstrSeqBuilder),
     ) -> Result<(), GeneratorError> {
         match self {
-            // for an optional, we need to push the full value to the stack
-            ShortReturnable::Optional { inner_type, .. } => {
+            // for an optional, we need to push the full value to the stack:
+            // - 0 for none
+            // - a placeholder for the some value with the type of the function return type
+            ShortReturnable::Optional { .. } => {
                 builder.i32_const(0);
-                add_placeholder_for_clarity_type(builder, inner_type);
+                let TypeSignature::OptionalType(expected_inner_type) = expected_type else {
+                    return Err(GeneratorError::TypeError(format!(
+                        "Expected Optional type in assertion, got {expected_type}"
+                    )));
+                };
+                add_placeholder_for_clarity_type(builder, expected_inner_type);
             }
             // for a response, we need to create the full value:
             // - 0 for err
             // - a placeholder for the ok value with the type of the function return type
-            // - the err value
-            ShortReturnable::Response { err_value, .. } => {
+            // - the err value, without its hidden tuple fields
+            ShortReturnable::Response {
+                err_type,
+                err_value,
+                ..
+            } => {
                 builder.i32_const(0);
                 let TypeSignature::ResponseType(expected_resp) = expected_type else {
                     return Err(GeneratorError::TypeError(format!(
                         "Expected Response type in assertion, got {expected_type}"
                     )));
                 };
-                let (expected_ok_type, _expected_err_type) = expected_resp.as_ref();
+                let (expected_ok_type, expected_err_type) = expected_resp.as_ref();
                 add_placeholder_for_clarity_type(builder, expected_ok_type);
                 for &l in err_value {
                     builder.local_get(l);
                 }
+                generator.duck_type(builder, err_type, expected_err_type, None)?;
             }
             // for any value, we just push the value on the stack
             Self::Any { value, .. } => {
@@ -822,11 +834,9 @@ impl ComplexWord for Unwrap {
         generator.set_expr_type(input, input_ty.clone())?;
 
         // if we are in a function, we should make sure the thrown value is the same type as the return type.
-        if let Some(ty) = generator.get_current_function_return_type().cloned() {
-            generator.set_expr_type(throw, ty)?;
-        }
         let throw_ty = generator
-            .get_expr_type(throw)
+            .get_current_function_return_type()
+            .or_else(|| generator.get_expr_type(throw))
             .ok_or_else(|| {
                 GeneratorError::TypeError("Thrown value for unwrap! should be typed".to_owned())
             })
@@ -838,7 +848,8 @@ impl ComplexWord for Unwrap {
         let (short_returnable_input, variant) =
             ShortReturnable::new(generator, builder, &input_ty)?;
 
-        generator.traverse_expr(builder, throw)?;
+        // the thrown value can have hidden tuple fields, which are dropped.
+        generator.traverse_expr_as(builder, throw, &throw_ty)?;
 
         // we save the thrown value as a short returnable and handle a short-return
         let short_returnable_throw = ShortReturnable::new_any(
@@ -908,11 +919,9 @@ impl ComplexWord for UnwrapErr {
         generator.set_expr_type(input, input_ty.clone())?;
 
         // if we are in a function, we should make sure the thrown value is the same type as the return type.
-        if let Some(ty) = generator.get_current_function_return_type().cloned() {
-            generator.set_expr_type(throw, ty)?;
-        }
         let throw_ty = generator
-            .get_expr_type(throw)
+            .get_current_function_return_type()
+            .or_else(|| generator.get_expr_type(throw))
             .ok_or_else(|| {
                 GeneratorError::TypeError("Thrown value for unwrap-err! should be typed".to_owned())
             })
@@ -924,7 +933,8 @@ impl ComplexWord for UnwrapErr {
         let (short_returnable_input, variant) =
             ShortReturnable::new(generator, builder, &input_ty)?;
 
-        generator.traverse_expr(builder, throw)?;
+        // the thrown value can have hidden tuple fields, which are dropped.
+        generator.traverse_expr_as(builder, throw, &throw_ty)?;
 
         // we save the thrown value as a short returnable and handle a short-return
         let short_returnable_throw = ShortReturnable::new_any(
@@ -981,8 +991,8 @@ impl ComplexWord for Asserts {
                 GeneratorError::TypeError("Thrown value in an asserts! should be typed".to_owned())
             })
             .cloned()?;
-        generator.set_expr_type(thrown, thrown_type.clone())?;
-        generator.traverse_expr(builder, thrown)?;
+        // the thrown value can have hidden tuple fields, which are dropped.
+        generator.traverse_expr_as(builder, thrown, &thrown_type)?;
 
         // we save the thrown as a short-returnable, and we handle its short-return.
         let short_returnable_thrown = ShortReturnable::new_any(
@@ -1051,8 +1061,8 @@ impl ComplexWord for Try {
 #[cfg(test)]
 mod tests {
     use clarity::vm::errors::{EarlyReturnError, VmExecutionError};
-    use clarity::vm::types::ResponseData;
-    use clarity::vm::Value;
+    use clarity::vm::types::{ResponseData, TupleData};
+    use clarity::vm::{ClarityName, Value};
 
     use crate::tools::{crosscheck, crosscheck_compare_only, crosscheck_expect_failure, evaluate};
 
@@ -2014,5 +2024,107 @@ mod tests {
         "#;
 
         crosscheck(snippet, Ok(Some(Value::okay_true())));
+    }
+
+    #[test]
+    fn function_body_with_hidden_tuple_field() {
+        let snippet = r#"
+            (define-private (f (b bool))
+                (begin
+                    (asserts! b (err { a: u1 }))
+                    (if b (err { a: u2, k: true }) (ok u0))
+                )
+            )
+            (+ (get a (unwrap-err-panic (f false))) (get a (unwrap-err-panic (f true))))
+        "#;
+
+        crosscheck(snippet, Ok(Some(Value::UInt(3))));
+    }
+
+    #[test]
+    fn asserts_throwing_hidden_tuple_field() {
+        let snippet = r#"
+            (define-private (f (b bool) (c bool))
+                (begin
+                    (asserts! b (err { a: u1 }))
+                    (asserts! c (err { a: u2, k: true }))
+                    (ok u0)
+                )
+            )
+            (get a (unwrap-err-panic (f true false)))
+        "#;
+
+        crosscheck(snippet, Ok(Some(Value::UInt(2))));
+    }
+
+    #[test]
+    fn unwrap_throwing_hidden_tuple_field() {
+        let snippet = r#"
+            (define-private (f (b bool) (o (optional uint)))
+                (begin
+                    (asserts! b (err { a: u1 }))
+                    (ok (unwrap! o (err { a: u2, k: true })))
+                )
+            )
+            (get a (unwrap-err-panic (f true none)))
+        "#;
+
+        crosscheck(snippet, Ok(Some(Value::UInt(2))));
+    }
+
+    #[test]
+    fn unwrap_err_throwing_hidden_tuple_field() {
+        let snippet = r#"
+            (define-private (f (b bool) (r (response uint uint)))
+                (begin
+                    (asserts! b (err { a: u1 }))
+                    (ok (unwrap-err! r (err { a: u2, k: true })))
+                )
+            )
+            (get a (unwrap-err-panic (f true (ok u5))))
+        "#;
+
+        crosscheck(snippet, Ok(Some(Value::UInt(2))));
+    }
+
+    #[test]
+    fn try_response_with_hidden_tuple_field() {
+        let snippet = r#"
+            (define-private (f (b bool) (r (response uint { a: uint, k: bool })))
+                (begin
+                    (asserts! b (err { a: u1 }))
+                    (ok (try! r))
+                )
+            )
+            (get a (unwrap-err-panic (f true (err { a: u2, k: true }))))
+        "#;
+
+        crosscheck(snippet, Ok(Some(Value::UInt(2))));
+    }
+
+    #[test]
+    fn try_optional_with_hidden_tuple_field() {
+        let snippet = r#"
+            (define-private (f (o (optional { a: uint, k: bool })))
+                (begin
+                    (try! o)
+                    (some { a: u1 })
+                )
+            )
+            (list (f none) (f (some { a: u2, k: true })))
+        "#;
+
+        let tuple = TupleData::from_data(vec![(ClarityName::from_literal("a"), Value::UInt(1))])
+            .unwrap();
+        crosscheck(
+            snippet,
+            Ok(Some(
+                Value::cons_list_unsanitized(vec![
+                    Value::none(),
+                    Value::some(tuple.into()).unwrap(),
+                ])
+                .unwrap(),
+            )),
+        );
     }
 }

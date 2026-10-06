@@ -709,9 +709,8 @@ impl WasmGenerator {
 
         self.early_return_block_id = Some(block_id);
 
-        // Traverse the body of the function
-        self.set_expr_type(body, function_type.returns.clone())?;
-        self.traverse_expr(&mut block, body)?;
+        // Traverse the body of the function, dropping its hidden tuple fields
+        self.traverse_expr_as(&mut block, body, &function_type.returns)?;
 
         // If the same arg name is used multiple times, the interpreter throws an
         // `Unchecked` error at runtime, so we do the same here
