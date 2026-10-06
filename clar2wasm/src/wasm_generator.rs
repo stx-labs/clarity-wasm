@@ -1068,25 +1068,6 @@ impl WasmGenerator {
         Ok((offset, len))
     }
 
-    pub(crate) fn block_from_expr(
-        &mut self,
-        builder: &mut InstrSeqBuilder,
-        expr: &SymbolicExpression,
-    ) -> Result<InstrSeqId, GeneratorError> {
-        let return_type = clar2wasm_ty(self.get_expr_type(expr).ok_or_else(|| {
-            GeneratorError::TypeError("Expression results must be typed".to_owned())
-        })?);
-
-        let mut block = builder.dangling_instr_seq(InstrSeqType::new(
-            &mut self.module.types,
-            &[],
-            &return_type,
-        ));
-        self.traverse_expr(&mut block, expr)?;
-
-        Ok(block.id())
-    }
-
     /// Traverses `expr`, leaving it on the stack with type `target_ty`.
     ///
     /// `expr` is traversed with its hidden tuple fields (see `with_hidden_tuple_fields`), which are
@@ -1107,7 +1088,7 @@ impl WasmGenerator {
         self.duck_type(builder, &expr_ty, target_ty, None)
     }
 
-    /// Like `block_from_expr`, but the block returns `target_ty`, using `traverse_expr_as`.
+    /// Generates a block containing `expr` and returning `target_ty`, using `traverse_expr_as`.
     pub(crate) fn block_from_expr_as(
         &mut self,
         builder: &mut InstrSeqBuilder,

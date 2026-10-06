@@ -291,16 +291,15 @@ impl ComplexWord for If {
         let true_branch = args.get_expr(1)?;
         let false_branch = args.get_expr(2)?;
 
-        // WORKAROUND: have to set the expression result type to the true and false branch
+        // WORKAROUND: have to set the expression result type to the true and false branch,
+        // keeping their hidden tuple fields
         let expr_ty = generator
             .get_expr_type(expr)
             .ok_or_else(|| GeneratorError::TypeError("if expression must be typed".to_owned()))?
             .clone();
-        generator.set_expr_type(true_branch, expr_ty.clone())?;
-        generator.set_expr_type(false_branch, expr_ty)?;
 
-        let id_true = generator.block_from_expr(builder, true_branch)?;
-        let id_false = generator.block_from_expr(builder, false_branch)?;
+        let id_true = generator.block_from_expr_as(builder, true_branch, &expr_ty)?;
+        let id_false = generator.block_from_expr_as(builder, false_branch, &expr_ty)?;
 
         generator.traverse_expr(builder, conditional)?;
 
@@ -313,7 +312,7 @@ impl ComplexWord for If {
     }
 }
 
-/// Generates the instruction block for a `match` branch. The interpreter
+/// Generates the instruction block for a `match` branch, returning `target_ty`. The interpreter
 /// raises `NameAlreadyUsed` at runtime when the binding collides with a
 /// reserved or contract-defined name if the branch is actually taken.
 fn match_branch_block(
@@ -321,11 +320,10 @@ fn match_branch_block(
     builder: &mut InstrSeqBuilder,
     binding: &ClarityName,
     body: &SymbolicExpression,
+    target_ty: &TypeSignature,
 ) -> Result<InstrSeqId, GeneratorError> {
     if generator.is_already_used_name(binding) {
-        let return_type = clar2wasm_ty(generator.get_expr_type(body).ok_or_else(|| {
-            GeneratorError::TypeError("Expression results must be typed".to_owned())
-        })?);
+        let return_type = clar2wasm_ty(target_ty);
         let mut block = builder.dangling_instr_seq(InstrSeqType::new(
             &mut generator.module.types,
             &[],
@@ -334,7 +332,7 @@ fn match_branch_block(
         error_mapping::generate_name_already_used_error(generator, &mut block, binding)?;
         Ok(block.id())
     } else {
-        generator.block_from_expr(builder, body)
+        generator.block_from_expr_as(builder, body, target_ty)
     }
 }
 
@@ -357,8 +355,8 @@ impl ComplexWord for Match {
     ) -> Result<(), GeneratorError> {
         self.charge(generator, builder, 0)?;
 
-        // WORKAROUND: we'll have to set the types of arguments to the type of expression,
-        //             since the typechecker didn't do it for us
+        // WORKAROUND: we'll have to set the types of the branches to the type of expression,
+        //             keeping their hidden tuple fields, since the typechecker didn't do it for us
         let expr_ty = generator
             .get_expr_type(_expr)
             .ok_or_else(|| {
@@ -369,8 +367,6 @@ impl ComplexWord for Match {
         let match_on = args.get_expr(0)?;
         let success_binding = args.get_name(1)?;
         let success_body = args.get_expr(2)?;
-        // WORKAROND: type set on some/ok body
-        generator.set_expr_type(success_body, expr_ty.clone())?;
 
         // save the current set of named locals, for later restoration
         let saved_bindings = generator.bindings.clone();
@@ -383,22 +379,24 @@ impl ComplexWord for Match {
 
                 let none_body = args.get_expr(3)?;
 
-                // WORKAROUND: set type on none body
-                generator.set_expr_type(none_body, expr_ty)?;
-
                 let some_locals = generator.save_to_locals(builder, &inner_type, true);
 
                 generator
                     .bindings
                     .insert(success_binding.clone(), *inner_type, some_locals);
 
-                let some_block =
-                    match_branch_block(generator, builder, success_binding, success_body)?;
+                let some_block = match_branch_block(
+                    generator,
+                    builder,
+                    success_binding,
+                    success_body,
+                    &expr_ty,
+                )?;
 
                 // we can restore early, since the none branch does not bind anything
                 generator.bindings = saved_bindings;
 
-                let none_block = generator.block_from_expr(builder, none_body)?;
+                let none_block = generator.block_from_expr_as(builder, none_body, &expr_ty)?;
 
                 builder.instr(ir::IfElse {
                     consequent: some_block,
@@ -414,8 +412,6 @@ impl ComplexWord for Match {
 
                 let err_binding = args.get_name(3)?;
                 let err_body = args.get_expr(4)?;
-                // Workaround: set type on err body
-                generator.set_expr_type(err_body, expr_ty)?;
 
                 let err_locals = generator.save_to_locals(builder, err_ty, true);
                 let ok_locals = generator.save_to_locals(builder, ok_ty, true);
@@ -423,8 +419,13 @@ impl ComplexWord for Match {
                 generator
                     .bindings
                     .insert(success_binding.clone(), ok_ty.clone(), ok_locals);
-                let ok_block =
-                    match_branch_block(generator, builder, success_binding, success_body)?;
+                let ok_block = match_branch_block(
+                    generator,
+                    builder,
+                    success_binding,
+                    success_body,
+                    &expr_ty,
+                )?;
 
                 // restore named locals
                 generator.bindings.clone_from(&saved_bindings);
@@ -434,7 +435,8 @@ impl ComplexWord for Match {
                     .bindings
                     .insert(err_binding.clone(), err_ty.clone(), err_locals);
 
-                let err_block = match_branch_block(generator, builder, err_binding, err_body)?;
+                let err_block =
+                    match_branch_block(generator, builder, err_binding, err_body, &expr_ty)?;
 
                 // restore named locals again
                 generator.bindings = saved_bindings;
@@ -1910,5 +1912,107 @@ mod tests {
         "#;
 
         crosscheck(snippet, Ok(Some(Value::err_uint(5555))));
+    }
+
+    #[test]
+    fn nested_if_with_hidden_tuple_fields() {
+        let snippet = r#"
+            (define-private (f (b bool) (c bool))
+                (get a (if b { a: u1 } (if c { a: u2, k: true } { a: u3, k: false, l: u4 })))
+            )
+            (f false false)
+        "#;
+
+        crosscheck(snippet, Ok(Some(Value::UInt(3))));
+    }
+
+    #[test]
+    fn if_with_hidden_tuple_field_in_optional() {
+        let snippet = r#"
+            (define-private (f (b bool))
+                (get a (unwrap-panic (if b (some { a: u1 }) (some { a: u2, k: true }))))
+            )
+            (f false)
+        "#;
+
+        crosscheck(snippet, Ok(Some(Value::UInt(2))));
+    }
+
+    #[test]
+    fn if_with_hidden_tuple_field_in_list() {
+        let snippet = r#"
+            (define-private (f (b bool))
+                (let ((l (if b (list { a: u1 }) (list { a: u2, k: true } { a: u3, k: false }))))
+                    (+ (get a (unwrap-panic (element-at? l u0))) (get a (unwrap-panic (element-at? l u1))))
+                )
+            )
+            (f false)
+        "#;
+
+        crosscheck(snippet, Ok(Some(Value::UInt(5))));
+    }
+
+    #[test]
+    fn match_optional_with_hidden_tuple_field() {
+        let snippet = r#"
+            (define-private (f (o (optional uint)))
+                (get a (match o v { a: v } { a: u0, k: true }))
+            )
+            (list (f (some u1)) (f none))
+        "#;
+
+        crosscheck(
+            snippet,
+            Ok(Some(
+                Value::cons_list_unsanitized(vec![Value::UInt(1), Value::UInt(0)]).unwrap(),
+            )),
+        );
+    }
+
+    #[test]
+    fn match_response_with_hidden_tuple_field() {
+        let snippet = r#"
+            (define-private (f (r (response uint uint)))
+                (get a (match r v { a: v } e { a: e, k: true }))
+            )
+            (list (f (ok u1)) (f (err u3)))
+        "#;
+
+        crosscheck(
+            snippet,
+            Ok(Some(
+                Value::cons_list_unsanitized(vec![Value::UInt(1), Value::UInt(3)]).unwrap(),
+            )),
+        );
+    }
+
+    #[test]
+    fn match_branch_printing_hidden_tuple_field() {
+        let snippet = r#"
+            (define-private (f (o (optional uint)))
+                (begin
+                    (match o v (print { a: v }) (print { a: u0, k: true }))
+                    (ok true)
+                )
+            )
+            (f none)
+        "#;
+
+        crosscheck(snippet, Ok(Some(Value::okay_true())));
+    }
+
+    #[test]
+    fn if_branch_printing_hidden_tuple_field() {
+        let snippet = r#"
+            (define-private (f (b bool))
+                (begin
+                    (if b (print { a: u1 }) (print { a: u1, k: true }))
+                    (ok true)
+                )
+            )
+            (f false)
+        "#;
+
+        crosscheck(snippet, Ok(Some(Value::okay_true())));
     }
 }
