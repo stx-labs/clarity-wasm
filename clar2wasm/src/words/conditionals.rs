@@ -1953,7 +1953,7 @@ mod tests {
         let snippet = r#"
             (define-private (f (b bool))
                 (let ((l (if b (list { a: u1 }) (list { a: u2, k: true } { a: u3, k: false }))))
-                    (+ (get a (unwrap-panic (element-at? l u0))) (get a (unwrap-panic (element-at? l u1))))
+                    (+ (get a (unwrap-panic (element-at l u0))) (get a (unwrap-panic (element-at l u1))))
                 )
             )
             (f false)
