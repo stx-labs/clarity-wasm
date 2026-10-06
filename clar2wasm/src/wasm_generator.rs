@@ -23,7 +23,7 @@ use walrus::{
 };
 
 use crate::cost::{ChargeContext, WordCharge};
-use crate::duck_type::need_ducktyping;
+use crate::duck_type::{need_ducktyping, with_hidden_tuple_fields};
 use crate::error_mapping::ErrorMap;
 use crate::wasm_utils::{
     get_type_in_memory_size, get_type_size, signature_from_string, trait_identifier_as_bytes,
@@ -1083,6 +1083,45 @@ impl WasmGenerator {
             &return_type,
         ));
         self.traverse_expr(&mut block, expr)?;
+
+        Ok(block.id())
+    }
+
+    /// Traverses `expr`, leaving it on the stack with type `target_ty`.
+    ///
+    /// `expr` is traversed with its hidden tuple fields (see `with_hidden_tuple_fields`), which are
+    /// dropped afterwards. This is needed wherever the typechecker joins types, since the joined type
+    /// can have fewer tuple fields than the value `expr` builds.
+    pub(crate) fn traverse_expr_as(
+        &mut self,
+        builder: &mut InstrSeqBuilder,
+        expr: &SymbolicExpression,
+        target_ty: &TypeSignature,
+    ) -> Result<(), GeneratorError> {
+        let expr_ty = match self.get_expr_type(expr) {
+            Some(own_ty) => with_hidden_tuple_fields(target_ty, own_ty)?,
+            None => target_ty.clone(),
+        };
+        self.set_expr_type(expr, expr_ty.clone())?;
+        self.traverse_expr(builder, expr)?;
+        self.duck_type(builder, &expr_ty, target_ty, None)
+    }
+
+    /// Like `block_from_expr`, but the block returns `target_ty`, using `traverse_expr_as`.
+    pub(crate) fn block_from_expr_as(
+        &mut self,
+        builder: &mut InstrSeqBuilder,
+        expr: &SymbolicExpression,
+        target_ty: &TypeSignature,
+    ) -> Result<InstrSeqId, GeneratorError> {
+        let return_type = clar2wasm_ty(target_ty);
+
+        let mut block = builder.dangling_instr_seq(InstrSeqType::new(
+            &mut self.module.types,
+            &[],
+            &return_type,
+        ));
+        self.traverse_expr_as(&mut block, expr, target_ty)?;
 
         Ok(block.id())
     }
