@@ -2114,8 +2114,8 @@ mod tests {
             (list (f none) (f (some { a: u2, k: true })))
         "#;
 
-        let tuple = TupleData::from_data(vec![(ClarityName::from_literal("a"), Value::UInt(1))])
-            .unwrap();
+        let tuple =
+            TupleData::from_data(vec![(ClarityName::from_literal("a"), Value::UInt(1))]).unwrap();
         crosscheck(
             snippet,
             Ok(Some(
