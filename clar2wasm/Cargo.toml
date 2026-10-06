@@ -79,5 +79,9 @@ harness = false
 name = "operations"
 harness = false
 
+[[bench]]
+name = "mainnet"
+harness = false
+
 [lints.clippy]
 result_large_err = "allow"

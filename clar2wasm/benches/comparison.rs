@@ -15,7 +15,7 @@ use clarity::util::secp256k1::{Secp256k1PrivateKey, Secp256k1PublicKey};
 use clarity::vm::contexts::{ExecutionState, FunctionExecutionOptions, InvocationContext};
 use clarity::vm::types::TupleData;
 use clarity::vm::{ClarityName, Value};
-use common::{bench_calls, bench_transactions, criterion_config};
+use common::{bench_calls, bench_transactions, criterion_config, Contract, Scenario};
 use criterion::{criterion_group, criterion_main, Criterion};
 use paste::paste;
 
@@ -32,17 +32,17 @@ macro_rules! decl_benches {
             $(
                 #[allow(non_snake_case)]
                 fn [<single _ $fn_name>](c: &mut Criterion) {
-                    let contracts = [(format!("clarity-{}", $fn_name), $clarity.to_string())];
+                    let scenario = Scenario::single(Contract::new(format!("clarity-{}", $fn_name), $clarity), $fn_name);
 
                     let mut group = c.benchmark_group($fn_name);
-                    bench_calls(&mut group, None, &contracts, $fn_name, |_, _| {
+                    bench_calls(&mut group, None, &scenario, |_, _| {
                         vec![$(black_box($arg)),*]
                     });
                     group.finish();
 
                     let group_name = concat!($fn_name, "-tx");
                     let mut group = c.benchmark_group(group_name);
-                    bench_transactions(&mut group, group_name, None, &contracts, $fn_name, |_, _| {
+                    bench_transactions(&mut group, group_name, None, &scenario, |_, _| {
                         vec![$(black_box($arg)),*]
                     });
                     group.finish();
@@ -64,13 +64,13 @@ macro_rules! decl_benches {
                 fn [<range _ $fn_name>](c: &mut Criterion) {
                     let produce_clarity = $produce_clarity;
                     let all_contracts: Vec<_> = ($range)
-                        .map(|i| (i, [(format!("clarity-{}", $fn_name), produce_clarity(i))]))
+                        .map(|i| (i, Scenario::single(Contract::new(format!("clarity-{}", $fn_name), produce_clarity(i)), $fn_name)))
                         .collect();
 
                     let mut group = c.benchmark_group($fn_name);
-                    for (i, contracts) in &all_contracts {
+                    for (i, scenario) in &all_contracts {
                         let i = *i;
-                        bench_calls(&mut group, Some(&i.to_string()), contracts, $fn_name, |exec_state, invoke_ctx| {
+                        bench_calls(&mut group, Some(&i.to_string()), scenario, |exec_state, invoke_ctx| {
                             $init(i, exec_state, invoke_ctx)
                         });
                     }
@@ -78,9 +78,9 @@ macro_rules! decl_benches {
 
                     let group_name = concat!($fn_name, "-tx");
                     let mut group = c.benchmark_group(group_name);
-                    for (i, contracts) in &all_contracts {
+                    for (i, scenario) in &all_contracts {
                         let i = *i;
-                        bench_transactions(&mut group, group_name, Some(&i.to_string()), contracts, $fn_name, |exec_state, invoke_ctx| {
+                        bench_transactions(&mut group, group_name, Some(&i.to_string()), scenario, |exec_state, invoke_ctx| {
                             $init(i, exec_state, invoke_ctx)
                         });
                     }

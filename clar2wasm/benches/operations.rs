@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use clarity::vm::contexts::{ExecutionState, InvocationContext};
 use clarity::vm::Value;
-use common::{bench_calls, check, criterion_config, Contract};
+use common::{bench_calls, check, criterion_config, Contract, Scenario};
 use criterion::{criterion_group, criterion_main, Criterion};
 
 /// The lengths of the folded list. The contract accepts lists of up to the last one.
@@ -178,7 +178,7 @@ const OPS: &[Op] = &[
 ];
 
 impl Op {
-    fn contracts(&self) -> Vec<Contract> {
+    fn scenario(&self) -> Scenario {
         let max = SIZES[SIZES.len() - 1];
         let Op {
             elem,
@@ -199,11 +199,14 @@ impl Op {
             "#
         );
 
-        self.dependencies
+        let target = format!("op-{}", self.name);
+        let contracts = self
+            .dependencies
             .iter()
-            .map(|(name, source)| (name.to_string(), source.to_string()))
-            .chain([(format!("op-{}", self.name), source)])
-            .collect()
+            .map(|(name, source)| Contract::new(*name, *source))
+            .chain([Contract::new(target.clone(), source)])
+            .collect();
+        Scenario::new(contracts, target, "run")
     }
 }
 
@@ -217,15 +220,15 @@ fn list_arg(
 
 fn operations(c: &mut Criterion) {
     for op in OPS {
-        let contracts = op.contracts();
+        let scenario = op.scenario();
         let group_name = format!("ops-{}", op.name);
         let mut group = c.benchmark_group(&group_name);
 
         for n in SIZES {
             let param = n.to_string();
             let init = list_arg(op.elem, n);
-            check(&group_name, Some(&param), &contracts, "run", &init);
-            bench_calls(&mut group, Some(&param), &contracts, "run", init);
+            check(&group_name, Some(&param), &scenario, &init);
+            bench_calls(&mut group, Some(&param), &scenario, init);
         }
 
         group.finish();

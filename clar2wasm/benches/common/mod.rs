@@ -17,6 +17,7 @@ use std::path::PathBuf;
 use clar2wasm::compile;
 use clar2wasm::datastore::{BurnDatastore, Datastore, StacksConstants};
 use clar2wasm::initialize::initialize_contract;
+use clar2wasm::tools::execute;
 use clarity::consts::CHAIN_ID_TESTNET;
 use clarity::types::StacksEpochId;
 use clarity::vm::analysis::{run_analysis, ContractAnalysis};
@@ -34,11 +35,13 @@ use clarity::vm::{
     eval_all, CallStack, ClarityVersion, ContractContext, ContractName, SymbolicExpression, Value,
 };
 use criterion::measurement::WallTime;
-use criterion::{BenchmarkGroup, BenchmarkId, Criterion};
+use criterion::{BatchSize, BenchmarkGroup, BenchmarkId, Criterion};
 use pprof::criterion::{Output, PProfProfiler};
 
 pub const EPOCH: StacksEpochId = StacksEpochId::latest();
-pub const VERSION: ClarityVersion = ClarityVersion::latest();
+
+/// The STX balance of the sender of the benchmarked transactions.
+pub const SENDER_BALANCE: u128 = 100_000_000_000_000;
 
 #[derive(Clone, Copy, Debug)]
 pub enum Engine {
@@ -57,8 +60,137 @@ impl Engine {
     }
 }
 
-/// A contract to deploy, as `(name, source)`.
-pub type Contract = (String, String);
+/// A contract to deploy.
+pub struct Contract {
+    pub name: String,
+    pub source: String,
+    pub version: ClarityVersion,
+    /// The address deploying the contract, the transient test address by default.
+    pub issuer: StandardPrincipalData,
+}
+
+impl Contract {
+    /// A contract using the latest Clarity version.
+    pub fn new(name: impl Into<String>, source: impl Into<String>) -> Self {
+        Self::with_version(name, source, ClarityVersion::latest())
+    }
+
+    pub fn with_version(
+        name: impl Into<String>,
+        source: impl Into<String>,
+        version: ClarityVersion,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            source: source.into(),
+            version,
+            issuer: StandardPrincipalData::transient(),
+        }
+    }
+
+    /// Deploys the contract from `address` instead of the transient test address, for contracts
+    /// referred to by their fully qualified name.
+    pub fn at(mut self, address: &str) -> Self {
+        self.issuer = match PrincipalData::parse_standard_principal(address) {
+            Ok(issuer) => issuer,
+            Err(e) => panic!("Invalid address {address}: {e:?}"),
+        };
+        self
+    }
+
+    pub fn id(&self) -> QualifiedContractIdentifier {
+        QualifiedContractIdentifier::new(
+            self.issuer.clone(),
+            ContractName::try_from(self.name.as_str())
+                .unwrap_or_else(|_| panic!("Failed to create contract name from {}", self.name)),
+        )
+    }
+}
+
+/// A step setting up the chain state of a benchmark.
+pub enum Step {
+    /// A transaction from the sender, which must return `(ok ...)`.
+    Call {
+        contract: String,
+        function: String,
+        args: Vec<Value>,
+    },
+    /// Mines empty blocks.
+    AdvanceBlocks(u32),
+}
+
+impl Step {
+    pub fn call(contract: &str, function: &str, args: Vec<Value>) -> Self {
+        Step::Call {
+            contract: contract.to_string(),
+            function: function.to_string(),
+            args,
+        }
+    }
+}
+
+/// What a benchmark deploys and calls.
+pub struct Scenario {
+    /// The contracts to deploy, in order.
+    pub contracts: Vec<Contract>,
+    /// The name of the contract holding the benchmarked function.
+    pub target: String,
+    /// The benchmarked function.
+    pub function: String,
+    /// Steps run after deploying the contracts, before `init`.
+    pub setup: Vec<Step>,
+    /// Whether every benchmarked transaction must start from the prepared state, for transactions
+    /// which cannot be repeated on the state they leave behind (transferring an NFT, registering a
+    /// name). The prepared state is then copied before each transaction, outside of the
+    /// measurement. Such scenarios can only be benchmarked as whole transactions.
+    pub fresh_state: bool,
+}
+
+impl Scenario {
+    pub fn new(
+        contracts: Vec<Contract>,
+        target: impl Into<String>,
+        function: impl Into<String>,
+    ) -> Self {
+        let target = target.into();
+        assert!(
+            contracts.iter().any(|contract| contract.name == target),
+            "{target} is not deployed by the scenario"
+        );
+        Self {
+            contracts,
+            target,
+            function: function.into(),
+            setup: vec![],
+            fresh_state: false,
+        }
+    }
+
+    pub fn with_setup(mut self, setup: Vec<Step>) -> Self {
+        self.setup = setup;
+        self
+    }
+
+    pub fn with_fresh_state(mut self) -> Self {
+        self.fresh_state = true;
+        self
+    }
+
+    /// The identifier of the deployed contract `name`.
+    pub fn contract_id(&self, name: &str) -> QualifiedContractIdentifier {
+        self.contracts
+            .iter()
+            .find(|contract| contract.name == name)
+            .unwrap_or_else(|| panic!("{name} is not deployed by the scenario"))
+            .id()
+    }
+
+    /// A scenario calling `function` of a single contract.
+    pub fn single(contract: Contract, function: impl Into<String>) -> Self {
+        let target = contract.name.clone();
+        Self::new(vec![contract], target, function)
+    }
+}
 
 pub fn contract_id(name: &str) -> QualifiedContractIdentifier {
     QualifiedContractIdentifier::new(
@@ -69,6 +201,7 @@ pub fn contract_id(name: &str) -> QualifiedContractIdentifier {
 }
 
 /// The chain state contracts are deployed to and called on.
+#[derive(Clone)]
 pub struct Chain {
     datastore: Datastore,
     burn_datastore: BurnDatastore,
@@ -88,6 +221,14 @@ impl Chain {
             conn.setup_block_metadata(Some(1)).unwrap();
             conn.commit().unwrap();
         }
+
+        execute(&mut conn, |db| {
+            let mut snapshot = db.get_stx_balance_snapshot(&sender())?;
+            snapshot.credit(SENDER_BALANCE)?;
+            snapshot.save()?;
+            db.increment_ustx_liquid_supply(SENDER_BALANCE)
+        })
+        .expect("Failed to fund the sender");
 
         Self {
             datastore,
@@ -122,8 +263,15 @@ impl Chain {
         GlobalContext::new(false, CHAIN_ID_TESTNET, conn, cost_tracker, EPOCH)
     }
 
-    pub fn deploy(&mut self, engine: Engine, (name, source): &Contract) -> ContractContext {
-        let contract_id = contract_id(name);
+    pub fn deploy(&mut self, engine: Engine, contract: &Contract) -> ContractContext {
+        let Contract {
+            name,
+            source,
+            version,
+            ..
+        } = contract;
+        let version = *version;
+        let contract_id = contract.id();
         let cost_tracker = self.cost_tracker();
 
         let (mut analysis, wasm_module): (ContractAnalysis, Option<Vec<u8>>) = self
@@ -134,7 +282,7 @@ impl Chain {
                     Engine::Interpreter => {
                         let mut cost_tracker = cost_tracker;
                         let ast =
-                            build_ast(&contract_id, source, &mut cost_tracker, VERSION, EPOCH)
+                            build_ast(&contract_id, source, &mut cost_tracker, version, EPOCH)
                                 .unwrap_or_else(|e| panic!("Failed to parse {name}: {e:?}"));
                         let analysis = run_analysis(
                             &contract_id,
@@ -143,7 +291,7 @@ impl Chain {
                             false,
                             cost_tracker,
                             EPOCH,
-                            VERSION,
+                            version,
                             true,
                             ResourceLimiter::unlimited(),
                         )
@@ -155,7 +303,7 @@ impl Chain {
                             source,
                             &contract_id,
                             cost_tracker,
-                            VERSION,
+                            version,
                             EPOCH,
                             analysis_db,
                             false,
@@ -176,7 +324,7 @@ impl Chain {
             .cost_track
             .take()
             .expect("Analysis should return its cost tracker");
-        let mut contract_context = ContractContext::new(contract_id.clone(), VERSION);
+        let mut contract_context = ContractContext::new(contract_id.clone(), version);
         if let Some(wasm_module) = wasm_module {
             contract_context.set_wasm_module(wasm_module);
         }
@@ -290,8 +438,23 @@ impl Chain {
     }
 }
 
+impl Chain {
+    pub fn advance_blocks(&mut self, count: u32) {
+        self.burn_datastore.advance_chain_tip(count);
+        self.datastore.advance_chain_tip(count);
+    }
+}
+
 pub fn sender() -> PrincipalData {
     StandardPrincipalData::transient().into()
+}
+
+/// Panics if `value` is an `(err ...)` response, so that a benchmark can never measure a failing
+/// call by mistake.
+pub fn expect_success(value: &Value, what: &str) {
+    if let Value::Response(response) = value {
+        assert!(response.committed, "{what} returned {value}");
+    }
 }
 
 /// A chain on which the contracts of a benchmark are deployed, ready for the benchmarked call.
@@ -301,21 +464,22 @@ pub struct Prepared {
     pub args: Vec<Value>,
 }
 
-/// Deploys `contracts` in order on a new chain, then runs `init` in its own transaction to set up
-/// the state and produce the arguments of the call to the last contract, which holds the
-/// benchmarked function. Contracts are compiled to Wasm here, so compilation is never measured.
-pub fn prepare<F>(engine: Engine, contracts: &[Contract], init: &F) -> Prepared
+/// Deploys the contracts of `scenario` in order on a new chain, then runs `init` in its own
+/// transaction calling into the target contract, to set up the state and produce the arguments of
+/// the benchmarked call. Contracts are compiled to Wasm here, so compilation is never measured.
+pub fn prepare<F>(engine: Engine, scenario: &Scenario, init: &F) -> Prepared
 where
     F: Fn(&mut ExecutionState, &mut InvocationContext) -> Vec<Value>,
 {
     let mut chain = Chain::new();
-    let mut deployed: Vec<_> = contracts
-        .iter()
-        .map(|contract| chain.deploy(engine, contract))
-        .collect();
-    let contract = deployed
-        .pop()
-        .expect("A benchmark needs at least one contract");
+    let mut target = None;
+    for contract in &scenario.contracts {
+        let context = chain.deploy(engine, contract);
+        if contract.name == scenario.target && target.is_none() {
+            target = Some(context);
+        }
+    }
+    let contract = target.expect("The target contract should be deployed");
 
     // A contract stored without a Wasm module is silently interpreted, which the crosscheck cannot
     // detect since both engines would then be the interpreter.
@@ -325,9 +489,9 @@ where
         &chain.burn_datastore,
     );
     conn.begin();
-    for (name, _) in contracts {
+    for contract @ Contract { name, .. } in &scenario.contracts {
         let stored = conn
-            .get_contract(&contract_id(name))
+            .get_contract(&contract.id())
             .expect("Failed to load deployed contract");
         assert_eq!(
             stored.wasm_module.is_some(),
@@ -337,6 +501,26 @@ where
         );
     }
     conn.roll_back().unwrap();
+
+    let mut cost_tracker = chain.cost_tracker();
+    for step in &scenario.setup {
+        match step {
+            Step::Call {
+                contract,
+                function,
+                args,
+            } => {
+                let (result, _) = chain.transaction(
+                    &mut cost_tracker,
+                    &scenario.contract_id(contract),
+                    function,
+                    &as_transaction_args(args),
+                );
+                expect_success(&result, &format!("Setup call to {contract}.{function}"));
+            }
+            Step::AdvanceBlocks(count) => chain.advance_blocks(*count),
+        }
+    }
 
     let args = chain.session(&contract, |exec_state, invoke_ctx| {
         init(exec_state, invoke_ctx)
@@ -358,17 +542,18 @@ pub fn as_transaction_args(args: &[Value]) -> Vec<SymbolicExpression> {
 /// Executes the benchmarked transaction once on each engine, starting from the same state, and
 /// panics if the engines disagree on the result or the emitted events. Returns the cost of the
 /// transaction on each engine.
-pub fn crosscheck<F>(contracts: &[Contract], fn_name: &str, init: &F) -> [ExecutionCost; 2]
+pub fn crosscheck<F>(scenario: &Scenario, init: &F) -> [ExecutionCost; 2]
 where
     F: Fn(&mut ExecutionState, &mut InvocationContext) -> Vec<Value>,
 {
+    let fn_name = scenario.function.as_str();
     let [(interpreted, interpreter_events, interpreter_cost), (wasm, wasm_events, wasm_cost)] =
         Engine::ALL.map(|engine| {
             let Prepared {
                 mut chain,
                 contract,
                 args,
-            } = prepare(engine, contracts, init);
+            } = prepare(engine, scenario, init);
             let mut cost_tracker = chain.cost_tracker();
             let (result, events) = chain.transaction(
                 &mut cost_tracker,
@@ -376,6 +561,7 @@ where
                 fn_name,
                 &as_transaction_args(&args),
             );
+            expect_success(&result, &format!("{fn_name} on the {}", engine.name()));
             (result, events, cost_tracker.get_total())
         });
 
@@ -426,16 +612,11 @@ pub fn record_costs(group: &str, param: Option<&str>, costs: &[ExecutionCost; 2]
 
 /// Checks that both engines agree on the benchmarked transaction (see [`crosscheck`]), and records
 /// its costs next to the criterion results of `group_name`.
-pub fn check<F>(
-    group_name: &str,
-    param: Option<&str>,
-    contracts: &[Contract],
-    fn_name: &str,
-    init: &F,
-) where
+pub fn check<F>(group_name: &str, param: Option<&str>, scenario: &Scenario, init: &F)
+where
     F: Fn(&mut ExecutionState, &mut InvocationContext) -> Vec<Value>,
 {
-    record_costs(group_name, param, &crosscheck(contracts, fn_name, init));
+    record_costs(group_name, param, &crosscheck(scenario, init));
 }
 
 pub fn benchmark_id(engine: Engine, param: Option<&str>) -> BenchmarkId {
@@ -445,57 +626,63 @@ pub fn benchmark_id(engine: Engine, param: Option<&str>) -> BenchmarkId {
     }
 }
 
-/// Benchmarks calling `fn_name` of the last of `contracts` on both engines. All calls happen in a
-/// single transaction, so this measures the function call alone.
+/// Benchmarks calling the function of `scenario` on both engines. All calls happen in a single
+/// transaction, so this measures the function call alone.
 pub fn bench_calls<F>(
     group: &mut BenchmarkGroup<WallTime>,
     param: Option<&str>,
-    contracts: &[Contract],
-    fn_name: &str,
+    scenario: &Scenario,
     init: F,
 ) where
     F: Fn(&mut ExecutionState, &mut InvocationContext) -> Vec<Value>,
 {
+    assert!(
+        !scenario.fresh_state,
+        "Scenarios needing a fresh state can only be benchmarked as transactions"
+    );
     for engine in Engine::ALL {
         group.bench_function(benchmark_id(engine, param), |b| {
             let Prepared {
                 mut chain,
                 contract,
                 args,
-            } = prepare(engine, contracts, &init);
+            } = prepare(engine, scenario, &init);
             let func = contract
-                .lookup_function(fn_name)
+                .lookup_function(&scenario.function)
                 .expect("failed to lookup function");
             chain.session(&contract, |exec_state, invoke_ctx| {
                 b.iter(|| {
-                    exec_state
+                    let result = exec_state
                         .execute_function_as_transaction(
                             invoke_ctx,
                             &func,
                             &args,
                             FunctionExecutionOptions::default(),
                         )
-                        .expect("Function call failed")
+                        .expect("Function call failed");
+                    expect_success(&result, &scenario.function);
+                    result
                 });
             });
         });
     }
 }
 
-/// Benchmarks a transaction calling `fn_name` of the last of `contracts` on both engines, after
-/// checking that they agree on the outcome. Each iteration is a whole transaction, as executed by
-/// a node: setting up the execution context, loading the contract, calling it and committing.
+/// Benchmarks a transaction calling the function of `scenario` on both engines, after checking
+/// that they agree on the outcome. Each iteration is a whole transaction, as executed by a node:
+/// setting up the execution context, loading the contract, calling it and committing. With a
+/// [`Scenario::fresh_state`], each transaction runs on a copy of the prepared state, made outside of
+/// the measurement.
 pub fn bench_transactions<F>(
     group: &mut BenchmarkGroup<WallTime>,
     group_name: &str,
     param: Option<&str>,
-    contracts: &[Contract],
-    fn_name: &str,
+    scenario: &Scenario,
     init: F,
 ) where
     F: Fn(&mut ExecutionState, &mut InvocationContext) -> Vec<Value>,
 {
-    check(group_name, param, contracts, fn_name, &init);
+    check(group_name, param, scenario, &init);
 
     for engine in Engine::ALL {
         group.bench_function(benchmark_id(engine, param), |b| {
@@ -503,17 +690,28 @@ pub fn bench_transactions<F>(
                 mut chain,
                 contract,
                 args,
-            } = prepare(engine, contracts, &init);
+            } = prepare(engine, scenario, &init);
             let args = as_transaction_args(&args);
             let mut cost_tracker = chain.cost_tracker();
-            b.iter(|| {
-                chain.transaction(
+            let mut transaction = |chain: &mut Chain| {
+                let (result, events) = chain.transaction(
                     &mut cost_tracker,
                     &contract.contract_identifier,
-                    fn_name,
+                    &scenario.function,
                     &args,
-                )
-            });
+                );
+                expect_success(&result, &scenario.function);
+                (result, events)
+            };
+            if scenario.fresh_state {
+                b.iter_batched_ref(
+                    || chain.clone(),
+                    |chain| transaction(chain),
+                    BatchSize::SmallInput,
+                );
+            } else {
+                b.iter(|| transaction(&mut chain));
+            }
         });
     }
 }
