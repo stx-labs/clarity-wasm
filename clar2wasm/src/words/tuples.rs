@@ -361,7 +361,8 @@ impl ComplexWord for TupleMerge {
 
 #[cfg(test)]
 mod tests {
-    use clarity::vm::types::TupleData;
+    use clarity::vm::errors::{RuntimeCheckErrorKind, VmExecutionError};
+    use clarity::vm::types::{TupleData, TupleTypeSignature, TypeSignature};
     use clarity::vm::{ClarityName, Value};
 
     use crate::tools::{crosscheck, evaluate};
@@ -669,5 +670,132 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("expecting 2 arguments, got 3"));
+    }
+
+    // Known incompatibilities: where the typechecker joins types, the joined type can have fewer tuple
+    // fields than the value. The interpreter keeps those hidden fields in the value, while the compiled
+    // code drops them, so they diverge wherever the joined value is used as a whole.
+
+    /// `{ a: u2, k: true }`, the value of the joined expressions below.
+    fn value_with_hidden_field() -> Value {
+        TupleData::from_data(vec![
+            (ClarityName::from_literal("a"), Value::UInt(2)),
+            (ClarityName::from_literal("k"), Value::Bool(true)),
+        ])
+        .unwrap()
+        .into()
+    }
+
+    /// The error raised by the interpreter when `value_with_hidden_field` is checked against `{ a: uint }`.
+    fn hidden_field_type_value_error() -> VmExecutionError {
+        let ty = TupleTypeSignature::try_from(vec![(
+            ClarityName::from_literal("a"),
+            TypeSignature::UIntType,
+        )])
+        .unwrap();
+        VmExecutionError::RuntimeCheck(RuntimeCheckErrorKind::TypeValueError(
+            Box::new(ty.into()),
+            value_with_hidden_field().to_error_string(),
+        ))
+    }
+
+    #[test]
+    #[ignore = "hidden tuple fields are dropped at joins"]
+    fn print_joined_value_with_hidden_tuple_field() {
+        let snippet = r#"
+            (define-private (f (b bool))
+                (begin
+                    (print (if b { a: u1 } { a: u2, k: true }))
+                    (ok true)
+                )
+            )
+            (f false)
+        "#;
+
+        crosscheck(snippet, Ok(Some(Value::okay_true())));
+    }
+
+    #[test]
+    #[ignore = "hidden tuple fields are dropped at joins"]
+    fn to_consensus_buff_of_joined_value_with_hidden_tuple_field() {
+        let snippet = r#"
+            (len (unwrap-panic (to-consensus-buff? (if false { a: u1 } { a: u2, k: true }))))
+        "#;
+
+        crosscheck(snippet, Ok(Some(Value::UInt(27))));
+    }
+
+    #[test]
+    #[ignore = "hidden tuple fields are dropped at joins"]
+    fn is_eq_with_fewer_tuple_fields() {
+        crosscheck(
+            "(is-eq { a: u1, k: true } { a: u1 })",
+            Ok(Some(Value::Bool(false))),
+        );
+    }
+
+    #[test]
+    #[ignore = "hidden tuple fields are dropped at joins"]
+    fn is_eq_joined_value_with_hidden_tuple_field() {
+        crosscheck(
+            "(is-eq (if false { a: u1 } { a: u1, k: true }) { a: u1 })",
+            Ok(Some(Value::Bool(false))),
+        );
+    }
+
+    #[test]
+    #[ignore = "hidden tuple fields are dropped at joins"]
+    fn index_of_joined_value_with_hidden_tuple_field() {
+        let snippet = r#"
+            (index-of (list { a: u1 }) (if false { a: u1 } { a: u1, k: true }))
+        "#;
+
+        crosscheck(snippet, Ok(Some(Value::none())));
+    }
+
+    #[test]
+    #[ignore = "hidden tuple fields are dropped at joins"]
+    fn function_returning_joined_value_with_hidden_tuple_field() {
+        let snippet = r#"
+            (define-read-only (f (b bool))
+                (if b { a: u1 } { a: u2, k: true })
+            )
+            (f false)
+        "#;
+
+        crosscheck(snippet, Ok(Some(value_with_hidden_field())));
+    }
+
+    #[test]
+    #[ignore = "hidden tuple fields are dropped at joins"]
+    fn function_argument_with_hidden_tuple_field() {
+        let snippet = r#"
+            (define-private (get-a (t { a: uint })) (get a t))
+            (get-a (if false { a: u1 } { a: u2, k: true }))
+        "#;
+
+        crosscheck(snippet, Err(hidden_field_type_value_error()));
+    }
+
+    #[test]
+    #[ignore = "hidden tuple fields are dropped at joins"]
+    fn map_set_with_hidden_tuple_field() {
+        let snippet = r#"
+            (define-map m uint { a: uint })
+            (map-set m u0 (if false { a: u1 } { a: u2, k: true }))
+        "#;
+
+        crosscheck(snippet, Err(hidden_field_type_value_error()));
+    }
+
+    #[test]
+    #[ignore = "hidden tuple fields are dropped at joins"]
+    fn var_set_with_hidden_tuple_field() {
+        let snippet = r#"
+            (define-data-var v { a: uint } { a: u0 })
+            (var-set v (if false { a: u1 } { a: u2, k: true }))
+        "#;
+
+        crosscheck(snippet, Err(hidden_field_type_value_error()));
     }
 }

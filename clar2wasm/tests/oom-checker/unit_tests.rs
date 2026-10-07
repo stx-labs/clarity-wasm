@@ -451,4 +451,128 @@ mod clarity_v2_v3 {
             Ok(Some(Value::string_utf8_from_bytes(b"42".to_vec()).unwrap())),
         );
     }
+
+    // Dropping hidden tuple fields from list elements copies the list into a new space.
+
+    #[test]
+    fn if_with_hidden_tuple_fields_in_list_oom() {
+        crosscheck_oom(
+            r#"
+                (let ((l (if false (list { a: u1 }) (list { a: u2, k: true } { a: u3, k: false }))))
+                    (get a (unwrap-panic (element-at? l u1)))
+                )
+            "#,
+            Ok(Some(Value::UInt(3))),
+        );
+    }
+
+    #[test]
+    fn match_with_hidden_tuple_fields_in_list_oom() {
+        crosscheck_oom(
+            r#"
+                (define-private (f (o (optional uint)))
+                    (match o v (list { a: v }) (list { a: u2, k: true } { a: u3, k: false }))
+                )
+                (get a (unwrap-panic (element-at? (f none) u1)))
+            "#,
+            Ok(Some(Value::UInt(3))),
+        );
+    }
+
+    #[test]
+    fn default_to_with_hidden_tuple_fields_in_list_oom() {
+        crosscheck_oom(
+            r#"
+                (let ((l (default-to (list { a: u1 }) (some (list { a: u2, k: true } { a: u3, k: false })))))
+                    (get a (unwrap-panic (element-at? l u1)))
+                )
+            "#,
+            Ok(Some(Value::UInt(3))),
+        );
+    }
+
+    #[test]
+    fn list_with_hidden_tuple_fields_in_nested_list_oom() {
+        crosscheck_oom(
+            r#"
+                (let ((l (list { l: (list { a: u1 }) } { l: (list { a: u2, k: true } { a: u3, k: false }) })))
+                    (get a (unwrap-panic (element-at? (get l (unwrap-panic (element-at? l u1))) u1)))
+                )
+            "#,
+            Ok(Some(Value::UInt(3))),
+        );
+    }
+
+    #[test]
+    fn append_with_hidden_tuple_fields_in_nested_list_oom() {
+        crosscheck_oom(
+            r#"
+                (let ((l (append (list { l: (list { a: u1 }) }) { l: (list { a: u2, k: true } { a: u3, k: false }) })))
+                    (get a (unwrap-panic (element-at? (get l (unwrap-panic (element-at? l u1))) u1)))
+                )
+            "#,
+            Ok(Some(Value::UInt(3))),
+        );
+    }
+
+    #[test]
+    fn concat_with_hidden_tuple_fields_in_list_oom() {
+        crosscheck_oom(
+            r#"
+                (let ((l (concat (list { a: u1 }) (list { a: u2, k: true } { a: u3, k: false }))))
+                    (get a (unwrap-panic (element-at? l u2)))
+                )
+            "#,
+            Ok(Some(Value::UInt(3))),
+        );
+    }
+
+    #[test]
+    fn function_body_with_hidden_tuple_fields_in_list_oom() {
+        crosscheck_oom(
+            r#"
+                (define-private (f (b bool))
+                    (begin
+                        (asserts! b (err (list { a: u1 })))
+                        (if b (err (list { a: u2, k: true } { a: u3, k: false })) (ok u0))
+                    )
+                )
+                (get a (unwrap-panic (element-at? (unwrap-err-panic (f true)) u1)))
+            "#,
+            Ok(Some(Value::UInt(3))),
+        );
+    }
+
+    #[test]
+    fn asserts_throwing_hidden_tuple_fields_in_list_oom() {
+        crosscheck_oom(
+            r#"
+                (define-private (f (b bool) (c bool))
+                    (begin
+                        (asserts! b (err (list { a: u1 })))
+                        (asserts! c (err (list { a: u2, k: true } { a: u3, k: false })))
+                        (ok u0)
+                    )
+                )
+                (get a (unwrap-panic (element-at? (unwrap-err-panic (f true false)) u1)))
+            "#,
+            Ok(Some(Value::UInt(3))),
+        );
+    }
+
+    #[test]
+    fn try_with_hidden_tuple_fields_in_list_oom() {
+        crosscheck_oom(
+            r#"
+                (define-private (f (b bool) (r (response uint (list 2 { a: uint, k: bool }))))
+                    (begin
+                        (asserts! b (err (list { a: u1 })))
+                        (ok (try! r))
+                    )
+                )
+                (get a (unwrap-panic (element-at? (unwrap-err-panic (f true (err (list { a: u2, k: true } { a: u3, k: false })))) u1)))
+            "#,
+            Ok(Some(Value::UInt(3))),
+        );
+    }
 }
