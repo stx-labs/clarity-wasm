@@ -26,7 +26,7 @@ use clarity::vm::contexts::{
     ExecutionState, FunctionExecutionOptions, GlobalContext, InvocationContext,
 };
 use clarity::vm::costs::{ExecutionCost, LimitedCostTracker};
-use clarity::vm::database::ClarityDatabase;
+use clarity::vm::database::{ClarityDatabase, ClarityExecutionCache};
 use clarity::vm::errors::StaticCheckErrorKind;
 use clarity::vm::events::StacksTransactionEvent;
 use clarity::vm::resource_limiter::ResourceLimiter;
@@ -254,12 +254,19 @@ impl Chain {
         .expect("Failed to create cost tracker")
     }
 
-    pub fn global_context(&mut self, cost_tracker: LimitedCostTracker) -> GlobalContext<'_> {
+    /// The context of a transaction. `cache` is the per-transaction contract cache, which a node
+    /// attaches to the database of every transaction (see `ClarityTransactionConnection`).
+    pub fn global_context<'s>(
+        &'s mut self,
+        cost_tracker: LimitedCostTracker,
+        cache: &'s mut ClarityExecutionCache,
+    ) -> GlobalContext<'s> {
         let conn = ClarityDatabase::new(
             &mut self.datastore,
             &self.burn_datastore,
             &self.burn_datastore,
-        );
+        )
+        .with_cache(cache);
         GlobalContext::new(false, CHAIN_ID_TESTNET, conn, cost_tracker, EPOCH)
     }
 
@@ -329,7 +336,8 @@ impl Chain {
             contract_context.set_wasm_module(wasm_module);
         }
 
-        let mut global_context = self.global_context(cost_tracker);
+        let mut cache = ClarityExecutionCache::default();
+        let mut global_context = self.global_context(cost_tracker, &mut cache);
         global_context.begin();
         global_context
             .database
@@ -370,7 +378,8 @@ impl Chain {
         f: impl FnOnce(&mut ExecutionState, &mut InvocationContext) -> R,
     ) -> R {
         let cost_tracker = self.cost_tracker();
-        let mut global_context = self.global_context(cost_tracker);
+        let mut cache = ClarityExecutionCache::default();
+        let mut global_context = self.global_context(cost_tracker, &mut cache);
         global_context.begin();
 
         let mut call_stack = CallStack::new();
@@ -393,7 +402,8 @@ impl Chain {
 
     /// Executes a contract-call transaction the way a node does (see
     /// `OwnedEnvironment::execute_transaction`): the contract is loaded from the chain state, the
-    /// arguments are sanitized, the function is called, and the transaction is committed.
+    /// arguments are sanitized, the function is called, and the transaction is committed. Like on a
+    /// node, contracts loaded during the transaction are cached for the rest of it.
     ///
     /// The cost tracker lives for a whole block on a node, so it is moved in and out of the
     /// transaction instead of being created for it.
@@ -404,10 +414,11 @@ impl Chain {
         fn_name: &str,
         args: &[SymbolicExpression],
     ) -> (Value, Vec<StacksTransactionEvent>) {
-        let mut global_context = self.global_context(std::mem::replace(
-            cost_tracker,
-            LimitedCostTracker::new_free(),
-        ));
+        let mut cache = ClarityExecutionCache::default();
+        let mut global_context = self.global_context(
+            std::mem::replace(cost_tracker, LimitedCostTracker::new_free()),
+            &mut cache,
+        );
         global_context.begin();
 
         let initial_context = ContractContext::new(
