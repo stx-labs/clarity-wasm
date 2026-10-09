@@ -1018,7 +1018,12 @@ impl WasmGenerator {
             TypeSignature::IntType | TypeSignature::UIntType => {
                 builder.i32_const(17);
             }
-            TypeSignature::PrincipalType => {
+            // Callable types (traits, contract principals, and unions of
+            // them) are principals at runtime, with the same representation.
+            TypeSignature::PrincipalType
+            | TypeSignature::CallableType(_)
+            | TypeSignature::TraitReferenceType(_)
+            | TypeSignature::ListUnionType(_) => {
                 let &[_offset, length] = value else {
                     return MISMATCHED_TYPE_VALUE(ty);
                 };
@@ -1247,11 +1252,6 @@ impl WasmGenerator {
                     self.serialization_size_runtime(builder, elem_ty, elem)?;
                     builder.binop(BinaryOp::I32Add);
                 }
-            }
-            _ => {
-                return Err(GeneratorError::TypeError(format!(
-                    "Unserializable type found for serialization size computation: {ty}"
-                )))
             }
         }
         Ok(())
