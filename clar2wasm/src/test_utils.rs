@@ -11,7 +11,7 @@ use clarity::vm::types::{
 };
 use clarity::vm::{CallStack, ClarityVersion, ContractContext, Value};
 use walrus::{FunctionBuilder, InstrSeqBuilder, MemoryId};
-use wasmtime::{Engine, Module, Store};
+use wasmi::{Engine, Module, Store};
 
 use crate::datastore::{BurnDatastore, Datastore, StacksConstants};
 use crate::initialize::{ClarityWasmContext, ClarityWasmStore};
@@ -187,7 +187,10 @@ impl WasmGenerator {
     /// Compiles and executes the current module and returns the value on top of the stack.
     /// If the value isn't of the type passed as a parameter, the function panics.
     pub fn execute_module(&mut self, return_ty: &TypeSignature) -> Value {
-        let engine = Engine::default();
+        let mut config = wasmi::Config::default();
+        config.consume_fuel(true);
+        let engine = Engine::new(&config);
+
         let version = TestConfig::clarity_version();
         let epoch = TestConfig::epoch_for_version(version);
 
@@ -197,7 +200,7 @@ impl WasmGenerator {
             let module =
                 Module::new(&engine, self.module.emit_wasm()).expect("failed to create module");
             let instance = linker
-                .instantiate(&mut *store, &module)
+                .instantiate_and_start(&mut *store, &module)
                 .expect("failed to instanciate module");
 
             let top_level = instance
@@ -207,6 +210,8 @@ impl WasmGenerator {
             let mut result: Vec<_> = top_level
                 .ty(&mut *store)
                 .results()
+                .iter()
+                .copied()
                 .map(placeholder_for_type)
                 .collect();
 
@@ -254,5 +259,7 @@ fn with_test_store<R>(
         None,
     );
     let mut store = ClarityWasmStore::new(engine, context);
+    store.set_fuel(1_000_000).expect("fuel could not be set");
+
     f(&mut store)
 }

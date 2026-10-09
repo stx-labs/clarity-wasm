@@ -12,7 +12,7 @@ use clarity::vm::types::{
 use clarity::vm::{ClarityName, ClarityVersion, ContractName, Value};
 use stacks_common::types::StacksEpochId;
 use walrus::{GlobalId, InstrSeqBuilder};
-use wasmtime::{AsContext, AsContextMut, Memory, Val, ValType};
+use wasmi::{AsContext, AsContextMut, Memory, Val, ValType};
 
 use crate::error_mapping::ErrorMap;
 use crate::initialize::ClarityWasmContext;
@@ -464,8 +464,9 @@ pub fn read_from_wasm(
                 memory
                     .read(store, current_offset, &mut contract_name)
                     .map_err(|e| VmExecutionError::Wasm(WasmError::Runtime(e.into())))?;
-                let contract_name = String::from_utf8(contract_name)
-                    .map_err(|e| VmExecutionError::Wasm(WasmError::Runtime(e.into())))?;
+                let contract_name = String::from_utf8(contract_name).map_err(|e| {
+                    VmExecutionError::Wasm(WasmError::Runtime(wasmi::Error::new(e.to_string())))
+                })?;
                 let qualified_id = QualifiedContractIdentifier {
                     issuer: principal,
                     name: ContractName::try_from(contract_name)?,
@@ -727,14 +728,7 @@ pub fn get_type_in_memory_size(ty: &TypeSignature, include_repr: bool) -> i32 {
 
 /// Push a placeholder value for Wasm type `ty` onto the data stack.
 pub fn placeholder_for_type(ty: ValType) -> Val {
-    match ty {
-        ValType::I32 => Val::I32(0),
-        ValType::I64 => Val::I64(0),
-        ValType::F32 => Val::F32(0),
-        ValType::F64 => Val::F64(0),
-        ValType::V128 => Val::V128(0.into()),
-        ValType::Ref(ref_ty) => Val::null_ref(ref_ty.heap_type()),
-    }
+    Val::default_for_ty(ty)
 }
 
 /// Write a value to the Wasm memory at `offset` given the provided Clarity
@@ -830,7 +824,9 @@ pub fn write_to_wasm(
                     };
                     String::from_utf8(utf8_data.items().iter().flatten().copied().collect())
                         .map_err(|e| {
-                            VmExecutionError::Wasm(WasmError::UnableToWriteMemory(e.into()))
+                            VmExecutionError::Wasm(WasmError::UnableToWriteMemory(
+                                wasmi::Error::new(e.to_string()),
+                            ))
                         })?
                         .chars()
                         .flat_map(|c| (c as u32).to_be_bytes())

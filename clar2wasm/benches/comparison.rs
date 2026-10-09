@@ -1,244 +1,30 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+//! Benchmarks comparing the Clarity interpreter with the WebAssembly runtime on whole contracts.
+//!
+//! Each benchmark is measured both as calls to the function within a single transaction, and as
+//! whole transactions, as executed by a node. See [`common`] for how benchmarks are run.
+
+mod common;
+
 use std::hint::black_box;
 
-use clar2wasm::compile;
-use clar2wasm::datastore::{BurnDatastore, Datastore, StacksConstants};
-use clar2wasm::initialize::initialize_contract;
-use clarity::consts::CHAIN_ID_TESTNET;
-use clarity::types::{PrivateKey, StacksEpochId};
+use clarity::types::PrivateKey;
 use clarity::util::hash::Keccak256Hash;
 use clarity::util::secp256k1::{Secp256k1PrivateKey, Secp256k1PublicKey};
-use clarity::vm::analysis::{run_analysis, AnalysisDatabase};
-use clarity::vm::ast::build_ast_with_diagnostics;
-use clarity::vm::contexts::{
-    ExecutionState, FunctionExecutionOptions, GlobalContext, InvocationContext,
-};
-use clarity::vm::costs::LimitedCostTracker;
-use clarity::vm::database::{ClarityDatabase, MemoryBackingStore};
-use clarity::vm::resource_limiter::ResourceLimiter;
-use clarity::vm::types::{QualifiedContractIdentifier, StandardPrincipalData, TupleData};
-use clarity::vm::{
-    eval_all, CallStack, ClarityName, ClarityVersion, ContractContext, ContractName, Value,
-};
-use criterion::measurement::Measurement;
-use criterion::{criterion_group, criterion_main, Bencher, BenchmarkId, Criterion};
+use clarity::vm::contexts::{ExecutionState, FunctionExecutionOptions, InvocationContext};
+use clarity::vm::types::TupleData;
+use clarity::vm::{ClarityName, Value};
+use common::{bench_calls, bench_transactions, criterion_config, Contract, Scenario};
+use criterion::{criterion_group, criterion_main, Criterion};
 use paste::paste;
-use pprof::criterion::{Output, PProfProfiler};
-
-fn interpreter<M, F>(b: &mut Bencher<M>, fn_name: &str, clarity: &str, init: F)
-where
-    M: 'static + Measurement,
-    F: FnOnce(&mut ExecutionState, &mut InvocationContext) -> Vec<Value>,
-{
-    let contract_id = QualifiedContractIdentifier::new(
-        StandardPrincipalData::transient(),
-        ContractName::try_from(format!("clarity-{fn_name}").as_str())
-            .unwrap_or_else(|_| panic!("Failed to create contract name from clarity-{}", fn_name)),
-    );
-    let mut datastore = Datastore::new();
-    let constants = StacksConstants::default();
-    let burn_datastore = BurnDatastore::new(constants);
-    let mut clarity_store = MemoryBackingStore::new();
-    let mut conn = ClarityDatabase::new(&mut datastore, &burn_datastore, &burn_datastore);
-    conn.begin();
-    conn.set_clarity_epoch_version(StacksEpochId::latest())
-        .unwrap();
-    conn.commit().unwrap();
-    let mut cost_tracker: LimitedCostTracker = LimitedCostTracker::new_free();
-    let mut contract_context: ContractContext =
-        ContractContext::new(contract_id.clone(), ClarityVersion::latest());
-
-    let contract_str = clarity.to_string();
-
-    // Create a new analysis database
-    let mut analysis_db = AnalysisDatabase::new(&mut clarity_store);
-
-    // Parse the contract
-    let (ast, _, success) = build_ast_with_diagnostics(
-        &contract_id,
-        &contract_str,
-        &mut cost_tracker,
-        ClarityVersion::latest(),
-        StacksEpochId::latest(),
-    );
-
-    if !success {
-        panic!("Failed to parse contract");
-    }
-
-    // Run the analysis passes
-    let mut contract_analysis = run_analysis(
-        &contract_id,
-        &ast.expressions,
-        &mut analysis_db,
-        false,
-        cost_tracker,
-        StacksEpochId::latest(),
-        ClarityVersion::latest(),
-        true,
-        ResourceLimiter::unlimited(),
-    )
-    .expect("Failed to run analysis");
-
-    let mut global_context = GlobalContext::new(
-        false,
-        CHAIN_ID_TESTNET,
-        conn,
-        contract_analysis.cost_track.take().unwrap(),
-        StacksEpochId::latest(),
-    );
-
-    global_context.begin();
-
-    // Initialize the contract
-    eval_all(
-        &ast.expressions,
-        &mut contract_context,
-        &mut global_context,
-        None,
-    )
-    .expect("Failed to initialize the contract");
-
-    let func = contract_context
-        .lookup_function(fn_name)
-        .expect("failed to lookup function");
-
-    let mut call_stack = CallStack::new();
-    let mut exec_state = ExecutionState {
-        global_context: &mut global_context,
-        call_stack: &mut call_stack,
-    };
-
-    let mut invoke_ctx = InvocationContext {
-        contract_context: &contract_context,
-        sender: Some(StandardPrincipalData::transient().into()),
-        caller: Some(StandardPrincipalData::transient().into()),
-        sponsor: None,
-    };
-
-    let args = init(&mut exec_state, &mut invoke_ctx);
-
-    b.iter(|| {
-        exec_state
-            .execute_function_as_transaction(
-                &invoke_ctx,
-                &func,
-                &args,
-                FunctionExecutionOptions::default(),
-            )
-            .expect("Function call failed");
-    });
-
-    global_context.commit().unwrap();
-}
-
-fn webassembly<M, F>(b: &mut Bencher<M>, fn_name: &str, clarity: &str, init: F)
-where
-    M: 'static + Measurement,
-    F: FnOnce(&mut ExecutionState, &mut InvocationContext) -> Vec<Value>,
-{
-    let contract_id = QualifiedContractIdentifier::new(
-        StandardPrincipalData::transient(),
-        ContractName::try_from(format!("clarity-{fn_name}").as_str())
-            .unwrap_or_else(|_| panic!("Failed to create contract name from clarity-{}", fn_name)),
-    );
-    let mut datastore = Datastore::new();
-    let constants = StacksConstants::default();
-    let burn_datastore = BurnDatastore::new(constants);
-    let mut clarity_store = MemoryBackingStore::new();
-    let mut conn = ClarityDatabase::new(&mut datastore, &burn_datastore, &burn_datastore);
-    conn.begin();
-    conn.set_clarity_epoch_version(StacksEpochId::latest())
-        .unwrap();
-    conn.commit().unwrap();
-    let cost_tracker: LimitedCostTracker = LimitedCostTracker::new_free();
-    let mut contract_context: ContractContext =
-        ContractContext::new(contract_id.clone(), ClarityVersion::latest());
-
-    // Create a new analysis database
-    let mut analysis_db = AnalysisDatabase::new(&mut clarity_store);
-
-    let mut compilation = compile(
-        clarity,
-        &contract_id,
-        cost_tracker,
-        ClarityVersion::latest(),
-        StacksEpochId::latest(),
-        &mut analysis_db,
-        false,
-    )
-    .expect("Failed compiling clarity to WASM");
-
-    let mut global_context = GlobalContext::new(
-        false,
-        CHAIN_ID_TESTNET,
-        conn,
-        compilation.contract_analysis.cost_track.take().unwrap(),
-        StacksEpochId::latest(),
-    );
-
-    contract_context.set_wasm_module(compilation.module.emit_wasm());
-
-    global_context.begin();
-
-    // Initialize the contract
-    initialize_contract(
-        &mut global_context,
-        &mut contract_context,
-        None,
-        &compilation.contract_analysis,
-    )
-    .expect("Failed to initialize the contract");
-
-    let func = contract_context
-        .lookup_function(fn_name)
-        .expect("failed to lookup function");
-
-    let mut call_stack = CallStack::new();
-
-    let mut exec_state = ExecutionState {
-        global_context: &mut global_context,
-        call_stack: &mut call_stack,
-    };
-
-    let mut invoke_ctx = InvocationContext {
-        contract_context: &contract_context,
-        sender: Some(StandardPrincipalData::transient().into()),
-        caller: Some(StandardPrincipalData::transient().into()),
-        sponsor: None,
-    };
-
-    let args = init(&mut exec_state, &mut invoke_ctx);
-
-    b.iter(|| {
-        exec_state
-            .execute_function_as_transaction(
-                &invoke_ctx,
-                &func,
-                &args,
-                FunctionExecutionOptions::default(),
-            )
-            .expect("Function call failed");
-    });
-
-    global_context.commit().unwrap();
-}
-
-fn criterion_config() -> Criterion {
-    if cfg!(feature = "flamegraph") {
-        Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)))
-    } else if cfg!(feature = "pb") {
-        Criterion::default().with_profiler(PProfProfiler::new(100, Output::Protobuf))
-    } else {
-        Criterion::default()
-    }
-}
 
 /// Used to declare benchmarks of clarity contracts to be run on both the interpreter and the
 /// WebAssembly runtime.
 /// Each arm should only be matched once and declares a criterion group that can then be picked up
 /// by [`criterion_main!`].
+/// Every benchmark `name` declares two groups: `name`, measuring calls to the function `name`, and
+/// `name-tx`, measuring whole transactions calling it.
 macro_rules! decl_benches {
     // single
     ($(($fn_name:literal, $clarity:literal, [$($arg:expr),*])),* $(,)?) => {
@@ -246,23 +32,20 @@ macro_rules! decl_benches {
             $(
                 #[allow(non_snake_case)]
                 fn [<single _ $fn_name>](c: &mut Criterion) {
+                    let scenario = Scenario::single(Contract::new(format!("clarity-{}", $fn_name), $clarity), $fn_name);
+
                     let mut group = c.benchmark_group($fn_name);
-                    group.bench_function("interpreter", |b| {
-                        interpreter(
-                            b,
-                            black_box($fn_name),
-                            black_box($clarity),
-                            |_, _| vec![$(black_box($arg)),*]
-                        );
+                    bench_calls(&mut group, None, &scenario, |_, _| {
+                        vec![$(black_box($arg)),*]
                     });
-                    group.bench_function("webassembly", |b| {
-                        webassembly(
-                            b,
-                            black_box($fn_name),
-                            black_box($clarity),
-                            |_, _| vec![$(black_box($arg)),*]
-                        );
+                    group.finish();
+
+                    let group_name = concat!($fn_name, "-tx");
+                    let mut group = c.benchmark_group(group_name);
+                    bench_transactions(&mut group, group_name, None, &scenario, |_, _| {
+                        vec![$(black_box($arg)),*]
                     });
+                    group.finish();
                 }
             )*
 
@@ -279,29 +62,29 @@ macro_rules! decl_benches {
             $(
                 #[allow(non_snake_case)]
                 fn [<range _ $fn_name>](c: &mut Criterion) {
-                    let mut group = c.benchmark_group($fn_name);
-
                     let produce_clarity = $produce_clarity;
+                    let all_contracts: Vec<_> = ($range)
+                        .map(|i| (i, Scenario::single(Contract::new(format!("clarity-{}", $fn_name), produce_clarity(i)), $fn_name)))
+                        .collect();
 
-                    for i in $range {
-                        let clarity = produce_clarity(i);
-                        group.bench_with_input(BenchmarkId::new("interpreter", i), &i, |b, _| {
-                            interpreter(
-                                b,
-                                black_box($fn_name),
-                                black_box(&clarity),
-                                |exec_state, invoke_ctx| { $init(i, exec_state, invoke_ctx) }
-                            )
-                        });
-                        group.bench_with_input(BenchmarkId::new("webassembly", i), &i, |b, _| {
-                            webassembly(
-                                b,
-                                black_box($fn_name),
-                                black_box(&clarity),
-                                |exec_state, invoke_ctx| { $init(i, exec_state, invoke_ctx) }
-                            )
+                    let mut group = c.benchmark_group($fn_name);
+                    for (i, scenario) in &all_contracts {
+                        let i = *i;
+                        bench_calls(&mut group, Some(&i.to_string()), scenario, |exec_state, invoke_ctx| {
+                            $init(i, exec_state, invoke_ctx)
                         });
                     }
+                    group.finish();
+
+                    let group_name = concat!($fn_name, "-tx");
+                    let mut group = c.benchmark_group(group_name);
+                    for (i, scenario) in &all_contracts {
+                        let i = *i;
+                        bench_transactions(&mut group, group_name, Some(&i.to_string()), scenario, |exec_state, invoke_ctx| {
+                            $init(i, exec_state, invoke_ctx)
+                        });
+                    }
+                    group.finish();
                 }
             )*
 

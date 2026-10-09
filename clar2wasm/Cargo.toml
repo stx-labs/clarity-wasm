@@ -9,15 +9,15 @@ clap = { version = "4.3.17", features = ["derive"] }
 regex = "1.9.1"
 walrus = "0.20.1"
 lazy_static = "1.4.0"
-wasmtime = "49.0.0"
+wasmi = { version = "2.0.0", features = ["simd", "deterministic"] }
 sha2 = { version = "0.10.7" }
 chrono = { version = "0.4.20" }
 rusqlite = { version = "0.31.0" }
+slog = { version = "2.5.2", features = ["max_level_trace"] }
 
-clarity = { git = "https://github.com/stacks-network/stacks-core", branch = "feat/clarity-wasm-develop" }
-stacks-common = { git = "https://github.com/stacks-network/stacks-core", branch = "feat/clarity-wasm-develop" }
-clarity-types = { git = "https://github.com/stacks-network/stacks-core", branch = "feat/clarity-wasm-develop" }
-
+clarity = { git = "https://github.com/melcar-stacks/stacks-core", branch = "feat/clarity-wasm-develop-with-jit-wasmi" }
+stacks-common = { git = "https://github.com/melcar-stacks/stacks-core", branch = "feat/clarity-wasm-develop-with-jit-wasmi" }
+clarity-types = { git = "https://github.com/melcar-stacks/stacks-core", branch = "feat/clarity-wasm-develop-with-jit-wasmi" }
 [build-dependencies]
 wat = "1.0.74"
 
@@ -67,6 +67,14 @@ path = "src/bin/crosscheck.rs"
 
 [[bench]]
 name = "comparison"
+harness = false
+
+[[bench]]
+name = "operations"
+harness = false
+
+[[bench]]
+name = "mainnet"
 harness = false
 
 [lints.clippy]
