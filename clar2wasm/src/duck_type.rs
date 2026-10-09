@@ -1,6 +1,4 @@
-use std::collections::BTreeMap;
-
-use clarity::vm::types::{SequenceSubtype, TupleTypeSignature, TypeSignature};
+use clarity::vm::types::{SequenceSubtype, TypeSignature};
 use clarity_types::types::StringSubtype;
 use walrus::ir::{BinaryOp, Loop};
 use walrus::{InstrSeqBuilder, LocalId, ValType};
@@ -140,16 +138,11 @@ impl WasmGenerator {
                 builder.local_set(*variant_local);
             }
             (TypeSignature::TupleType(og_tup_ty), TypeSignature::TupleType(target_tup_ty)) => {
-                // Fields are matched by name: the original tuple can have hidden fields that the target
-                // doesn't list (see `with_hidden_tuple_fields`), and those are dropped.
-                let target_map = target_tup_ty.get_type_map();
+                let og_ty_iter = og_tup_ty.get_type_map().values().rev();
+                let target_ty_iter = target_tup_ty.get_type_map().values().rev();
 
                 let mut remaining_locals = locals;
-                for (name, og_subty) in og_tup_ty.get_type_map().iter().rev() {
-                    let Some(target_subty) = target_map.get(name) else {
-                        drop_value(builder, og_subty);
-                        continue;
-                    };
+                for (og_subty, target_subty) in og_ty_iter.zip(target_ty_iter) {
                     let current_locals;
                     (remaining_locals, current_locals) = remaining_locals
                         .split_at_checked(remaining_locals.len() - clar2wasm_ty(target_subty).len())
@@ -330,14 +323,11 @@ pub fn need_ducktyping(og_ty: &TypeSignature, tg_ty: &TypeSignature) -> bool {
         }
         TypeSignature::TupleType(og_tup_ty) => {
             if let TypeSignature::TupleType(tg_tup_ty) = tg_ty {
-                let og_map = og_tup_ty.get_type_map();
-                let tg_map = tg_tup_ty.get_type_map();
-                og_map.len() != tg_map.len()
-                    || og_map.iter().zip(tg_map).any(
-                        |((og_name, og_elem_ty), (tg_name, tg_elem_ty))| {
-                            og_name != tg_name || need_ducktyping(og_elem_ty, tg_elem_ty)
-                        },
-                    )
+                og_tup_ty
+                    .get_type_map()
+                    .values()
+                    .zip(tg_tup_ty.get_type_map().values())
+                    .any(|(og_elem_ty, tg_tup_ty)| need_ducktyping(og_elem_ty, tg_tup_ty))
             } else {
                 false
             }
@@ -360,62 +350,6 @@ pub fn need_ducktyping(og_ty: &TypeSignature, tg_ty: &TypeSignature) -> bool {
         TypeSignature::ListUnionType(_) => {
             unreachable!("ListUnionType should not exist at this point")
         }
-    }
-}
-
-/// Returns `target`, plus the hidden tuple fields of `own`: the fields it has and `target` doesn't,
-/// at any nesting level.
-///
-/// When the typechecker joins two types (`if` branches, list elements, ...), the resulting tuple types
-/// only keep the fields of the first one. An expression with hidden fields still builds all of them, so it
-/// has to be traversed with this type, and duck-typed to `target` afterwards (which drops the hidden fields).
-///
-/// The result is equal to `target` when `own` has no hidden fields.
-pub(crate) fn with_hidden_tuple_fields(
-    target: &TypeSignature,
-    own: &TypeSignature,
-) -> Result<TypeSignature, GeneratorError> {
-    match (target, own) {
-        (TypeSignature::TupleType(tg_tup_ty), TypeSignature::TupleType(own_tup_ty)) => {
-            let tg_map = tg_tup_ty.get_type_map();
-            let fields = own_tup_ty
-                .get_type_map()
-                .iter()
-                .map(|(name, own_subty)| {
-                    let subty = match tg_map.get(name) {
-                        Some(tg_subty) => with_hidden_tuple_fields(tg_subty, own_subty)?,
-                        None => own_subty.clone(),
-                    };
-                    Ok((name.clone(), subty))
-                })
-                .collect::<Result<BTreeMap<_, _>, GeneratorError>>()?;
-            TupleTypeSignature::try_from(fields)
-                .map(TypeSignature::from)
-                .map_err(|e| GeneratorError::TypeError(format!("Invalid tuple type: {e}")))
-        }
-        (TypeSignature::OptionalType(tg_subty), TypeSignature::OptionalType(own_subty)) => Ok(
-            TypeSignature::OptionalType(Box::new(with_hidden_tuple_fields(tg_subty, own_subty)?)),
-        ),
-        (TypeSignature::ResponseType(tg_subty), TypeSignature::ResponseType(own_subty)) => {
-            let (tg_ok_ty, tg_err_ty) = tg_subty.as_ref();
-            let (own_ok_ty, own_err_ty) = own_subty.as_ref();
-            Ok(TypeSignature::ResponseType(Box::new((
-                with_hidden_tuple_fields(tg_ok_ty, own_ok_ty)?,
-                with_hidden_tuple_fields(tg_err_ty, own_err_ty)?,
-            ))))
-        }
-        (
-            TypeSignature::SequenceType(SequenceSubtype::ListType(tg_ltd)),
-            TypeSignature::SequenceType(SequenceSubtype::ListType(own_ltd)),
-        ) if own_ltd.get_max_len() > 0 => {
-            let item_ty = with_hidden_tuple_fields(
-                tg_ltd.get_list_item_type(),
-                own_ltd.get_list_item_type(),
-            )?;
-            TypeSignature::list_of(item_ty, tg_ltd.get_max_len())
-                .map_err(|e| GeneratorError::TypeError(format!("Invalid list type: {e}")))
-        }
-        _ => Ok(target.clone()),
     }
 }
 
@@ -444,21 +378,12 @@ mod tests {
     #[allow(unused_imports)]
     use clarity_types::ContractName;
 
-    use super::{need_ducktyping, with_hidden_tuple_fields};
+    use super::need_ducktyping;
     #[allow(unused_imports)]
     use crate::tools::crosscheck_multi_contract;
     use crate::wasm_generator::WasmGenerator;
 
     fn duck_type_test(value: &Value, original_ty: &TypeSignature, target_ty: &TypeSignature) {
-        duck_type_test_expecting(value, original_ty, target_ty, value);
-    }
-
-    fn duck_type_test_expecting(
-        value: &Value,
-        original_ty: &TypeSignature,
-        target_ty: &TypeSignature,
-        expected: &Value,
-    ) {
         let mut gen = WasmGenerator::empty();
         gen.create_module(target_ty, |gen, builder| {
             gen.pass_value(builder, value, original_ty)
@@ -469,29 +394,7 @@ mod tests {
         });
         let res = gen.execute_module(target_ty);
 
-        assert_eq!(expected, &res);
-    }
-
-    fn tuple_ty(fields: Vec<(&'static str, TypeSignature)>) -> TypeSignature {
-        TupleTypeSignature::try_from(
-            fields
-                .into_iter()
-                .map(|(name, ty)| (ClarityName::from_literal(name), ty))
-                .collect::<Vec<_>>(),
-        )
-        .unwrap()
-        .into()
-    }
-
-    fn tuple_value(fields: Vec<(&'static str, Value)>) -> Value {
-        TupleData::from_data(
-            fields
-                .into_iter()
-                .map(|(name, value)| (ClarityName::from_literal(name), value))
-                .collect(),
-        )
-        .unwrap()
-        .into()
+        assert_eq!(value, &res);
     }
 
     #[test]
@@ -641,185 +544,6 @@ mod tests {
         );
 
         duck_type_test(&value, &og_ty, &target_ty);
-    }
-
-    #[test]
-    fn duck_type_tuple_drops_hidden_fields() {
-        let value = tuple_value(vec![
-            ("a", Value::Int(42)),
-            ("b", Value::buff_from(vec![1, 2, 3]).unwrap()),
-            ("c", Value::some(Value::Bool(true)).unwrap()),
-            ("d", Value::UInt(7)),
-        ]);
-        let og_ty = tuple_ty(vec![
-            ("a", TypeSignature::IntType),
-            (
-                "b",
-                TypeSignature::SequenceType(SequenceSubtype::BufferType(3u32.try_into().unwrap())),
-            ),
-            (
-                "c",
-                TypeSignature::OptionalType(Box::new(TypeSignature::BoolType)),
-            ),
-            ("d", TypeSignature::UIntType),
-        ]);
-        let target_ty = tuple_ty(vec![
-            ("a", TypeSignature::IntType),
-            (
-                "c",
-                TypeSignature::OptionalType(Box::new(TypeSignature::BoolType)),
-            ),
-        ]);
-        let expected = tuple_value(vec![
-            ("a", Value::Int(42)),
-            ("c", Value::some(Value::Bool(true)).unwrap()),
-        ]);
-
-        duck_type_test_expecting(&value, &og_ty, &target_ty, &expected);
-    }
-
-    #[test]
-    fn duck_type_list_drops_hidden_tuple_fields() {
-        let value = Value::cons_list_unsanitized(vec![
-            tuple_value(vec![("a", Value::UInt(1)), ("k", Value::Bool(true))]),
-            tuple_value(vec![("a", Value::UInt(2)), ("k", Value::Bool(false))]),
-        ])
-        .unwrap();
-        let og_ty = TypeSignature::list_of(
-            tuple_ty(vec![
-                ("a", TypeSignature::UIntType),
-                ("k", TypeSignature::BoolType),
-            ]),
-            2,
-        )
-        .unwrap();
-        let target_ty =
-            TypeSignature::list_of(tuple_ty(vec![("a", TypeSignature::UIntType)]), 2).unwrap();
-        let expected = Value::cons_list_unsanitized(vec![
-            tuple_value(vec![("a", Value::UInt(1))]),
-            tuple_value(vec![("a", Value::UInt(2))]),
-        ])
-        .unwrap();
-
-        duck_type_test_expecting(&value, &og_ty, &target_ty, &expected);
-    }
-
-    #[test]
-    fn hidden_tuple_fields_need_ducktyping() {
-        let narrow_ty = tuple_ty(vec![("a", TypeSignature::UIntType)]);
-        let hidden_ty = tuple_ty(vec![
-            ("a", TypeSignature::UIntType),
-            ("k", TypeSignature::BoolType),
-        ]);
-        // same number of fields, different names
-        let renamed_ty = tuple_ty(vec![("b", TypeSignature::UIntType)]);
-
-        assert!(!need_ducktyping(&narrow_ty, &narrow_ty));
-        assert!(need_ducktyping(&hidden_ty, &narrow_ty));
-        assert!(need_ducktyping(&renamed_ty, &narrow_ty));
-    }
-
-    #[test]
-    fn with_hidden_tuple_fields_without_hidden_fields_is_target() {
-        let target_ty = TypeSignature::ResponseType(Box::new((
-            tuple_ty(vec![(
-                "a",
-                TypeSignature::OptionalType(Box::new(TypeSignature::IntType)),
-            )]),
-            TypeSignature::list_of(TypeSignature::IntType, 4).unwrap(),
-        )));
-        let own_ty = TypeSignature::ResponseType(Box::new((
-            tuple_ty(vec![(
-                "a",
-                TypeSignature::OptionalType(Box::new(TypeSignature::NoType)),
-            )]),
-            TypeSignature::NoType,
-        )));
-
-        assert_eq!(
-            with_hidden_tuple_fields(&target_ty, &own_ty).unwrap(),
-            target_ty
-        );
-        assert_eq!(
-            with_hidden_tuple_fields(&target_ty, &target_ty).unwrap(),
-            target_ty
-        );
-    }
-
-    #[test]
-    fn with_hidden_tuple_fields_keeps_nested_hidden_fields() {
-        let target_ty = TypeSignature::OptionalType(Box::new(tuple_ty(vec![
-            (
-                "a",
-                TypeSignature::OptionalType(Box::new(TypeSignature::IntType)),
-            ),
-            (
-                "l",
-                TypeSignature::list_of(tuple_ty(vec![("x", TypeSignature::UIntType)]), 5).unwrap(),
-            ),
-        ])));
-        let own_ty = TypeSignature::OptionalType(Box::new(tuple_ty(vec![
-            (
-                "a",
-                TypeSignature::OptionalType(Box::new(TypeSignature::NoType)),
-            ),
-            ("k", TypeSignature::BoolType),
-            (
-                "l",
-                TypeSignature::list_of(
-                    tuple_ty(vec![
-                        ("x", TypeSignature::UIntType),
-                        ("y", TypeSignature::IntType),
-                    ]),
-                    2,
-                )
-                .unwrap(),
-            ),
-        ])));
-
-        // shared fields and the list length come from the target, hidden fields from `own`
-        let expected = TypeSignature::OptionalType(Box::new(tuple_ty(vec![
-            (
-                "a",
-                TypeSignature::OptionalType(Box::new(TypeSignature::IntType)),
-            ),
-            ("k", TypeSignature::BoolType),
-            (
-                "l",
-                TypeSignature::list_of(
-                    tuple_ty(vec![
-                        ("x", TypeSignature::UIntType),
-                        ("y", TypeSignature::IntType),
-                    ]),
-                    5,
-                )
-                .unwrap(),
-            ),
-        ])));
-
-        assert_eq!(
-            with_hidden_tuple_fields(&target_ty, &own_ty).unwrap(),
-            expected
-        );
-    }
-
-    #[test]
-    fn with_hidden_tuple_fields_ignores_empty_list() {
-        let target_ty =
-            TypeSignature::list_of(tuple_ty(vec![("a", TypeSignature::UIntType)]), 3).unwrap();
-        let own_ty = TypeSignature::list_of(
-            tuple_ty(vec![
-                ("a", TypeSignature::UIntType),
-                ("k", TypeSignature::BoolType),
-            ]),
-            0,
-        )
-        .unwrap();
-
-        assert_eq!(
-            with_hidden_tuple_fields(&target_ty, &own_ty).unwrap(),
-            target_ty
-        );
     }
 
     #[test]
