@@ -415,6 +415,7 @@ dependencies = [
  "regex",
  "rusqlite",
  "sha2 0.10.9",
+ "slog",
  "stacks-common",
  "walrus",
  "wasmi",

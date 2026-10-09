@@ -8,6 +8,7 @@
 
 use std::collections::HashSet;
 use std::fmt;
+use std::time::Instant;
 
 use clarity::types::StacksEpochId;
 use clarity::vm::analysis::{run_analysis, AnalysisDatabase};
@@ -65,6 +66,7 @@ pub fn compile_deployed_contract(
     clarity_version: ClarityVersion,
     epoch: StacksEpochId,
 ) -> Result<CompileResult, DeployedCompileError> {
+    let start = Instant::now();
     let source = lookup
         .contract_source(contract_identifier)
         .map_err(|e| DeployedCompileError::Lookup(e.to_string()))?
@@ -102,7 +104,7 @@ pub fn compile_deployed_contract(
         &mut seeded,
     )?;
 
-    compile(
+    let compiled = compile(
         &source,
         contract_identifier,
         LimitedCostTracker::new_free(),
@@ -110,8 +112,13 @@ pub fn compile_deployed_contract(
         epoch,
         &mut analysis_db,
         false,
-    )
-    .map_err(|CompileError::Generic { diagnostics, .. }| {
+    );
+    stacks_common::info!("Compiled deployed contract to Wasm";
+        "contract" => %contract_identifier,
+        "success" => compiled.is_ok(),
+        "total_ms" => start.elapsed().as_secs_f64() * 1000.0);
+
+    compiled.map_err(|CompileError::Generic { diagnostics, .. }| {
         let diagnostics: Vec<String> = diagnostics.iter().map(|d| d.to_string()).collect();
         DeployedCompileError::Compile(format!(
             "failed to compile contract {contract_identifier}: {}",

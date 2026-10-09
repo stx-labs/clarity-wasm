@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use clarity::types::StacksEpochId;
 use clarity::vm::analysis::{run_analysis, AnalysisDatabase, ContractAnalysis};
 use clarity::vm::ast::{build_ast_with_diagnostics, ContractAST};
@@ -74,6 +76,8 @@ pub fn compile(
     analysis_db: &mut AnalysisDatabase,
     emit_cost_code: bool,
 ) -> Result<CompileResult, CompileError> {
+    let start = Instant::now();
+
     // Parse the contract
     let (ast, mut diagnostics, success) = build_ast_with_diagnostics(
         contract_id,
@@ -115,7 +119,14 @@ pub fn compile(
         }
     };
 
-    match generate_module_from_analysis(&mut contract_analysis, &ast, analysis_db, emit_cost_code) {
+    let generated =
+        generate_module_from_analysis(&mut contract_analysis, &ast, analysis_db, emit_cost_code);
+    stacks_common::info!("Compiled contract to Wasm";
+        "contract" => %contract_id,
+        "success" => generated.is_ok(),
+        "total_ms" => start.elapsed().as_secs_f64() * 1000.0);
+
+    match generated {
         Ok(module) => Ok(CompileResult {
             ast,
             diagnostics,
@@ -187,7 +198,15 @@ pub fn compile_contract(
     ast: &ContractAST,
     analysis_lookup: &mut dyn AnalysisLookup,
 ) -> Result<Module, ModuleGenerationError> {
-    generate_module_from_analysis(&mut contract_analysis, ast, analysis_lookup, false)
+    let start = Instant::now();
+    let contract_id = contract_analysis.contract_identifier.clone();
+    let generated =
+        generate_module_from_analysis(&mut contract_analysis, ast, analysis_lookup, false);
+    stacks_common::info!("Generated Wasm module for analyzed contract";
+        "contract" => %contract_id,
+        "success" => generated.is_ok(),
+        "total_ms" => start.elapsed().as_secs_f64() * 1000.0);
+    generated
 }
 
 /// The post-analysis compilation pipeline shared by every compile path: Clarity 1 type-map
